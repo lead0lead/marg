@@ -1,5 +1,6 @@
-//! Phase 0 spike: copy a PDF and add one yellow highlight over the first text
-//! line of page 1, saved incrementally. For checking in other viewers.
+//! Phase 0 spike: copy a PDF and add one yellow highlight over the first
+//! non-blank text line of page 1, saved incrementally. For checking in other
+//! viewers.
 //!
 //! Usage: cargo run -p marg-pdf --example highlight_copy -- <in.pdf> <out.pdf>
 
@@ -24,7 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .blocks
         .iter()
         .find_map(|b| match &b.content {
-            TextBlockContent::Text { lines } => lines.first().cloned(),
+            // Skip whitespace-only lines (some PDFs start with a lone space).
+            TextBlockContent::Text { lines } => lines
+                .iter()
+                .find(|l| l.text.trim().chars().count() >= 3)
+                .cloned(),
             _ => None,
         })
         .ok_or("no text on page 1")?;

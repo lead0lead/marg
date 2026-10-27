@@ -945,7 +945,9 @@ Format:
   step: a real document thread in `marg-pdf` with request/result channels.
 - Watch out: eframe 0.37 uses `App::ui(&mut self, ui, frame)` and
   `egui::Panel::bottom` (not `update` / `TopBottomPanel`). MuPDF objects
-  must never cross threads.
+  must never cross threads. Real PDFs contain whitespace-only stext lines
+  (Grudin 2008 paper: first line on page 1 is " "); hints, caret motions and
+  selection must skip them.
 
 ### 2026-10-27 — Planning
 - Done: this concept document, from a brainstorming session. No code yet.
