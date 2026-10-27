@@ -24,11 +24,14 @@ fn main() {
         info.labels.is_some(),
         info.id.is_some()
     );
-    t.send(Request::Render(vec![RenderKey {
-        page: 0,
-        scale: Scale::from_f32(1.5),
-        tile: None,
-    }]));
+    t.send(Request::Render {
+        keys: vec![RenderKey {
+            page: 0,
+            scale: Scale::from_f32(1.5),
+            tile: None,
+        }],
+        received: 0,
+    });
     let Some(Response::Rendered { result, took, .. }) = t.recv_timeout(Duration::from_secs(60))
     else {
         panic!("no render response")

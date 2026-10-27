@@ -9,14 +9,24 @@ use simplelog::{CombinedLogger, SharedLogger, SimpleLogger, WriteLogger};
 use crate::paths::Paths;
 
 /// Log to stderr/stdout and, if possible, to the log file. `MARG_LOG` sets
-/// the level (`error`, `warn`, `info`, `debug`, `trace`); default `info`.
+/// the level of marg's own crates (`error`, `warn`, `info`, `debug`,
+/// `trace`); default `info`. Dependencies log warnings and errors only.
 pub fn init_logging(paths: Option<&Paths>) {
     let level = std::env::var("MARG_LOG")
         .ok()
         .and_then(|v| v.parse::<LevelFilter>().ok())
         .unwrap_or(LevelFilter::Info);
-    let cfg = simplelog::Config::default();
-    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![SimpleLogger::new(level, cfg.clone())];
+    let ours = simplelog::ConfigBuilder::new()
+        .add_filter_allow_str("marg")
+        .build();
+    let deps = simplelog::ConfigBuilder::new()
+        .add_filter_ignore_str("marg")
+        .build();
+    let deps_level = LevelFilter::Warn;
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![
+        SimpleLogger::new(level, ours.clone()),
+        SimpleLogger::new(deps_level, deps.clone()),
+    ];
     let mut file_error = None;
     if let Some(paths) = paths {
         let opened = paths
@@ -30,7 +40,14 @@ pub fn init_logging(paths: Option<&Paths>) {
                     .open(&paths.log_file)
             });
         match opened {
-            Ok(file) => loggers.push(WriteLogger::new(level, cfg, file)),
+            Ok(file) => {
+                let file2 = file.try_clone();
+                loggers.push(WriteLogger::new(level, ours, file));
+                match file2 {
+                    Ok(f) => loggers.push(WriteLogger::new(deps_level, deps, f)),
+                    Err(e) => file_error = Some(format!("{}: {e}", paths.log_file.display())),
+                }
+            }
             Err(e) => file_error = Some(format!("{}: {e}", paths.log_file.display())),
         }
     }

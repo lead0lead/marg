@@ -1,6 +1,8 @@
 //! Document thread: open, info, full-page and tile renders.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use marg_pdf::{DocInfo, DocThread, Pixels, RenderKey, Request, Response, Scale, Tile};
@@ -23,8 +25,12 @@ fn open(t: &DocThread, path: PathBuf) -> (u64, Result<DocInfo, String>) {
     }
 }
 
+/// Render one key; all earlier responses have been received.
 fn render(t: &DocThread, key: RenderKey) -> (u64, RenderKey, Result<Pixels, String>) {
-    t.send(Request::Render(vec![key]));
+    t.send(Request::Render {
+        keys: vec![key],
+        received: u64::MAX,
+    });
     match t.recv_timeout(WAIT).expect("render response") {
         Response::Rendered {
             generation,
@@ -159,4 +165,42 @@ fn offset_page_renders_from_its_top_left() {
         .flat_map(|y| (0..150).map(move |x| (y * w + x) * 4))
         .any(|i| px.rgba[i] < 64);
     assert!(dark_in_top_band);
+}
+
+#[test]
+fn keys_in_transit_are_not_rendered_twice() {
+    // Count responses sent, so we can wait for one without consuming it.
+    let sent = Arc::new(AtomicUsize::new(0));
+    let counter = sent.clone();
+    let t = DocThread::spawn(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+    open(&t, fixture("text.pdf")).1.unwrap();
+    let key = |page| RenderKey {
+        page,
+        scale: Scale::from_f32(0.5),
+        tile: None,
+    };
+    t.send(Request::Render {
+        keys: vec![key(0)],
+        received: 0,
+    });
+    // Wait until page 0 has been rendered, without consuming the response.
+    let start = std::time::Instant::now();
+    while sent.load(Ordering::SeqCst) < 2 {
+        assert!(start.elapsed() < WAIT, "render timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The caller has received nothing yet and asks again for page 0 and 1.
+    t.send(Request::Render {
+        keys: vec![key(0), key(1)],
+        received: 0,
+    });
+    let pages: Vec<usize> = std::iter::from_fn(|| t.recv_timeout(Duration::from_secs(2)))
+        .map(|r| match r {
+            Response::Rendered { key, .. } => key.page,
+            Response::Opened { .. } => panic!("unexpected Opened"),
+        })
+        .collect();
+    assert_eq!(pages, [0, 1]);
 }

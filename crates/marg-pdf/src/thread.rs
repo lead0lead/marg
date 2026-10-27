@@ -44,8 +44,10 @@ pub enum Request {
     /// Open a document, replacing the current one and clearing the queue.
     Open(PathBuf),
     /// Replace the render queue. Jobs are done in order; jobs from an
-    /// earlier queue that have not started are dropped.
-    Render(Vec<RenderKey>),
+    /// earlier queue that have not started are dropped. `received` is the
+    /// number of `Rendered` responses the caller has taken so far: keys
+    /// rendered after that are still in transit and are not rendered again.
+    Render { keys: Vec<RenderKey>, received: u64 },
 }
 
 pub enum Response {
@@ -141,6 +143,10 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut doc: Option<(Doc, DocInfo)> = None;
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
+    // Rendered responses sent so far, and the keys of those the UI may not
+    // have received yet, with their sequence numbers.
+    let mut sent = 0u64;
+    let mut in_transit: VecDeque<(u64, RenderKey)> = VecDeque::new();
     loop {
         // Block only when idle; otherwise take whatever arrived meanwhile.
         let mut incoming = Vec::new();
@@ -184,7 +190,15 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     }
                     wake();
                 }
-                Request::Render(keys) => queue = keys.into(),
+                Request::Render { keys, received } => {
+                    while in_transit.front().is_some_and(|&(seq, _)| seq <= received) {
+                        in_transit.pop_front();
+                    }
+                    queue = keys
+                        .into_iter()
+                        .filter(|k| !in_transit.iter().any(|(_, t)| t == k))
+                        .collect();
+                }
             }
         }
         let Some(key) = queue.pop_front() else {
@@ -206,6 +220,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
         if tx.send(resp).is_err() {
             return;
         }
+        sent += 1;
+        in_transit.push_back((sent, key));
         wake();
     }
 }
