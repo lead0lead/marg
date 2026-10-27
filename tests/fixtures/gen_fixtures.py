@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Generate marg's fixture PDFs. Standard library only; output is deterministic.
+
+Usage: python3 tests/fixtures/gen_fixtures.py
+"""
+
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def pdf_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def text_stream(lines, x=72, y=720, size=12, leading=16):
+    out = [f"BT /F1 {size} Tf {leading} TL {x} {y} Td"]
+    for line in lines:
+        out.append(f"({pdf_escape(line)}) Tj T*")
+    out.append("ET")
+    return "\n".join(out).encode("latin-1")
+
+
+def write_pdf(path: Path, objects: dict, root: int, info: int, doc_id: str):
+    """objects: {num: bytes body (without 'obj'/'endobj')}; numbers 1..n contiguous."""
+    buf = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    offsets = {}
+    for num in sorted(objects):
+        offsets[num] = len(buf)
+        buf += f"{num} 0 obj\n".encode() + objects[num] + b"\nendobj\n"
+    xref = len(buf)
+    n = max(objects) + 1
+    buf += f"xref\n0 {n}\n0000000000 65535 f \n".encode()
+    for num in range(1, n):
+        buf += f"{offsets[num]:010d} 00000 n \n".encode()
+    buf += (
+        f"trailer\n<< /Size {n} /Root {root} 0 R /Info {info} 0 R /ID [<{doc_id}> <{doc_id}>] >>\n"
+        f"startxref\n{xref}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(bytes(buf))
+
+
+def stream(data: bytes) -> bytes:
+    return f"<< /Length {len(data)} >>\nstream\n".encode() + data + b"\nendstream"
+
+
+def text_pdf():
+    """Two portrait pages: text, outline, internal + external link, page labels, /ID."""
+    page1 = text_stream(
+        [
+            "marg fixture: text page one",
+            "",
+            "The quick brown fox jumps over the lazy dog.",
+            "Highlights, underlines and comments are saved",
+            "into the PDF as standard annotations.",
+            "",
+            "Go to page two.",
+            "Visit example.com.",
+        ]
+    )
+    page2 = text_stream(
+        [
+            "marg fixture: text page two",
+            "",
+            "Second page with a little more text for search.",
+        ]
+    )
+    # Text lines are at y = 720 - 16*i; "Go to page two." is line 6 -> y=624.
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 9 0 R /PageMode /UseOutlines"
+        b" /PageLabels << /Nums [0 << /S /r >> 1 << /S /D /St 1 >>] >> >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+        b" /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R /Annots [12 0 R 13 0 R] >>",
+        4: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+        b" /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+        5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        6: stream(page1),
+        7: stream(page2),
+        8: b"<< /Producer (marg gen_fixtures.py) /Title (marg text fixture) >>",
+        9: b"<< /Type /Outlines /First 10 0 R /Last 11 0 R /Count 2 >>",
+        10: b"<< /Title (Page one) /Parent 9 0 R /Next 11 0 R /Dest [3 0 R /XYZ 0 792 0] >>",
+        11: b"<< /Title (Page two) /Parent 9 0 R /Prev 10 0 R /Dest [4 0 R /XYZ 0 792 0] >>",
+        12: b"<< /Type /Annot /Subtype /Link /Rect [72 620 160 636] /Border [0 0 0]"
+        b" /Dest [4 0 R /XYZ 0 792 0] >>",
+        13: b"<< /Type /Annot /Subtype /Link /Rect [72 604 180 620] /Border [0 0 0]"
+        b" /A << /S /URI /URI (https://example.com/) >> >>",
+    }
+    write_pdf(HERE / "text.pdf", objs, 1, 8, "6d617267746578746669787475726531")
+
+
+if __name__ == "__main__":
+    text_pdf()
