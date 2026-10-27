@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 0 in progress on branch `phase-0-setup`: workspace skeleton, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests and spike window done. |
-| **Current phase** | 0 — in progress |
-| **Next step** | Phase 0: CI green on Linux + Windows, API gap report, user check |
+| **Status** | Phase 0 built on branch `phase-0-setup` (not merged): workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI: Linux green, Windows pending (rerun after the CRLF and CRT fixes). |
+| **Current phase** | 0 — done, waiting for the user's check |
+| **Next step** | User tries the spike window and the highlighted copy, then merges `phase-0-setup`; then Phase 1 (viewer) |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
-| **App** | runs locally: `cargo run --release -- <file.pdf>` |
+| **App** | runs locally: `cargo run --release -- <file.pdf>` (Phase 0: spike window showing page 1; `q` quits) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (initial plan, before any code) |
+| **Last updated** | 2026-10-27 (end of Phase 0) |
 
 ---
 
@@ -657,6 +657,34 @@ forgotten.
 
 **Ask the user before adding any library not listed here.**
 
+### MuPDF API coverage (Phase 0 spike, as implemented)
+
+Checked with `mupdf` 0.8.0 (built with default features off, only
+`base14-fonts`), in `crates/marg-pdf/tests/spike.rs` on the generated
+fixture `tests/fixtures/text.pdf`. The `highlight_copy` example's output
+renders correctly in Poppler (`pdftoppm`), an independent renderer.
+
+| Need | Status | How |
+|---|---|---|
+| Render with annotations | ✅ | `Page::to_pixmap(.., show_extras = true)` |
+| Tiles | ✅ (not tested yet) | `Device::from_pixmap_with_clip` + `Page::run` |
+| Cancel a render | ✅ (not tested yet) | `Cookie::abort` with `run_with_cookie` |
+| Structured text with char boxes | ✅ | `to_text_page(flags).structured()`: blocks → lines → chars with `quad`, `origin`; page space, y down; `DEHYPHENATE` flag exists |
+| Search | ✅ (not tested yet) | `Page::search`, `TextPage::search` |
+| Highlight / Underline / Text / Square | ✅ | `PdfPage::add_*_annotation` |
+| Color, opacity, QuadPoints, Contents, author, border width | ✅ | `PdfAnnotation` setters, all round-trip |
+| `/Subj` | ⚠️ no setter | write via `annot.object().dict_put("Subj", ..)`; round-trips |
+| Delete annotation | ✅ | `PdfPage::delete_annotation` |
+| Incremental save | ✅ | `PdfWriteOptions::set_incremental(true)`; original bytes stay an untouched prefix |
+| Can save incrementally / repaired | ✅ / ⚠️ | `can_be_saved_incrementally()`; `pdf_was_repaired` only in `mupdf-sys` (not needed: the first check covers the save rule) |
+| Document ID | ⚠️ no helper | trailer `/ID[0]` via `trailer().get_dict("ID")`; stable across incremental save |
+| Outline, links, page labels, metadata | ✅ | `outlines()`, `Page::links()` (internal dest page or URI), `PdfDocument::page_label`, `metadata()` |
+| Password, permissions | ✅ (not tested yet) | `needs_password`, `authenticate`, `permissions` |
+
+Threading: MuPDF's context is thread-local and `Document`/`Page` are not
+`Send`, so the document must be opened and used on the document thread
+(matches §2.2). Only `DisplayList` is `Send + Sync`.
+
 ### Key technical rules
 
 - **Cargo workspace with three crates:**
@@ -678,8 +706,9 @@ forgotten.
 - **All tuning values come from config defaults**, defined in one place in
   `marg-core` (`config.rs`).
 - Release builds: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`;
-  Windows built with the MSVC toolchain and static CRT so the `.exe` is
-  portable.
+  Windows built with the MSVC toolchain. Static CRT is **off** for now (see
+  open questions): `+crt-static` clashed with MuPDF's dynamic-CRT build
+  (`LNK4098`), so the `.exe` currently needs the MSVC runtime.
 
 ### Folder structure
 
@@ -817,13 +846,16 @@ building more.
   alternative. Confirm at the decision milestone.
 - `spread_first_page_alone` default (`false`).
 - Exact grid size and step sizes in box mode.
+- **Portable Windows `.exe` (Phase 5)**: static CRT was dropped in Phase 0
+  because `+crt-static` linked against MuPDF built with the dynamic CRT
+  (`LNK4098: defaultlib 'libcmt' conflicts`). Before release, try building
+  MuPDF with `/MT` (e.g. via `CFLAGS`), or ship with the MSVC runtime
+  requirement.
 
 **Risks**
 
-- **`mupdf` crate API coverage** (annotation creation with all needed fields,
-  incremental save, structured text). Mitigation: Phase 0 spike lists gaps
-  before any real work. Fallback: call missing MuPDF functions through the
-  crate's `-sys` bindings, or switch to C++/Qt + MuPDF (ask the user).
+- ~~**`mupdf` crate API coverage**~~ Checked in Phase 0: no blocking gaps
+  (§9 spike report). Two small ones are covered by raw object access.
 - **Building MuPDF on Windows** (toolchain, clang/bindgen requirements).
   Checked in Phase 0 with CI on Windows.
 - **Hint/caret selection not feeling faster than a mouse.** This is the core
@@ -841,7 +873,10 @@ building more.
 
 **Known issues**
 
-- None yet.
+- Spike window renders page 1 at a fixed 2× scale and does not track the
+  window's pixel ratio or zoom; replaced in Phase 1.
+- First CI run on Windows is slow (MuPDF compiled from source, no cache);
+  later runs use `rust-cache`.
 
 ---
 
@@ -874,6 +909,31 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-27 — Phase 0: setup + MuPDF spike
+- Done (branch `phase-0-setup`, pushed, not merged): Cargo workspace with
+  `marg-core`, `marg-pdf`, `marg`; `CLAUDE.md`; CI (fmt, build, test, clippy
+  on Linux + Windows); `.gitattributes` (`*.pdf binary`);
+  `tests/fixtures/gen_fixtures.py` → `text.pdf` (2 pages, outline, internal +
+  URI link, page labels i/1, title, fixed `/ID`); spike tests
+  (`crates/marg-pdf/tests/spike.rs`); `highlight_copy` example; spike window
+  (page 1 rendered on a worker thread, status bar with version + git hash).
+- Decisions: static CRT on Windows dropped for now (user left the choice to
+  Claude; it clashed with MuPDF's dynamic CRT, revisit in Phase 5).
+  `mupdf` 0.8.0 with default features off except `base14-fonts`
+  (no JS, XPS, EPUB, tesseract etc.; smaller and faster to build); eframe
+  0.37 (wgpu default).
+- Tried and failed: first Windows CI run failed the round-trip test because
+  git converted `text.pdf` to CRLF on checkout (no NUL bytes → treated as
+  text), MuPDF repaired it, and incremental save was refused. Fixed with
+  `.gitattributes`. `+crt-static` gave linker warning LNK4098; removed.
+- State: builds; 5 tests pass; clippy and fmt clean; CI Linux green,
+  Windows pending (rerun after the CRLF and CRT fixes).
+- Next: user check of Phase 0, merge, then Phase 1 (viewer). Phase 1 first
+  step: a real document thread in `marg-pdf` with request/result channels.
+- Watch out: eframe 0.37 uses `App::ui(&mut self, ui, frame)` and
+  `egui::Panel::bottom` (not `update` / `TopBottomPanel`). MuPDF objects
+  must never cross threads.
 
 ### 2026-10-27 — Planning
 - Done: this concept document, from a brainstorming session. No code yet.

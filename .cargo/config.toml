@@ -1,3 +1,0 @@
-# Static CRT on Windows MSVC so the .exe is portable.
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
