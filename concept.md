@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading); step 2 (document thread `marg-pdf/src/thread.rs`: open, renders of pages and tiles, replace-queue semantics, generations); step 3 (`marg-core/src/view.rs`: continuous layout, scroll, zoom with anchor, fit width/page, page navigation); step 4 (viewer: `marg/src/pages.rs` texture LRU (`marg-core/src/lru.rs`), pre-render ±2, nearest-scale fallback, 512 px tiles above 200% over a low-res page; mouse wheel / Ctrl+wheel); steps 5+6 together (`marg-core` `keys.rs`, `command.rs`, `keymap.rs`, `lineedit.rs`: key notation, command registry, Normal keymap with `[keys.normal]` remaps, counts, sequences with timeout, `:` command line with history and `:e` Tab completion; status bar with pending keys and messages); step 7 (`marg-core` `state.rs`, `fuzzy.rs`; `marg/src/statefile.rs`, `recent.rs`: per-file position/zoom/fit keyed by `/ID`, saved on open, file switch and exit; recent list when started without a file). |
-| **Current phase** | 1 — viewer |
-| **Next step** | Phase 1 step 8: debug overlay + startup timing. Plan: 1 config/paths/logging ✅ · 2 document thread ✅ · 3 continuous layout + zoom/fit model in core ✅ · 4 viewer with texture cache, pre-render, scaled fallback, tiles ✅ · 5 commands + keymap + counts ✅ · 6 status bar + command line ✅ · 7 state file + recent files ✅ · 8 debug overlay + startup timing |
+| **Status** | Phase 1 (viewer) built on branch `phase-1-viewer`, waiting for the user's check (read a paper and a book, check speed in `:debug`). Not merged. |
+| **Current phase** | 1 — viewer, built; user check pending |
+| **Next step** | User tries the Phase 1 build. Then merge `phase-1-viewer` into `main`, and start Phase 2 (select & highlight) after the go-ahead. Open questions from Phase 1 are in §12. |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
-| **App** | runs locally: `cargo run --release -- <file.pdf> [--page N]` (Phase 1 in progress: continuous viewer) |
+| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (Phase 1 step 7) |
+| **Last updated** | 2026-10-27 (end of Phase 1 build) |
 
 ---
 
@@ -160,6 +160,19 @@ defaults of `config.toml` (see §8), not scattered in code.
   extra read-only render workers (each with its own document handle). Ask the
   user before adding that complexity.
 
+**As implemented (Phase 1):** `marg-pdf/src/thread.rs` owns the document.
+The UI sends the full list of renders it is missing each time that list
+changes (`Request::Render`), most urgent first: visible pages, then ±2
+pages; jobs not yet started are dropped when a new list arrives. Keys still
+in transit to the UI are not rendered twice. A render key is page + scale
+(thousandths of a device pixel per point) + optional 512 px tile. Textures
+live in a frame-aware LRU (`marg-core/src/lru.rs`, 256 MB): anything drawn in
+the current frame is never evicted. Above 200% zoom, visible tiles plus a
+one-tile margin are rendered over a low-resolution full page (at 200%).
+While a render is missing, the cached full page with the closest scale is
+drawn stretched. A failed `:e` keeps the current document. Text extraction
+and annotation re-renders come in Phase 2.
+
 ### 2.3 Layouts
 
 Three layouts, switchable per document. The current layout is remembered per
@@ -181,6 +194,14 @@ file.
   manually.
 - No scroll animation by default (`scroll_smooth = false`). Instant is the
   point.
+
+**As implemented (Phase 1):** Continuous only (`marg-core/src/view.rs`), in
+view units = points × zoom (logical pixels). Pages are centred; no margin
+above the first page. Fit-width uses the widest page, fit-page the largest
+page. A landscape first page opens in fit-page (Single comes in Phase 4).
+The "current page" (status bar, `J`/`K`) is the page at the viewport's
+vertical centre. `zoom.reset` (`=`) keeps the top centre in place; other
+zooms keep the viewport centre, Ctrl+wheel keeps the point under the mouse.
 
 ### 2.4 Navigation
 
@@ -459,6 +480,21 @@ remappable (§8).
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
 
+**As implemented (Phase 1):** Normal-mode bindings for scrolling, pages,
+zoom, fit, `:` and `q` (`marg-core/src/keymap.rs`, `DEFAULT_NORMAL`), plus
+arrow keys (scroll), `PageDown`/`PageUp` (page), `Home`/`End` (first/last
+page). Key notation: one character (`j`, `G`), a named key (`Space`,
+`PageDown`, `Esc`, …), modifier prefixes (`Ctrl-o`, `Shift-Space`),
+character sequences (`gg`, `]a`) or space-separated keys (`g Ctrl-o`).
+`"nop"` removes a default binding. Command names: `scroll.down|up|left|right`,
+`scroll.half_down|half_up`, `page.next|prev|first|last`,
+`zoom.in|out|reset|fit_width|fit_page`, `cmdline`, `quit`, `quit.force`,
+`version`, `debug.toggle`. A digit is a count unless a binding starts with
+it. `:` commands: `q`, `q!`, `e <path>` (Tab completes directories and PDFs),
+`version`, `debug`, `<n>` (go to page n), or any command name. Up/Down
+browse the session's command history. Windows AltGr (Ctrl+Alt) characters
+are taken from the key event, since egui drops text while Ctrl is held.
+
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
 link, double/triple-click selects a word/line, right-click on a selection or
@@ -616,6 +652,12 @@ color = "#FFD400"
   prefix of another) are reported at load; the later binding wins.
 - `:set key=value` changes a setting for the current session only.
 
+**As implemented (Phase 1):** sections `[view]`, `[render]`, `[ui]`
+(status bar height, message seconds, sequence timeout, recent and state file
+limits) and `[keys.normal]`; defaults in `marg-core/src/config.rs`. A broken
+config falls back to all defaults and shows the error. Reloading, `:set`,
+`:config` and unknown-key reporting come in Phase 5.
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -626,6 +668,13 @@ on every save.)
 Stored per file: last page and offset, zoom and fit mode, layout, marks, last
 opened time, last known path. Recent files list: the 50 most recent.
 
+**As implemented (Phase 1):** keys `id:<hex>` or `path:<canonical path>`;
+position is the document point at the window's top-left. Saved when a file
+opens, before `:e` switches files, and on exit; each save re-reads the file
+and changes only its own entry (several windows can share it). At most 1000
+files (`state_files_max`); the least recently opened are dropped. Marks
+come in Phase 4.
+
 ### Developer tooling
 
 - `:debug` toggles an overlay: frame time (last / p95), render queue length,
@@ -634,6 +683,17 @@ opened time, last known path. Recent files list: the 50 most recent.
   with timestamps (process start → window → document open → first page
   shown), used to check the startup target.
 - `:version` shows the version (from `Cargo.toml`) and git commit hash.
+
+**As implemented (Phase 1):** `:debug` shows UI frame time (last / p95 over
+120 frames), number of renders requested, cache MB and texture count, zoom,
+render scale, pixel ratio, tiled or not, and the last render time per
+visible page. MuPDF warnings are not captured yet (see §12). `MARG_LOG`
+applies to marg's crates; dependencies log warnings only. `MARG_TIMING=1`
+logs: window created, document opened, first page shown. The file is opened
+on the document thread before the window is created. Measured (release,
+Linux/Wayland, this machine): first page at 137–159 ms for papers and a
+739-page book; 314 ms for a Springer book whose cover takes ~190 ms to
+render.
 
 ---
 
@@ -862,6 +922,12 @@ building more.
   vcxproj files (patching MuPDF: ask the user first), or ship with the
   runtime requirement / app-local runtime DLLs.
 
+- **Moving in filterable lists** (recent files now, outline in Phase 4):
+  §2.4 says "typing filters, `j/k` or `Ctrl-n/p` move", which conflicts.
+  Built: typing (including `j`/`k`) filters; `Ctrl-n`/`Ctrl-p` and the arrow
+  keys move; Esc clears the filter, or quits when it is empty and no file is
+  open. Confirm or change.
+
 **Risks**
 
 - ~~**`mupdf` crate API coverage**~~ Checked in Phase 0: no blocking gaps
@@ -883,8 +949,20 @@ building more.
 
 **Known issues**
 
-- Spike window renders page 1 at a fixed 2× scale and does not track the
-  window's pixel ratio or zoom; replaced in Phase 1.
+- MuPDF warnings go to stderr; the `mupdf` crate does not expose
+  `fz_set_warning_callback`, so `:debug` cannot list them. Possible via
+  `mupdf-sys` FFI in `marg-pdf` (unsafe); not done.
+- Heavy first pages (full-page cover images) delay the first render past the
+  150 ms target (314 ms measured). A quick low-resolution first render could
+  help; not done.
+- The state file is written on open, file switch and exit only; if marg is
+  killed, the reading position since opening is lost.
+- Tiles re-run the whole page's content per tile (MuPDF clips the drawing
+  only). If tiled zoom feels slow, cache a display list per page on the
+  document thread.
+- Windows AltGr handling and Linux Alt bindings are untested on real
+  keyboards (no Alt bindings exist by default).
+- Unknown config keys are ignored silently (reported from Phase 5).
 - First CI run on Windows is slow (MuPDF compiled from source, no cache);
   later runs use `rust-cache`.
 - Windows **debug** builds warn `LNK4098: defaultlib 'msvcrt' conflicts`:
@@ -924,6 +1002,35 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-27 — Phase 1: viewer
+- Done (branch `phase-1-viewer`, not merged): config defaults, paths,
+  logging; document thread with page/tile renders and replace-queue
+  semantics; continuous layout/zoom/fit model; viewer with texture LRU,
+  pre-render ±2, nearest-scale fallback, tiles above 200%; command registry,
+  keymap with remaps, counts, sequences, timeout; status bar; `:` command
+  line with history and `:e` Tab completion; state file (position, zoom,
+  fit per `/ID`); recent files list with fuzzy filter; `:debug` overlay;
+  `MARG_TIMING`. New fixture `tests/fixtures/boxes.pdf` (Rotate, CropBox,
+  offset/inherited MediaBox, UserUnit). Steps 5 and 6 (keymap, command
+  line) were one commit.
+- Decisions: none from the user this session ("continue" taken as the
+  go-ahead for Phase 1). Claude's choices: page sizes read from page
+  dictionaries (fast open); RGBA renders on the doc thread; arrow/Page/Home/End
+  keys added to the defaults; in lists typing filters and Ctrl-n/p move
+  (open question in §12).
+- Tried and failed: opening by loading every page took 366 ms for a
+  1316-page book; replaced by reading page dictionaries (18 ms; identical
+  sizes on 51 real PDFs, opened read-only from `~/Downloads`).
+- State: builds; 65 tests pass; clippy and fmt clean on Linux. Release
+  smoke runs on fixtures and real PDFs (read-only) work; startup 137–159 ms
+  to first page. Visuals not checked by Claude (no screenshot tool on
+  COSMIC/Wayland). Windows CI runs after push.
+- Next: user checks Phase 1; merge; then Phase 2.
+- Watch out: eframe 0.37 has no `glow` here, so `App::on_exit(&mut self)`;
+  `egui::Id::new` is deprecated (use `Id::unique`); egui-winit drops text
+  events while Ctrl is held. Test runs of the app should set
+  `XDG_STATE_HOME` to a scratch dir so the user's recent list stays clean.
 
 ### 2026-10-27 — Phase 0: setup + MuPDF spike
 - Done (branch `phase-0-setup`, merged into `main` after the user's check): Cargo workspace with
