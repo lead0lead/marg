@@ -67,9 +67,9 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Nothing built yet. Start with Phase 0. |
-| **Current phase** | 0 — not started |
-| **Next step** | Phase 0: project setup and MuPDF spike |
+| **Status** | Phase 0 in progress on branch `phase-0-setup`: workspace skeleton + `CLAUDE.md` done. |
+| **Current phase** | 0 — in progress |
+| **Next step** | Phase 0: CI, then MuPDF spike |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |

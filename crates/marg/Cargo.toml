@@ -1,0 +1,12 @@
+[package]
+name = "marg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+marg-core.workspace = true
+marg-pdf.workspace = true
+eframe.workspace = true
+log.workspace = true
