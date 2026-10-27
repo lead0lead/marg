@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/marg-core", "crates/marg-pdf", "crates/marg"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "AGPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+marg-core = { path = "crates/marg-core" }
+marg-pdf = { path = "crates/marg-pdf" }
+mupdf = { version = "0.8.0", default-features = false, features = ["base14-fonts"] }
+eframe = "0.37.0"
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
