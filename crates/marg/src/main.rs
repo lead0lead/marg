@@ -1,6 +1,7 @@
 //! marg: keyboard-driven PDF reader and annotator.
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
 
@@ -54,6 +55,8 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> eframe::Result {
+    let start = std::time::Instant::now();
+    let timing = std::env::var_os("MARG_TIMING").is_some_and(|v| v != "0");
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -66,6 +69,17 @@ fn main() -> eframe::Result {
     let (config, config_error) = startup::load_config(paths.as_ref());
     if let Some(e) = &config_error {
         log::error!("{e}");
+    }
+    // Open the file while the window is being created.
+    let repaint: Arc<OnceLock<egui::Context>> = Arc::default();
+    let wake = repaint.clone();
+    let doc = marg_pdf::DocThread::spawn(move || {
+        if let Some(ctx) = wake.get() {
+            ctx.request_repaint();
+        }
+    });
+    if let Some(path) = &args.path {
+        doc.send(marg_pdf::Request::Open(path.clone()));
     }
     let title = args
         .path
@@ -86,11 +100,14 @@ fn main() -> eframe::Result {
                 cc,
                 app::Startup {
                     config,
+                    doc,
+                    repaint,
                     version: format!("marg {} ({GIT_HASH})", marg_core::VERSION),
                     path: args.path,
                     start_page: args.page.map(|p| p - 1),
                     state_path: paths.as_ref().map(|p| p.state_file.clone()),
                     errors: config_error.into_iter().collect(),
+                    timing_start: timing.then_some(start),
                 },
             )))
         }),

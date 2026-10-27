@@ -1,6 +1,8 @@
 //! The marg window: page view, status bar and command line.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
@@ -10,8 +12,9 @@ use marg_core::keymap::{Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
+use marg_core::stats::Rolling;
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response};
+use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response, Scale};
 
 use crate::complete;
 use crate::input;
@@ -75,25 +78,54 @@ pub struct MargApp {
     state_path: Option<PathBuf>,
     state: State,
     recent: Option<RecentList>,
+    debug: bool,
+    /// Time spent in `ui()` per frame, in ms.
+    frame_ms: Rolling,
+    /// Last render time and scale per page, for the debug overlay.
+    last_render: HashMap<usize, (Duration, Scale)>,
+    timing: Option<Timing>,
+}
+
+/// Startup phase logging (`MARG_TIMING=1`).
+struct Timing {
+    start: Instant,
+    opened: bool,
+    shown: bool,
+}
+
+impl Timing {
+    fn log(&self, phase: &str) {
+        log::info!(
+            "timing: {phase} at {:.1} ms",
+            self.start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 }
 
 pub struct Startup {
     pub config: Config,
+    /// Started before the window, so the file opens while the window is
+    /// being created.
+    pub doc: DocThread,
+    /// Set once the window exists; the document thread's wake-up uses it.
+    pub repaint: Arc<OnceLock<egui::Context>>,
     pub version: String,
-    /// No file: show the recent files list.
+    /// The file being opened; `None`: show the recent files list.
     pub path: Option<PathBuf>,
     pub start_page: Option<usize>,
     pub state_path: Option<PathBuf>,
     /// Problems found before the window existed (e.g. config errors).
     pub errors: Vec<String>,
+    /// Process start, when `MARG_TIMING` is set.
+    pub timing_start: Option<Instant>,
 }
 
 impl MargApp {
     pub fn new(cc: &eframe::CreationContext<'_>, s: Startup) -> Self {
         // Ctrl +/- are not egui's UI zoom in marg.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        let ctx = cc.egui_ctx.clone();
-        let doc = DocThread::spawn(move || ctx.request_repaint());
+        let _ = s.repaint.set(cc.egui_ctx.clone());
+        let doc = s.doc;
         let (keymap, warnings) = Keymap::normal(&s.config.keys.normal);
         for w in &warnings {
             log::warn!("{w}");
@@ -108,10 +140,7 @@ impl MargApp {
             None => State::default(),
         };
         let (mode, recent) = match s.path {
-            Some(path) => {
-                doc.send(Request::Open(path));
-                (Mode::Normal, None)
-            }
+            Some(_) => (Mode::Normal, None),
             None => (
                 Mode::Recent,
                 Some(RecentList::new(&state, s.config.ui.recent_files_max)),
@@ -135,7 +164,18 @@ impl MargApp {
             state_path: s.state_path,
             state,
             recent,
+            debug: false,
+            frame_ms: Rolling::new(120),
+            last_render: HashMap::new(),
+            timing: s.timing_start.map(|start| Timing {
+                start,
+                opened: false,
+                shown: false,
+            }),
         };
+        if let Some(t) = &app.timing {
+            t.log("window created");
+        }
         for e in &errors {
             log::error!("{e}");
         }
@@ -175,6 +215,12 @@ impl MargApp {
                 } => match result {
                     Ok(info) => {
                         log::info!("opened {} in {took:?}", info.path.display());
+                        if let Some(t) = &mut self.timing
+                            && !t.opened
+                        {
+                            t.opened = true;
+                            t.log(&format!("document opened (open took {took:?})"));
+                        }
                         self.save_state();
                         self.cache.clear();
                         self.last_request.clear();
@@ -206,6 +252,7 @@ impl MargApp {
                     match result {
                         Ok(px) => {
                             log::debug!("rendered {key:?} in {took:?}");
+                            self.last_render.insert(key.page, (took, key.scale));
                             self.cache.insert(ctx, key, px);
                         }
                         Err(e) => log::error!("render {key:?} failed: {e}"),
@@ -448,7 +495,7 @@ impl MargApp {
                 return;
             }
             Command::DebugToggle => {
-                self.show(Level::Info, "Debug overlay not built yet".into());
+                self.debug = !self.debug;
                 return;
             }
             _ => {}
@@ -557,6 +604,7 @@ impl eframe::App for MargApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let frame_start = Instant::now();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
         if self
@@ -609,8 +657,78 @@ impl eframe::App for MargApp {
                     self.last_request = plan.keys;
                 }
                 let painter = ui.painter_at(area);
-                self.cache
+                let exact = self
+                    .cache
                     .draw(&painter, area, &open.view, &self.config.render);
+                if let Some(t) = &mut self.timing
+                    && !t.shown
+                    && (exact || self.last_request.is_empty())
+                {
+                    t.shown = true;
+                    t.log("first page shown");
+                }
+            });
+        if self.debug {
+            self.debug_overlay(&ctx);
+        }
+        self.frame_ms
+            .push(frame_start.elapsed().as_secs_f32() * 1000.0);
+    }
+}
+
+impl MargApp {
+    fn debug_overlay(&self, ctx: &egui::Context) {
+        let mut lines = Vec::new();
+        let ms = |v: Option<f32>| v.map_or("-".into(), |v| format!("{v:.1}"));
+        lines.push(format!(
+            "ui frame  {} ms  (p95 {} ms)",
+            ms(self.frame_ms.last()),
+            ms(self.frame_ms.quantile(0.95))
+        ));
+        lines.push(format!("render queue  {}", self.last_request.len()));
+        lines.push(format!(
+            "cache  {:.1} / {} MB  ({} textures)",
+            self.cache.bytes() as f64 / (1024.0 * 1024.0),
+            self.config.render.cache_mb,
+            self.cache.len()
+        ));
+        if let Some(open) = &self.open {
+            let v = &open.view;
+            let ppp = ctx.pixels_per_point();
+            lines.push(format!(
+                "zoom {:.0}%  scale {:.3}  ppp {ppp}  {}",
+                v.zoom() * 100.0,
+                v.zoom() * ppp,
+                if v.zoom() > self.config.render.tile_above_zoom {
+                    "tiled"
+                } else {
+                    "whole pages"
+                }
+            ));
+            for p in v.visible_pages() {
+                if let Some((took, scale)) = self.last_render.get(&p) {
+                    lines.push(format!(
+                        "page {}  last render {:.1} ms @ {:.3}",
+                        p + 1,
+                        took.as_secs_f64() * 1000.0,
+                        scale.get()
+                    ));
+                }
+            }
+        }
+        lines.push("MuPDF warnings: on stderr (not captured yet)".into());
+        egui::Area::new(egui::Id::unique("marg-debug-overlay"))
+            .anchor(egui::Align2::RIGHT_TOP, [-8.0, 8.0])
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_black_alpha(200))
+                    .inner_margin(8)
+                    .show(ui, |ui| {
+                        for l in lines {
+                            ui.label(egui::RichText::new(l).monospace().color(STATUS_FG));
+                        }
+                    });
             });
     }
 }

@@ -29,6 +29,14 @@ impl PageCache {
         self.textures.clear();
     }
 
+    pub fn bytes(&self) -> usize {
+        self.textures.bytes()
+    }
+
+    pub fn len(&self) -> usize {
+        self.textures.len()
+    }
+
     pub fn insert(&mut self, ctx: &egui::Context, key: RenderKey, px: Pixels) {
         let size = [px.width as usize, px.height as usize];
         let image = egui::ColorImage::from_rgba_premultiplied(size, &px.rgba);
@@ -77,7 +85,16 @@ impl PageCache {
     }
 
     /// Draw the visible pages into `area` (the page view on screen).
-    pub fn draw(&mut self, painter: &egui::Painter, area: Rect, view: &View, cfg: &RenderConfig) {
+    /// Returns true if every visible page was drawn from a full-page
+    /// texture at the exact scale (not tiled, no fallback).
+    pub fn draw(
+        &mut self,
+        painter: &egui::Painter,
+        area: Rect,
+        view: &View,
+        cfg: &RenderConfig,
+    ) -> bool {
+        let mut all_exact = true;
         let ppp = painter.pixels_per_point();
         let scale = Scale::from_f32(view.zoom() * ppp);
         let tiled = view.zoom() > cfg.tile_above_zoom;
@@ -99,6 +116,7 @@ impl PageCache {
                     Color32::WHITE,
                 );
             } else {
+                all_exact = false;
                 if let Some(key) = self.best_fallback(page, scale)
                     && let Some(tex) = self.textures.get(&key)
                 {
@@ -115,6 +133,7 @@ impl PageCache {
                 egui::StrokeKind::Outside,
             );
         }
+        all_exact
     }
 
     fn draw_tiles(
