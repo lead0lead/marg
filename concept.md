@@ -67,9 +67,9 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 0 in progress on branch `phase-0-setup`: workspace skeleton, `CLAUDE.md`, CI, fixture generator and MuPDF API spike tests done. |
+| **Status** | Phase 0 in progress on branch `phase-0-setup`: workspace skeleton, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests and spike window done. |
 | **Current phase** | 0 — in progress |
-| **Next step** | Phase 0: spike window (render page 1 in eframe) |
+| **Next step** | Phase 0: CI green on Linux + Windows, API gap report, user check |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
