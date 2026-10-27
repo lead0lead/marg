@@ -89,5 +89,36 @@ def text_pdf():
     write_pdf(HERE / "text.pdf", objs, 1, 8, "6d617267746578746669787475726531")
 
 
+def boxes_pdf():
+    """Pages whose size comes from Rotate, CropBox, offset or inherited MediaBox, UserUnit."""
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        # Inherited MediaBox (A4) for pages without their own.
+        2: b"<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R] /Count 5 /MediaBox [0 0 595 842] >>",
+        # 1: rotated letter -> 792 x 612.
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90"
+        b" /Resources << /Font << /F1 8 0 R >> >> /Contents 9 0 R >>",
+        # 2: CropBox inside MediaBox -> 500 x 600.
+        4: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /CropBox [50 100 550 700]"
+        b" /Resources << /Font << /F1 8 0 R >> >> /Contents 10 0 R >>",
+        # 3: offset MediaBox -> 300 x 400; text near its top-left corner.
+        5: b"<< /Type /Page /Parent 2 0 R /MediaBox [100 200 400 600]"
+        b" /Resources << /Font << /F1 8 0 R >> >> /Contents 11 0 R >>",
+        # 4: inherited MediaBox -> 595 x 842.
+        6: b"<< /Type /Page /Parent 2 0 R"
+        b" /Resources << /Font << /F1 8 0 R >> >> /Contents 9 0 R >>",
+        # 5: UserUnit 2 -> 600 x 800.
+        7: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /UserUnit 2"
+        b" /Resources << /Font << /F1 8 0 R >> >> /Contents 9 0 R >>",
+        8: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        9: stream(text_stream(["marg fixture: page boxes"], x=20, y=380)),
+        10: stream(text_stream(["marg fixture: cropped"], x=60, y=680)),
+        11: stream(text_stream(["marg fixture: offset"], x=105, y=585)),
+        12: b"<< /Producer (marg gen_fixtures.py) /Title (marg boxes fixture) >>",
+    }
+    write_pdf(HERE / "boxes.pdf", objs, 1, 12, "6d61726762786573666978747572653031")
+
+
 if __name__ == "__main__":
     text_pdf()
+    boxes_pdf()

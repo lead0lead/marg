@@ -1,12 +1,10 @@
-//! Phase 0 spike: render page 1 of a PDF on a separate thread and show it.
+//! Phase 0 spike window, now fed by the document thread: shows page 1.
 
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
 use eframe::egui;
 use marg_core::config::Config;
-use marg_pdf::RenderedPage;
+use marg_pdf::{DocThread, RenderKey, Request, Response, Scale};
 
 mod paths;
 mod startup;
@@ -16,56 +14,59 @@ const GIT_HASH: &str = env!("MARG_GIT_HASH");
 /// Render scale in pixels per PDF point for the spike (fixed, ~144 dpi).
 const SPIKE_SCALE: f32 = 2.0;
 
-struct Rendered {
-    page: Result<RenderedPage, String>,
-    took: Duration,
-}
-
 struct SpikeApp {
     config: Config,
     file_name: String,
-    rx: mpsc::Receiver<Rendered>,
+    doc: DocThread,
     texture: Option<egui::TextureHandle>,
     status: String,
 }
 
 impl SpikeApp {
     fn new(path: PathBuf, config: Config, message: Option<String>, ctx: &egui::Context) -> Self {
-        let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
+        let doc = DocThread::spawn(move || ctx.request_repaint());
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        std::thread::spawn(move || {
-            let start = Instant::now();
-            let page = marg_pdf::render_page(&path, 0, SPIKE_SCALE);
-            let _ = tx.send(Rendered {
-                page,
-                took: start.elapsed(),
-            });
-            ctx.request_repaint();
-        });
+        doc.send(Request::Open(path));
         Self {
             config,
             file_name,
-            rx,
+            doc,
             texture: None,
-            status: message.unwrap_or_else(|| "rendering…".into()),
+            status: message.unwrap_or_else(|| "opening…".into()),
         }
     }
 }
 
 impl eframe::App for SpikeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Ok(r) = self.rx.try_recv() {
-            match r.page {
-                Ok(p) => {
-                    let image = egui::ColorImage::from_rgb([p.width, p.height], &p.rgb);
-                    self.texture = Some(ui.ctx().load_texture("page-1", image, Default::default()));
-                    self.status = format!("1/{}  render {} ms", p.page_count, r.took.as_millis());
+        while let Some(resp) = self.doc.try_recv() {
+            match resp {
+                Response::Opened {
+                    result: Ok(info), ..
+                } => {
+                    self.status = format!("1/{}", info.page_sizes.len());
+                    self.doc.send(Request::Render(vec![RenderKey {
+                        page: 0,
+                        scale: Scale::from_f32(SPIKE_SCALE),
+                        tile: None,
+                    }]));
                 }
-                Err(e) => {
+                Response::Rendered {
+                    result: Ok(p),
+                    took,
+                    ..
+                } => {
+                    let size = [p.width as usize, p.height as usize];
+                    let image = egui::ColorImage::from_rgba_premultiplied(size, &p.rgba);
+                    self.texture = Some(ui.ctx().load_texture("page-1", image, Default::default()));
+                    self.status += &format!("  render {} ms", took.as_millis());
+                }
+                Response::Opened { result: Err(e), .. }
+                | Response::Rendered { result: Err(e), .. } => {
                     log::error!("{e}");
                     self.status = format!("error: {e}");
                 }
