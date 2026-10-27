@@ -67,7 +67,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 0 built on branch `phase-0-setup` (not merged): workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI: Linux green, Windows pending (rerun after the CRLF and CRT fixes). |
+| **Status** | Phase 0 built on branch `phase-0-setup` (not merged): workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI green on Linux and Windows. User confirmed the spike window shows page 1 on Linux/Wayland. |
 | **Current phase** | 0 — done, waiting for the user's check |
 | **Next step** | User tries the spike window and the highlighted copy, then merges `phase-0-setup`; then Phase 1 (viewer) |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
@@ -706,9 +706,10 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
 - **All tuning values come from config defaults**, defined in one place in
   `marg-core` (`config.rs`).
 - Release builds: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`;
-  Windows built with the MSVC toolchain. Static CRT is **off** for now (see
-  open questions): `+crt-static` clashed with MuPDF's dynamic-CRT build
-  (`LNK4098`), so the `.exe` currently needs the MSVC runtime.
+  Windows built with the MSVC toolchain and the **dynamic** CRT: `mupdf-sys`
+  builds MuPDF's own `platform/win32/mupdf.sln`, whose projects use `/MD`
+  (Release) and `/MDd` (Debug), so `+crt-static` would mismatch. The `.exe`
+  currently needs the MSVC runtime (see open questions).
 
 ### Folder structure
 
@@ -846,11 +847,12 @@ building more.
   alternative. Confirm at the decision milestone.
 - `spread_first_page_alone` default (`false`).
 - Exact grid size and step sizes in box mode.
-- **Portable Windows `.exe` (Phase 5)**: static CRT was dropped in Phase 0
-  because `+crt-static` linked against MuPDF built with the dynamic CRT
-  (`LNK4098: defaultlib 'libcmt' conflicts`). Before release, try building
-  MuPDF with `/MT` (e.g. via `CFLAGS`), or ship with the MSVC runtime
-  requirement.
+- **Portable Windows `.exe` (Phase 5)**: MuPDF's Windows build (via
+  `mupdf-sys` → `mupdf.sln`) uses the dynamic CRT, so static CRT is off and
+  the `.exe` needs the MSVC runtime. `CFLAGS` won't change this (MSBuild, not
+  `cc`). Options: patch `RuntimeLibrary` to `MultiThreaded` in MuPDF's
+  vcxproj files (patching MuPDF: ask the user first), or ship with the
+  runtime requirement / app-local runtime DLLs.
 
 **Risks**
 
@@ -877,6 +879,11 @@ building more.
   window's pixel ratio or zoom; replaced in Phase 1.
 - First CI run on Windows is slow (MuPDF compiled from source, no cache);
   later runs use `rust-cache`.
+- Windows **debug** builds warn `LNK4098: defaultlib 'msvcrt' conflicts`:
+  `mupdf-sys` links MuPDF's Debug config with the debug CRT (`msvcrtd`)
+  while Rust always uses the release CRT. Inherent to `mupdf-sys`; release
+  builds should be clean (not yet checked in CI; check in Phase 5 release
+  builds).
 
 ---
 
@@ -918,8 +925,9 @@ Format:
   URI link, page labels i/1, title, fixed `/ID`); spike tests
   (`crates/marg-pdf/tests/spike.rs`); `highlight_copy` example; spike window
   (page 1 rendered on a worker thread, status bar with version + git hash).
-- Decisions: static CRT on Windows dropped for now (user left the choice to
-  Claude; it clashed with MuPDF's dynamic CRT, revisit in Phase 5).
+- Decisions: static CRT on Windows dropped (user left the choice to Claude):
+  MuPDF's Windows build uses the dynamic CRT; portable `.exe` revisited in
+  Phase 5.
   `mupdf` 0.8.0 with default features off except `base14-fonts`
   (no JS, XPS, EPUB, tesseract etc.; smaller and faster to build); eframe
   0.37 (wgpu default).
@@ -927,8 +935,12 @@ Format:
   git converted `text.pdf` to CRLF on checkout (no NUL bytes → treated as
   text), MuPDF repaired it, and incremental save was refused. Fixed with
   `.gitattributes`. `+crt-static` gave linker warning LNK4098; removed.
-- State: builds; 5 tests pass; clippy and fmt clean; CI Linux green,
-  Windows pending (rerun after the CRLF and CRT fixes).
+  First guess (MuPDF uses static CRT) was wrong: a debug-only LNK4098
+  remains because `mupdf-sys` links the debug CRT in Debug config.
+- State: builds; 5 tests pass; clippy and fmt clean; CI green on Linux and
+  Windows. User ran the spike window on Linux/Wayland: page 1 shows fine.
+  The user has not yet confirmed the highlight in another viewer (Poppler
+  render checked by Claude).
 - Next: user check of Phase 0, merge, then Phase 1 (viewer). Phase 1 first
   step: a real document thread in `marg-pdf` with request/result channels.
 - Watch out: eframe 0.37 uses `App::ui(&mut self, ui, frame)` and
