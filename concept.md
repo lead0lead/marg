@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading); step 2 (document thread `marg-pdf/src/thread.rs`: open, renders of pages and tiles, replace-queue semantics, generations). |
+| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading); step 2 (document thread `marg-pdf/src/thread.rs`: open, renders of pages and tiles, replace-queue semantics, generations); step 3 (`marg-core/src/view.rs`: continuous layout, scroll, zoom with anchor, fit width/page, page navigation). |
 | **Current phase** | 1 — viewer |
-| **Next step** | Phase 1 step 3: continuous layout + zoom/fit model in core. Plan: 1 config/paths/logging ✅ · 2 document thread ✅ · 3 continuous layout + zoom/fit model in core · 4 viewer with texture cache, pre-render, scaled fallback, tiles · 5 commands + keymap + counts · 6 status bar + command line · 7 state file + recent files · 8 debug overlay + startup timing |
+| **Next step** | Phase 1 step 4: viewer with texture cache, pre-render, scaled fallback, tiles. Plan: 1 config/paths/logging ✅ · 2 document thread ✅ · 3 continuous layout + zoom/fit model in core ✅ · 4 viewer with texture cache, pre-render, scaled fallback, tiles · 5 commands + keymap + counts · 6 status bar + command line · 7 state file + recent files · 8 debug overlay + startup timing |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- <file.pdf>` (Phase 0: spike window showing page 1; `q` quits) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (Phase 1 step 2) |
+| **Last updated** | 2026-10-27 (Phase 1 step 3) |
 
 ---
 

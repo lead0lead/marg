@@ -1,6 +1,7 @@
 //! Pure logic for marg: no MuPDF, no egui.
 
 pub mod config;
+pub mod view;
 
 /// Crate version from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
