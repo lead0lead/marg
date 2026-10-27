@@ -1,6 +1,10 @@
 //! Pure logic for marg: no MuPDF, no egui.
 
+pub mod command;
 pub mod config;
+pub mod keymap;
+pub mod keys;
+pub mod lineedit;
 pub mod lru;
 pub mod view;
 

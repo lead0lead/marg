@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use eframe::egui;
 
 mod app;
+mod complete;
+mod input;
 mod pages;
 mod paths;
 mod startup;
@@ -78,10 +80,13 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             Ok(Box::new(app::MargApp::new(
                 cc,
-                config,
-                args.path,
-                args.page.map(|p| p - 1),
-                config_error,
+                app::Startup {
+                    config,
+                    version: format!("marg {} ({GIT_HASH})", marg_core::VERSION),
+                    path: args.path,
+                    start_page: args.page.map(|p| p - 1),
+                    errors: config_error.into_iter().collect(),
+                },
             )))
         }),
     )

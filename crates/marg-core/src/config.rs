@@ -3,6 +3,8 @@
 //! Every tuning value lives here, so the defaults are defined in one place.
 //! A missing config file or a missing key means the default below.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Page layout of a document view.
@@ -20,6 +22,15 @@ pub struct Config {
     pub view: ViewConfig,
     pub render: RenderConfig,
     pub ui: UiConfig,
+    pub keys: KeysConfig,
+}
+
+/// Key bindings on top of the defaults: key sequence → command name
+/// (`"nop"` removes a default binding).
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct KeysConfig {
+    pub normal: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -132,6 +143,12 @@ mod tests {
     fn layout_names_parse() {
         let c = Config::from_toml("[view]\ndefault_layout_portrait = \"spread\"\n").unwrap();
         assert_eq!(c.view.default_layout_portrait, Layout::Spread);
+    }
+
+    #[test]
+    fn key_tables_parse() {
+        let c = Config::from_toml("[keys.normal]\n\"Ctrl-o\" = \"page.prev\"\n").unwrap();
+        assert_eq!(c.keys.normal["Ctrl-o"], "page.prev");
     }
 
     #[test]

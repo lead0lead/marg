@@ -125,6 +125,23 @@ fn reopen_bumps_generation() {
 }
 
 #[test]
+fn failed_open_keeps_current_document() {
+    let t = DocThread::spawn(|| ());
+    open(&t, fixture("text.pdf")).1.unwrap();
+    let (generation, result) = open(&t, fixture("does-not-exist.pdf"));
+    assert!(result.is_err());
+    assert_eq!(generation, 1);
+    let key = RenderKey {
+        page: 1,
+        scale: Scale::from_f32(0.5),
+        tile: None,
+    };
+    let (generation, _, px) = render(&t, key);
+    assert_eq!(generation, 1);
+    assert!(px.is_ok());
+}
+
+#[test]
 fn page_sizes_follow_boxes_rotation_and_user_unit() {
     let path = fixture("boxes.pdf");
     let (doc, info) = marg_pdf::document::Doc::open(&path).unwrap();

@@ -41,7 +41,8 @@ pub struct RenderKey {
 }
 
 pub enum Request {
-    /// Open a document, replacing the current one and clearing the queue.
+    /// Open a document. On success it replaces the current one, clears the
+    /// queue and starts a new generation; on failure the current one stays.
     Open(PathBuf),
     /// Replace the render queue. Jobs are done in order; jobs from an
     /// earlier queue that have not started are dropped. `received` is the
@@ -57,7 +58,8 @@ pub enum Response {
         took: Duration,
     },
     Rendered {
-        /// Which `Open` this render belongs to; stale ones can be ignored.
+        /// Which successful `Open` this render belongs to; stale ones can be
+        /// ignored.
         generation: u64,
         key: RenderKey,
         result: Result<Pixels, String>,
@@ -166,18 +168,17 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
         for req in incoming {
             match req {
                 Request::Open(path) => {
-                    queue.clear();
-                    // Close the old document before opening the new one.
-                    drop(doc.take());
-                    generation += 1;
                     let start = Instant::now();
-                    let result = Doc::open(&path);
+                    let info = match Doc::open(&path) {
+                        Ok((d, info)) => {
+                            queue.clear();
+                            generation += 1;
+                            doc = Some((d, info.clone()));
+                            Ok(info)
+                        }
+                        Err(e) => Err(e),
+                    };
                     let took = start.elapsed();
-                    let info = result
-                        .as_ref()
-                        .map(|(_, i)| i.clone())
-                        .map_err(Clone::clone);
-                    doc = result.ok();
                     if tx
                         .send(Response::Opened {
                             generation,
