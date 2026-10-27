@@ -1,0 +1,4 @@
+/target/
+*.marg-tmp
+.DS_Store
+CLAUDE.local.md
