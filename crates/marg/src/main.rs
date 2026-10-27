@@ -5,7 +5,11 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
+use marg_core::config::Config;
 use marg_pdf::RenderedPage;
+
+mod paths;
+mod startup;
 
 const GIT_HASH: &str = env!("MARG_GIT_HASH");
 
@@ -18,6 +22,7 @@ struct Rendered {
 }
 
 struct SpikeApp {
+    config: Config,
     file_name: String,
     rx: mpsc::Receiver<Rendered>,
     texture: Option<egui::TextureHandle>,
@@ -25,7 +30,7 @@ struct SpikeApp {
 }
 
 impl SpikeApp {
-    fn new(path: PathBuf, ctx: &egui::Context) -> Self {
+    fn new(path: PathBuf, config: Config, message: Option<String>, ctx: &egui::Context) -> Self {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let file_name = path
@@ -42,10 +47,11 @@ impl SpikeApp {
             ctx.request_repaint();
         });
         Self {
+            config,
             file_name,
             rx,
             texture: None,
-            status: "rendering…".into(),
+            status: message.unwrap_or_else(|| "rendering…".into()),
         }
     }
 }
@@ -70,7 +76,7 @@ impl eframe::App for SpikeApp {
         }
 
         egui::Panel::bottom("status")
-            .exact_size(22.0)
+            .exact_size(self.config.ui.status_bar_px)
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(0x1E, 0x1E, 0x1E)))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -95,6 +101,12 @@ impl eframe::App for SpikeApp {
 }
 
 fn main() -> eframe::Result {
+    let paths = paths::Paths::resolve();
+    startup::init_logging(paths.as_ref());
+    let (config, config_error) = startup::load_config(paths.as_ref());
+    if let Some(e) = &config_error {
+        log::error!("{e}");
+    }
     let Some(path) = std::env::args_os().nth(1).map(PathBuf::from) else {
         eprintln!("usage: marg <file.pdf>");
         std::process::exit(2);
@@ -102,6 +114,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "marg",
         eframe::NativeOptions::default(),
-        Box::new(|cc| Ok(Box::new(SpikeApp::new(path, &cc.egui_ctx)))),
+        Box::new(|cc| {
+            Ok(Box::new(SpikeApp::new(
+                path,
+                config,
+                config_error,
+                &cc.egui_ctx,
+            )))
+        }),
     )
 }

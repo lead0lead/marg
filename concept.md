@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 0 done and merged into `main`: workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI green on Linux and Windows. User confirmed the spike window shows page 1 on Linux/Wayland and the spike highlight in another viewer. |
-| **Current phase** | 0 — done; Phase 1 not started |
-| **Next step** | Phase 1 (viewer), on a new branch, after the user's go-ahead. First step: a real document thread in `marg-pdf` with request/result channels |
+| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading). |
+| **Current phase** | 1 — viewer |
+| **Next step** | Phase 1 step 2: document thread in `marg-pdf` with request/result channels. Plan: 1 config/paths/logging ✅ · 2 document thread · 3 continuous layout + zoom/fit model in core · 4 viewer with texture cache, pre-render, scaled fallback, tiles · 5 commands + keymap + counts · 6 status bar + command line · 7 state file + recent files · 8 debug overlay + startup timing |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- <file.pdf>` (Phase 0: spike window showing page 1; `q` quits) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (end of Phase 0) |
+| **Last updated** | 2026-10-27 (Phase 1 step 1) |
 
 ---
 

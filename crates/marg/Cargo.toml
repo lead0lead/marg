@@ -10,3 +10,5 @@ marg-core.workspace = true
 marg-pdf.workspace = true
 eframe.workspace = true
 log.workspace = true
+directories.workspace = true
+simplelog.workspace = true
