@@ -67,9 +67,9 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 0 built on branch `phase-0-setup` (not merged): workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI green on Linux and Windows. User confirmed the spike window shows page 1 on Linux/Wayland. |
-| **Current phase** | 0 — done, waiting for the user's check |
-| **Next step** | User tries the spike window and the highlighted copy, then merges `phase-0-setup`; then Phase 1 (viewer) |
+| **Status** | Phase 0 done and merged into `main`: workspace, `CLAUDE.md`, CI, fixture generator, MuPDF API spike tests, spike window. No API gaps that block the plan (§9 spike report). CI green on Linux and Windows. User confirmed the spike window shows page 1 on Linux/Wayland and the spike highlight in another viewer. |
+| **Current phase** | 0 — done; Phase 1 not started |
+| **Next step** | Phase 1 (viewer), on a new branch, after the user's go-ahead. First step: a real document thread in `marg-pdf` with request/result channels |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -918,7 +918,7 @@ Format:
 ```
 
 ### 2026-10-27 — Phase 0: setup + MuPDF spike
-- Done (branch `phase-0-setup`, pushed, not merged): Cargo workspace with
+- Done (branch `phase-0-setup`, merged into `main` after the user's check): Cargo workspace with
   `marg-core`, `marg-pdf`, `marg`; `CLAUDE.md`; CI (fmt, build, test, clippy
   on Linux + Windows); `.gitattributes` (`*.pdf binary`);
   `tests/fixtures/gen_fixtures.py` → `text.pdf` (2 pages, outline, internal +
@@ -939,9 +939,9 @@ Format:
   remains because `mupdf-sys` links the debug CRT in Debug config.
 - State: builds; 5 tests pass; clippy and fmt clean; CI green on Linux and
   Windows. User ran the spike window on Linux/Wayland: page 1 shows fine.
-  The user has not yet confirmed the highlight in another viewer (Poppler
-  render checked by Claude).
-- Next: user check of Phase 0, merge, then Phase 1 (viewer). Phase 1 first
+  User confirmed the spike highlight on their own paper (copy) in another
+  viewer.
+- Next: Phase 1 (viewer), after the user's go-ahead. Phase 1 first
   step: a real document thread in `marg-pdf` with request/result channels.
 - Watch out: eframe 0.37 uses `App::ui(&mut self, ui, frame)` and
   `egui::Panel::bottom` (not `update` / `TopBottomPanel`). MuPDF objects
