@@ -684,6 +684,10 @@ come in Phase 4.
   shown), used to check the startup target.
 - `:version` shows the version (from `Cargo.toml`) and git commit hash.
 
+**UI checks without a screen:** `scripts/xvfb-drive.sh` runs the release
+build on Xvfb, sends keys with `xdotool` and saves screenshots (usage in the
+script). Set `XDG_STATE_HOME` to a scratch dir.
+
 **As implemented (Phase 1):** `:debug` shows UI frame time (last / p95 over
 120 frames), number of renders requested, cache MB and texture count, zoom,
 render scale, pixel ratio, tiled or not, and the last render time per
@@ -963,6 +967,9 @@ building more.
 - Windows AltGr handling and Linux Alt bindings are untested on real
   keyboards (no Alt bindings exist by default).
 - Unknown config keys are ignored silently (reported from Phase 5).
+- Under Xvfb each simulated wheel click arrives twice (XTest artifact,
+  likely). User to confirm one zoom step per Ctrl+wheel notch on real
+  hardware; `MARG_LOG=debug` logs each wheel event.
 - First CI run on Windows is slow (MuPDF compiled from source, no cache);
   later runs use `rust-cache`.
 - Windows **debug** builds warn `LNK4098: defaultlib 'msvcrt' conflicts`:
@@ -1026,6 +1033,10 @@ Format:
   smoke runs on fixtures and real PDFs (read-only) work; startup 137–159 ms
   to first page. Visuals not checked by Claude (no screenshot tool on
   COSMIC/Wayland). Windows CI runs after push.
+- UI test via Xvfb + xdotool (user installed xdotool) found and fixed:
+  Space inserted twice in the command line and recent filter; fit page not
+  showing the current page whole; recent filter ranking path matches above
+  file-name matches (now name first, `fuzzy::filter_paths`).
 - Next: user checks Phase 1; merge; then Phase 2.
 - Watch out: eframe 0.37 has no `glow` here, so `App::on_exit(&mut self)`;
   `egui::Id::new` is deprecated (use `Id::unique`); egui-winit drops text

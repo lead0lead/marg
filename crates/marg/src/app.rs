@@ -366,6 +366,7 @@ impl MargApp {
         horizontal: bool,
         pointer: Option<egui::Vec2>,
     ) {
+        log::debug!("wheel {unit:?} {delta:?} zoom={zoom}");
         let Some(open) = &mut self.open else { return };
         let v = &mut open.view;
         let step = self.config.view.scroll_step_px;
@@ -448,7 +449,6 @@ impl MargApp {
                     KeyCode::Named(Named::Up) => self.cmdline.history_prev(),
                     KeyCode::Named(Named::Down) => self.cmdline.history_next(),
                     KeyCode::Named(Named::Tab) => self.complete(),
-                    KeyCode::Named(Named::Space) => self.cmdline.insert(" "),
                     _ => {}
                 }
             }

@@ -291,13 +291,20 @@ impl View {
     }
 
     /// Enter a fit mode (or leave it with `Fit::None`), keeping the reading
-    /// position at the top of the viewport.
+    /// position at the top of the viewport. Fit page shows the current page
+    /// whole, from its top.
     pub fn set_fit(&mut self, fit: Fit) {
+        let current = self.current_page();
         let pos = self.position();
         self.fit = fit;
         self.apply_fit();
         self.relayout();
-        self.set_position(pos);
+        if fit == Fit::Page {
+            self.scroll.0 = 0.0;
+            self.goto_page(current);
+        } else {
+            self.set_position(pos);
+        }
     }
 }
 
@@ -406,6 +413,16 @@ mod tests {
         let after = v.position();
         assert_eq!(after.page, 2);
         assert!(approx(before.y, after.y));
+    }
+
+    #[test]
+    fn fit_page_shows_current_page_whole() {
+        let mut v = View::new(letters(5), &cfg(), Fit::Width, (612.0, 500.0));
+        v.goto_page(2);
+        v.scroll_by(0.0, 300.0); // middle of page 2
+        v.set_fit(Fit::Page);
+        let r = v.page_rect_on_screen(2);
+        assert!(approx(r.y, 0.0) && r.bottom() <= 500.0 + 0.01);
     }
 
     #[test]

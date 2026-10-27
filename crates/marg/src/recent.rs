@@ -56,7 +56,7 @@ impl RecentList {
 
     fn refilter(&mut self) {
         let paths: Vec<&str> = self.items.iter().map(|i| i.path.as_str()).collect();
-        self.shown = fuzzy::filter(self.filter.text(), &paths);
+        self.shown = fuzzy::filter_paths(self.filter.text(), &paths);
         self.selected = 0;
     }
 
@@ -91,10 +91,6 @@ impl RecentList {
             }
             (KeyCode::Named(Named::Backspace), _) => {
                 self.filter.backspace();
-                self.refilter();
-            }
-            (KeyCode::Named(Named::Space), false) => {
-                self.filter.insert(" ");
                 self.refilter();
             }
             (KeyCode::Named(Named::Down), _) | (KeyCode::Char('n'), true) => self.step(1),

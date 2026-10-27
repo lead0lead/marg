@@ -66,6 +66,27 @@ pub fn filter<S: AsRef<str>>(query: &str, items: &[S]) -> Vec<usize> {
     hits.into_iter().map(|(_, i)| i).collect()
 }
 
+/// Score a path: a match within the file name ranks above any match that
+/// needs the directories.
+pub fn score_path(query: &str, path: &str) -> Option<i64> {
+    let name_start = path.rfind(['/', '\\']).map_or(0, |i| i + 1);
+    match score(query, &path[name_start..]) {
+        Some(s) => Some(s + 1_000_000_000),
+        None => score(query, path),
+    }
+}
+
+/// Like [`filter`], for paths (see [`score_path`]).
+pub fn filter_paths<S: AsRef<str>>(query: &str, paths: &[S]) -> Vec<usize> {
+    let mut hits: Vec<(i64, usize)> = paths
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| score_path(query, p.as_ref()).map(|sc| (sc, i)))
+        .collect();
+    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    hits.into_iter().map(|(_, i)| i).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +112,16 @@ mod tests {
         assert_eq!(filter("gru", &items), [0, 1]);
         let items = ["d-y-n.pdf", "dynamics.pdf"];
         assert_eq!(filter("dyn", &items), [1, 0]);
+    }
+
+    #[test]
+    fn file_name_matches_rank_first() {
+        let paths = [
+            "/home/u/Projects/claude/marg/tests/fixtures/boxes.pdf",
+            "/tmp/scratch/paper.pdf",
+        ];
+        assert_eq!(filter_paths("pap", &paths), [1, 0]);
+        assert_eq!(filter_paths("claude", &paths), [0]);
     }
 
     #[test]
