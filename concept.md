@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading); step 2 (document thread `marg-pdf/src/thread.rs`: open, renders of pages and tiles, replace-queue semantics, generations); step 3 (`marg-core/src/view.rs`: continuous layout, scroll, zoom with anchor, fit width/page, page navigation); step 4 (viewer: `marg/src/pages.rs` texture LRU (`marg-core/src/lru.rs`), pre-render ±2, nearest-scale fallback, 512 px tiles above 200% over a low-res page; mouse wheel / Ctrl+wheel); steps 5+6 together (`marg-core` `keys.rs`, `command.rs`, `keymap.rs`, `lineedit.rs`: key notation, command registry, Normal keymap with `[keys.normal]` remaps, counts, sequences with timeout, `:` command line with history and `:e` Tab completion; status bar with pending keys and messages). |
+| **Status** | Phase 1 (viewer) in progress on branch `phase-1-viewer`. Done: step 1 (config defaults in `marg-core/src/config.rs`, paths, logging, config loading); step 2 (document thread `marg-pdf/src/thread.rs`: open, renders of pages and tiles, replace-queue semantics, generations); step 3 (`marg-core/src/view.rs`: continuous layout, scroll, zoom with anchor, fit width/page, page navigation); step 4 (viewer: `marg/src/pages.rs` texture LRU (`marg-core/src/lru.rs`), pre-render ±2, nearest-scale fallback, 512 px tiles above 200% over a low-res page; mouse wheel / Ctrl+wheel); steps 5+6 together (`marg-core` `keys.rs`, `command.rs`, `keymap.rs`, `lineedit.rs`: key notation, command registry, Normal keymap with `[keys.normal]` remaps, counts, sequences with timeout, `:` command line with history and `:e` Tab completion; status bar with pending keys and messages); step 7 (`marg-core` `state.rs`, `fuzzy.rs`; `marg/src/statefile.rs`, `recent.rs`: per-file position/zoom/fit keyed by `/ID`, saved on open, file switch and exit; recent list when started without a file). |
 | **Current phase** | 1 — viewer |
-| **Next step** | Phase 1 step 7: state file + recent files. Plan: 1 config/paths/logging ✅ · 2 document thread ✅ · 3 continuous layout + zoom/fit model in core ✅ · 4 viewer with texture cache, pre-render, scaled fallback, tiles ✅ · 5 commands + keymap + counts ✅ · 6 status bar + command line ✅ · 7 state file + recent files · 8 debug overlay + startup timing |
+| **Next step** | Phase 1 step 8: debug overlay + startup timing. Plan: 1 config/paths/logging ✅ · 2 document thread ✅ · 3 continuous layout + zoom/fit model in core ✅ · 4 viewer with texture cache, pre-render, scaled fallback, tiles ✅ · 5 commands + keymap + counts ✅ · 6 status bar + command line ✅ · 7 state file + recent files ✅ · 8 debug overlay + startup timing |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- <file.pdf> [--page N]` (Phase 1 in progress: continuous viewer) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (Phase 1 steps 5+6) |
+| **Last updated** | 2026-10-27 (Phase 1 step 7) |
 
 ---
 

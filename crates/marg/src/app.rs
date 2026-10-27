@@ -9,12 +9,15 @@ use marg_core::config::Config;
 use marg_core::keymap::{Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
+use marg_core::state::{FileState, State, file_key};
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response};
 
 use crate::complete;
 use crate::input;
 use crate::pages::PageCache;
+use crate::recent::{self, RecentList};
+use crate::statefile;
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
 const STATUS_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
@@ -25,6 +28,8 @@ const ERROR_FG: Color32 = Color32::from_rgb(0xFF, 0x70, 0x70);
 /// A successfully opened document.
 struct OpenDoc {
     info: DocInfo,
+    /// Key in the state file.
+    key: String,
     generation: u64,
     file_name: String,
     view: View,
@@ -47,6 +52,7 @@ struct Message {
 enum Mode {
     Normal,
     Command,
+    Recent,
 }
 
 pub struct MargApp {
@@ -66,13 +72,18 @@ pub struct MargApp {
     received: u64,
     last_request: Vec<RenderKey>,
     message: Option<Message>,
+    state_path: Option<PathBuf>,
+    state: State,
+    recent: Option<RecentList>,
 }
 
 pub struct Startup {
     pub config: Config,
     pub version: String,
-    pub path: PathBuf,
+    /// No file: show the recent files list.
+    pub path: Option<PathBuf>,
     pub start_page: Option<usize>,
+    pub state_path: Option<PathBuf>,
     /// Problems found before the window existed (e.g. config errors).
     pub errors: Vec<String>,
 }
@@ -83,11 +94,29 @@ impl MargApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let ctx = cc.egui_ctx.clone();
         let doc = DocThread::spawn(move || ctx.request_repaint());
-        doc.send(Request::Open(s.path));
         let (keymap, warnings) = Keymap::normal(&s.config.keys.normal);
         for w in &warnings {
             log::warn!("{w}");
         }
+        let mut errors = s.errors;
+        let state = match s.state_path.as_deref().map(statefile::load) {
+            Some(Ok(state)) => state,
+            Some(Err(e)) => {
+                errors.push(format!("state file: {e}"));
+                State::default()
+            }
+            None => State::default(),
+        };
+        let (mode, recent) = match s.path {
+            Some(path) => {
+                doc.send(Request::Open(path));
+                (Mode::Normal, None)
+            }
+            None => (
+                Mode::Recent,
+                Some(RecentList::new(&state, s.config.ui.recent_files_max)),
+            ),
+        };
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
             config: s.config,
@@ -95,7 +124,7 @@ impl MargApp {
             keymap,
             matcher: Matcher::default(),
             clock: Instant::now(),
-            mode: Mode::Normal,
+            mode,
             cmdline: LineEdit::default(),
             doc,
             open: None,
@@ -103,8 +132,14 @@ impl MargApp {
             received: 0,
             last_request: Vec::new(),
             message: None,
+            state_path: s.state_path,
+            state,
+            recent,
         };
-        if let Some(e) = s.errors.first() {
+        for e in &errors {
+            log::error!("{e}");
+        }
+        if let Some(e) = errors.first() {
             app.show(Level::Error, e.clone());
         } else if let Some(w) = warnings.first() {
             app.show(Level::Warn, w.clone());
@@ -140,14 +175,20 @@ impl MargApp {
                 } => match result {
                     Ok(info) => {
                         log::info!("opened {} in {took:?}", info.path.display());
+                        self.save_state();
                         self.cache.clear();
                         self.last_request.clear();
+                        self.mode = Mode::Normal;
+                        self.recent = None;
                         let doc = self.open_doc(info, generation);
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
                             "{} — marg",
                             doc.file_name
                         )));
                         self.open = Some(doc);
+                        // Record the open now, so the recent list has it even
+                        // if marg does not exit cleanly.
+                        self.save_state();
                     }
                     Err(e) => self.error(format!("Cannot open: {e}")),
                 },
@@ -190,7 +231,17 @@ impl MargApp {
             .open
             .as_ref()
             .map_or((800.0, 600.0), |o| o.view.viewport());
+        let canonical = std::fs::canonicalize(&info.path).unwrap_or_else(|_| info.path.clone());
+        let key = file_key(info.id.as_deref(), &canonical.to_string_lossy());
+        let saved = self.state.files.get(&key);
+        let fit = saved.map_or(fit, |f| f.fit);
         let mut view = View::new(sizes, &self.config.view, fit, viewport);
+        if let Some(saved) = saved {
+            if saved.fit == Fit::None {
+                view.set_zoom_at(saved.zoom, (0.0, 0.0));
+            }
+            view.set_position(saved.position);
+        }
         if let Some(p) = self.start_page.take() {
             view.goto_page(p);
         }
@@ -200,7 +251,11 @@ impl MargApp {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         OpenDoc {
-            info,
+            info: DocInfo {
+                path: canonical,
+                ..info
+            },
+            key,
             generation,
             file_name,
             view,
@@ -234,6 +289,7 @@ impl MargApp {
                     }
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
+                _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 Event::Text(_) if std::mem::take(&mut skip_text) => {}
                 _ => {
                     if let Some(k) = input::key_press(e) {
@@ -278,6 +334,34 @@ impl MargApp {
             v.scroll_by(-lines.y * step, 0.0);
         } else {
             v.scroll_by(-lines.x * step, -lines.y * step);
+        }
+    }
+
+    fn recent_event(&mut self, ctx: &egui::Context, e: &Event) {
+        let Some(list) = &mut self.recent else { return };
+        match list.event(e) {
+            recent::Action::None => {}
+            recent::Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            recent::Action::Open(path) => self.open_path(&path.to_string_lossy()),
+        }
+    }
+
+    /// Write the open document's reading position to the state file.
+    fn save_state(&mut self) {
+        let Some(open) = &self.open else { return };
+        let file = FileState {
+            path: open.info.path.to_string_lossy().into_owned(),
+            last_opened: statefile::now_secs(),
+            position: open.view.position(),
+            zoom: open.view.zoom(),
+            fit: open.view.fit(),
+            layout: marg_core::config::Layout::Continuous,
+        };
+        let max = self.config.ui.state_files_max;
+        self.state.update(open.key.clone(), file.clone(), max);
+        let Some(path) = &self.state_path else { return };
+        if let Err(e) = statefile::save_entry(path, &open.key, file, max) {
+            self.error(format!("Cannot save state: {e}"));
         }
     }
 
@@ -415,6 +499,9 @@ impl MargApp {
     }
 
     fn status_left(&self) -> String {
+        if self.mode == Mode::Recent {
+            return "RECENT".into();
+        }
         let Some(open) = &self.open else {
             return "NORMAL".into();
         };
@@ -465,6 +552,10 @@ impl MargApp {
 }
 
 impl eframe::App for MargApp {
+    fn on_exit(&mut self) {
+        self.save_state();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
@@ -501,6 +592,12 @@ impl eframe::App for MargApp {
             .show(ui, |ui| {
                 let area = ui.max_rect();
                 let ppp = ui.ctx().pixels_per_point();
+                if self.mode == Mode::Recent
+                    && let Some(list) = &self.recent
+                {
+                    list.draw(ui);
+                    return;
+                }
                 let Some(open) = &mut self.open else { return };
                 open.view.set_viewport(area.width(), area.height());
                 let plan = self.cache.plan(&open.view, &self.config.render, ppp);

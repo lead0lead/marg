@@ -101,6 +101,9 @@ pub struct UiConfig {
     pub sequence_timeout_ms: u64,
     /// Length of the recent files list.
     pub recent_files_max: usize,
+    /// Files remembered in the state file; the least recently opened are
+    /// dropped beyond this.
+    pub state_files_max: usize,
 }
 
 impl Default for UiConfig {
@@ -110,6 +113,7 @@ impl Default for UiConfig {
             message_secs: 4.0,
             sequence_timeout_ms: 1000,
             recent_files_max: 50,
+            state_files_max: 1000,
         }
     }
 }

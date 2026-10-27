@@ -7,6 +7,7 @@ use directories::BaseDirs;
 
 pub struct Paths {
     pub config_file: PathBuf,
+    pub state_file: PathBuf,
     pub log_file: PathBuf,
 }
 
@@ -23,6 +24,7 @@ impl Paths {
             .join("marg");
         Some(Self {
             config_file: config.join("config.toml"),
+            state_file: state.join("state.toml"),
             log_file: state.join("marg.log"),
         })
     }

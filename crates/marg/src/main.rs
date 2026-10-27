@@ -9,14 +9,17 @@ mod complete;
 mod input;
 mod pages;
 mod paths;
+mod recent;
 mod startup;
+mod statefile;
 
 const GIT_HASH: &str = env!("MARG_GIT_HASH");
 
-const USAGE: &str = "usage: marg <file.pdf> [--page N]";
+const USAGE: &str = "usage: marg [<file.pdf> [--page N]]";
 
 struct Args {
-    path: PathBuf,
+    /// No file: show the recent files list.
+    path: Option<PathBuf>,
     /// 1-based page from `--page`.
     page: Option<usize>,
 }
@@ -44,10 +47,10 @@ fn parse_args() -> Result<Args, String> {
             _ => return Err(format!("unexpected argument {}", a.to_string_lossy())),
         }
     }
-    Ok(Args {
-        path: path.ok_or("no file given")?,
-        page,
-    })
+    if page.is_some() && path.is_none() {
+        return Err("--page needs a file".into());
+    }
+    Ok(Args { path, page })
 }
 
 fn main() -> eframe::Result {
@@ -66,7 +69,8 @@ fn main() -> eframe::Result {
     }
     let title = args
         .path
-        .file_name()
+        .as_deref()
+        .and_then(|p| p.file_name())
         .map_or("marg".into(), |n| format!("{} — marg", n.to_string_lossy()));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -85,6 +89,7 @@ fn main() -> eframe::Result {
                     version: format!("marg {} ({GIT_HASH})", marg_core::VERSION),
                     path: args.path,
                     start_page: args.page.map(|p| p - 1),
+                    state_path: paths.as_ref().map(|p| p.state_file.clone()),
                     errors: config_error.into_iter().collect(),
                 },
             )))
