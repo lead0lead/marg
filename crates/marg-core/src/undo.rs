@@ -45,6 +45,11 @@ impl<T> UndoStack<T> {
         self.done.iter_mut().chain(self.undone.iter_mut())
     }
 
+    /// Forget the last step without undoing it (it cannot be redone).
+    pub fn discard_last(&mut self) -> Option<T> {
+        self.done.pop()
+    }
+
     pub fn clear(&mut self) {
         self.done.clear();
         self.undone.clear();
@@ -67,6 +72,16 @@ mod tests {
         u.push(3);
         assert_eq!(u.redo().copied(), None);
         assert_eq!(u.undo().copied(), Some(3));
+        assert_eq!(u.undo().copied(), Some(1));
+    }
+
+    #[test]
+    fn discard_last_cannot_be_redone() {
+        let mut u = UndoStack::new(10);
+        u.push(1);
+        u.push(2);
+        assert_eq!(u.discard_last(), Some(2));
+        assert_eq!(u.redo().copied(), None);
         assert_eq!(u.undo().copied(), Some(1));
     }
 

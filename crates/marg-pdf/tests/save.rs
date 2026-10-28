@@ -3,9 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use marg_core::annot::{AnnotKind, AnnotSpec};
+use marg_core::annot::{AnnotChange, AnnotKind, AnnotSpec};
 use marg_core::text::BBox;
-use marg_pdf::document::Doc;
+use marg_pdf::document::{Doc, PixelRect};
 use marg_pdf::{SaveError, SaveReport};
 use mupdf::pdf::{PdfAnnotationType, PdfDocument};
 
@@ -35,6 +35,7 @@ fn spec(kind: AnnotKind) -> AnnotSpec {
         ],
         color: [0xA2, 0x8A, 0xE5],
         opacity: 0.4,
+        stroke_pt: 0.0,
         subject: "Question".into(),
         author: "tester".into(),
         contents: Some("why?".into()),
@@ -187,4 +188,117 @@ fn list_delete_restore_round_trip() {
     drop(doc);
     let (doc, _) = Doc::open(&path).unwrap();
     assert_eq!(doc.annotations(0).unwrap(), a);
+}
+
+/// Colored pixels in `b` (page points, rendered at scale 1), not white,
+/// grey or black.
+fn colored_pixels(doc: &Doc, b: BBox) -> usize {
+    let px = doc
+        .render(
+            0,
+            1.0,
+            PixelRect {
+                x: b.x0 as u32,
+                y: b.y0 as u32,
+                width: (b.x1 - b.x0) as u32,
+                height: (b.y1 - b.y0) as u32,
+            },
+        )
+        .unwrap();
+    px.rgba
+        .chunks(4)
+        .filter(|p| p[..3].iter().max().unwrap() - p[..3].iter().min().unwrap() > 25)
+        .count()
+}
+
+#[test]
+fn update_in_place_round_trip() {
+    let (_dir, path) = copy("text.pdf", "update");
+    let (mut doc, _) = Doc::open(&path).unwrap();
+    let xref = doc.create_annotation(&spec(AnnotKind::Highlight)).unwrap();
+    let colored = |doc: &Doc| colored_pixels(doc, BBox::new(72.0, 90.0, 300.0, 104.0));
+    let as_highlight = colored(&doc);
+    doc.update_annotation(
+        0,
+        xref,
+        &AnnotChange {
+            color: Some([0xFF, 0x66, 0x66]),
+            opacity: Some(1.0),
+            subject: Some("Disagree".into()),
+            contents: Some("no".into()),
+            kind: Some(AnnotKind::Underline),
+        },
+    )
+    .unwrap();
+    let listed = doc.annotations(0).unwrap();
+    let a = listed.iter().find(|a| a.xref == xref).unwrap();
+    assert_eq!(a.kind, "Underline");
+    assert_eq!(a.color, Some([0xFF, 0x66, 0x66]));
+    assert_eq!(a.subject.as_deref(), Some("Disagree"));
+    assert_eq!(a.contents.as_deref(), Some("no"));
+    assert_eq!(a.quads.len(), 2, "quads kept");
+    assert_eq!(doc.save(false), Ok(Some(SaveReport { full: false })));
+    let a = annotations(&path);
+    assert_eq!(a.len(), 1, "{a:?}");
+    assert_eq!(
+        (a[0].0, a[0].1.as_str(), a[0].2.as_str(), a[0].4),
+        (PdfAnnotationType::Underline, "Disagree", "tester", 2)
+    );
+    assert!((a[0].3 - 1.0).abs() < 1e-3);
+    // The new appearance is an underline: a thin line, not a filled box.
+    let n = colored(&doc);
+    assert!(n * 4 < as_highlight && n > 0, "{n} vs {as_highlight}");
+    drop(doc);
+    let (doc, _) = Doc::open(&path).unwrap();
+    doc.update_annotation(
+        0,
+        xref,
+        &AnnotChange {
+            subject: Some(String::new()),
+            contents: Some(String::new()),
+            ..AnnotChange::default()
+        },
+    )
+    .unwrap();
+    let listed = doc.annotations(0).unwrap();
+    assert_eq!(
+        (listed[0].subject.as_ref(), listed[0].contents.as_ref()),
+        (None, None)
+    );
+}
+
+#[test]
+fn box_and_note_round_trip() {
+    let (_dir, path) = copy("text.pdf", "box");
+    let (mut doc, _) = Doc::open(&path).unwrap();
+    let mut b = spec(AnnotKind::Box);
+    b.rects = vec![BBox::new(100.0, 200.0, 300.0, 260.0)];
+    b.stroke_pt = 1.5;
+    doc.create_annotation(&b).unwrap();
+    let mut n = spec(AnnotKind::Note);
+    n.rects = vec![BBox::new(10.0, 10.0, 30.0, 30.0)];
+    doc.create_annotation(&n).unwrap();
+    doc.save(false).unwrap();
+
+    let pdf = PdfDocument::open(path.to_str().unwrap()).unwrap();
+    let page = pdf.load_pdf_page(0).unwrap();
+    let annots: Vec<_> = page
+        .annotations()
+        .filter(|a| a.r#type().unwrap() != PdfAnnotationType::Link)
+        .collect();
+    assert_eq!(annots.len(), 2);
+    let sq = &annots[0];
+    assert_eq!(sq.r#type().unwrap(), PdfAnnotationType::Square);
+    assert!((sq.border_width().unwrap() - 1.5).abs() < 1e-3);
+    assert!(sq.interior_color().unwrap().is_none(), "not filled");
+    assert_eq!(sq.contents().unwrap(), Some("why?"));
+    assert_eq!(annots[1].r#type().unwrap(), PdfAnnotationType::Text);
+    let listed = Doc::open(&path).unwrap().0.annotations(0).unwrap();
+    let r = listed[0].rect;
+    // The rectangle may grow by half the line width; it covers the box.
+    assert!(
+        r.x0 <= 100.0 && r.y0 <= 200.0 && r.x1 >= 300.0 && r.y1 >= 260.0,
+        "{r:?}"
+    );
+    assert!(r.x1 <= 302.0 && r.y1 <= 262.0, "{r:?}");
 }

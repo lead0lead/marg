@@ -8,6 +8,10 @@ use crate::text::{BBox, PageText};
 pub enum AnnotKind {
     Highlight,
     Underline,
+    /// A sticky note (PDF `Text`); its one rect is the icon.
+    Note,
+    /// A rectangle (PDF `Square`), stroked, not filled; one rect.
+    Box,
 }
 
 /// Everything needed to create an annotation (or recreate it on redo).
@@ -15,17 +19,33 @@ pub enum AnnotKind {
 pub struct AnnotSpec {
     pub page: usize,
     pub kind: AnnotKind,
-    /// One box per line, in points from the page's top-left corner.
+    /// One box per line, in points from the page's top-left corner (for a
+    /// note: the icon).
     pub rects: Vec<BBox>,
     /// RGB, 0–255.
     pub color: [u8; 3],
     pub opacity: f32,
+    /// Line width of a box, in points.
+    pub stroke_pt: f32,
     /// Category name, written to `/Subj`.
     pub subject: String,
     /// Written to `/T`.
     pub author: String,
     /// The comment (`/Contents`).
     pub contents: Option<String>,
+}
+
+/// A change to an existing annotation; `None` fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnnotChange {
+    pub color: Option<[u8; 3]>,
+    pub opacity: Option<f32>,
+    /// Category name for `/Subj`; empty removes it.
+    pub subject: Option<String>,
+    /// The comment; empty removes it.
+    pub contents: Option<String>,
+    /// Switch between highlight and underline.
+    pub kind: Option<AnnotKind>,
 }
 
 /// An annotation found in the PDF (by marg or another program).
@@ -169,6 +189,33 @@ pub fn annot_at(annots: &[AnnotInfo], page: usize, x: f32, y: f32) -> Option<&An
         .iter()
         .rev()
         .find(|a| a.page == page && a.contains(x, y))
+}
+
+/// The category of an annotation, as an index into `categories` (name and
+/// color each): the one named by its `/Subj` (ignoring case), else the one
+/// with the nearest color. `None`: Uncategorised (no match and no color).
+pub fn category_of(a: &AnnotInfo, categories: &[(&str, Option<[u8; 3]>)]) -> Option<usize> {
+    if let Some(subj) = &a.subject {
+        let subj = subj.trim();
+        if let Some(i) = categories
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(subj))
+        {
+            return Some(i);
+        }
+    }
+    let color = a.color?;
+    let dist = |c: [u8; 3]| {
+        (0..3)
+            .map(|k| (i32::from(c[k]) - i32::from(color[k])).pow(2))
+            .sum::<i32>()
+    };
+    categories
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, c))| c.map(|c| (dist(c), i)))
+        .min()
+        .map(|(_, i)| i)
 }
 
 /// Parse `#RRGGBB` (the `#` is optional).
@@ -334,5 +381,26 @@ mod tests {
         assert_eq!(parse_color("#FFD40"), None);
         assert_eq!(parse_color("#GGGGGG"), None);
         assert_eq!(parse_color("#ÄÄÄ"), None);
+    }
+
+    #[test]
+    fn category_from_subject_then_nearest_color() {
+        let cats = [
+            ("Key point", Some([0xFF, 0xD4, 0x00])),
+            ("Question", Some([0xA2, 0x8A, 0xE5])),
+            ("Broken", None),
+        ];
+        let mut a = info(0, 1, 0.0);
+        assert_eq!(category_of(&a, &cats), None);
+        a.color = Some([0x90, 0x80, 0xF0]);
+        assert_eq!(category_of(&a, &cats), Some(1));
+        a.color = Some([0xFF, 0xFF, 0x00]);
+        assert_eq!(category_of(&a, &cats), Some(0));
+        a.subject = Some(" question".into());
+        assert_eq!(category_of(&a, &cats), Some(1));
+        a.subject = Some("broken".into());
+        assert_eq!(category_of(&a, &cats), Some(2));
+        a.subject = Some("Unknown".into());
+        assert_eq!(category_of(&a, &cats), Some(0));
     }
 }

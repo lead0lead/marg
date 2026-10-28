@@ -56,6 +56,11 @@ impl ListNav {
         self.selected = 0;
     }
 
+    /// Select entry `i` (the last one if `i` is past the end).
+    pub fn select(&mut self, i: usize) {
+        self.selected = i.min(self.len.saturating_sub(1));
+    }
+
     /// Typed text; only used while filtering.
     pub fn text(&mut self, t: &str) -> ListAction {
         if !self.filtering {

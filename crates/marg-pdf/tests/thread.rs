@@ -301,6 +301,7 @@ fn highlight_create_and_delete_render() {
         rects: vec![BBox::new(100.0, 400.0, 200.0, 420.0)],
         color: [0xFF, 0xD4, 0x00],
         opacity: 1.0,
+        stroke_pt: 0.0,
         subject: "Key point".into(),
         author: "test".into(),
         contents: None,

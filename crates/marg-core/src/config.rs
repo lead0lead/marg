@@ -74,6 +74,14 @@ pub struct AnnotationConfig {
     pub author: String,
     pub highlight_opacity: f32,
     pub box_stroke_pt: f32,
+    /// Size of a note's icon.
+    pub note_size_pt: f32,
+    /// Box mode: the label grid over the view.
+    pub box_grid_cols: usize,
+    pub box_grid_rows: usize,
+    /// Box mode: how far `hjkl` / `HJKL` move a corner, and with Ctrl.
+    pub box_step_pt: f32,
+    pub box_fine_step_pt: f32,
     /// Save this long after the last annotation change.
     pub autosave_secs: f32,
     /// Undo steps kept per session.
@@ -86,6 +94,11 @@ impl Default for AnnotationConfig {
             author: String::new(),
             highlight_opacity: 0.4,
             box_stroke_pt: 1.5,
+            note_size_pt: 20.0,
+            box_grid_cols: 9,
+            box_grid_rows: 12,
+            box_step_pt: 4.0,
+            box_fine_step_pt: 1.0,
             autosave_secs: 2.0,
             undo_steps: 100,
         }
@@ -133,6 +146,8 @@ pub struct KeysConfig {
     pub caret: BTreeMap<String, String>,
     /// Visual mode, on top of `caret`.
     pub visual: BTreeMap<String, String>,
+    /// Normal mode while an annotation is selected, on top of `normal`.
+    pub annot: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -216,6 +231,13 @@ pub struct UiConfig {
     pub drag_scroll_rate: f32,
     /// Height of that edge zone, in logical pixels.
     pub drag_scroll_edge_px: f32,
+    /// Width of the comment editor, in logical pixels.
+    pub comment_width_px: f32,
+    /// The comment editor grows up to this share of the window height,
+    /// then scrolls.
+    pub comment_max_height: f32,
+    /// Width of the annotation list, as a share of the window width.
+    pub annot_list_width: f32,
 }
 
 impl Default for UiConfig {
@@ -230,6 +252,9 @@ impl Default for UiConfig {
             file_check_secs: 1.0,
             drag_scroll_rate: 12.0,
             drag_scroll_edge_px: 16.0,
+            comment_width_px: 360.0,
+            comment_max_height: 0.4,
+            annot_list_width: 0.35,
         }
     }
 }

@@ -55,6 +55,24 @@ pub struct Line {
     pub bbox: BBox,
 }
 
+/// Append a line's text to `out`: after a space, or, when `out` ends in a
+/// letter and `-` and `part` starts in lowercase, without the hyphen (a
+/// word broken across lines). Empty parts are skipped.
+pub fn join_part(out: &mut String, part: &str) {
+    if part.is_empty() {
+        return;
+    }
+    let joins = out.ends_with('-')
+        && part.chars().next().is_some_and(|c| c.is_lowercase())
+        && out.chars().rev().nth(1).is_some_and(|c| c.is_alphabetic());
+    if joins {
+        out.pop();
+    } else if !out.is_empty() {
+        out.push(' ');
+    }
+    out.push_str(part);
+}
+
 /// One page's text, flattened: characters in reading order, with line and
 /// block boundaries as ranges.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -134,6 +152,26 @@ impl PageText {
     /// The characters of `range` as a string.
     pub fn string(&self, range: Range<usize>) -> String {
         self.chars[range].iter().map(|c| c.c).collect()
+    }
+
+    /// The text of the characters whose centre lies in one of `boxes`
+    /// (what a highlight covers), with leading and trailing spaces left
+    /// out, its line parts joined as `join_part` does.
+    pub fn covered(&self, boxes: &[BBox]) -> String {
+        let mut out = String::new();
+        for line in &self.lines {
+            let part: String = self.chars[line.chars.clone()]
+                .iter()
+                .filter(|c| {
+                    boxes
+                        .iter()
+                        .any(|b| b.contains(c.bbox.center_x(), c.bbox.center_y()))
+                })
+                .map(|c| c.c)
+                .collect();
+            join_part(&mut out, part.trim());
+        }
+        out
     }
 
     /// The character nearest to point `(x, y)`: on the line closest

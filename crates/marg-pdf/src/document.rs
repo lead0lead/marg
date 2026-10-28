@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
-use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
+use marg_core::annot::{AnnotChange, AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::text::{BBox, Char, PageText};
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::{PdfAnnotationType, PdfDocument, PdfObject, PdfWriteOptions};
@@ -378,6 +378,27 @@ impl Doc {
         Ok(PageText::from_blocks(blocks))
     }
 
+    /// Where images are drawn on page `index`, in points. Separate from
+    /// `text`: keeping images in the text page can take much longer (a
+    /// book cover: 394 ms instead of under 80 ms).
+    pub fn images(&self, index: usize) -> Result<Vec<BBox>, String> {
+        let page = self.doc.load_page(index as i32).map_err(err)?;
+        let b = page.bounds().map_err(err)?;
+        let st = page
+            .to_text_page(TextPageFlags::PRESERVE_IMAGES)
+            .map_err(err)?
+            .structured();
+        Ok(st
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.content, TextBlockContent::Image { .. }))
+            .map(|block| {
+                let r = block.bounds;
+                BBox::new(r.x0 - b.x0, r.y0 - b.y0, r.x1 - b.x0, r.y1 - b.y0)
+            })
+            .collect())
+    }
+
     /// The offset of page `index`'s top-left corner in MuPDF page space.
     fn page_origin(&self, index: usize) -> Result<(f32, f32), String> {
         let b = self
@@ -391,28 +412,35 @@ impl Doc {
     /// Create an annotation. Returns its object number.
     pub fn create_annotation(&self, spec: &AnnotSpec) -> Result<i32, String> {
         let (ox, oy) = self.page_origin(spec.page)?;
-        let quads: Vec<Quad> = spec
+        let shifted: Vec<mupdf::Rect> = spec
             .rects
             .iter()
-            .map(|r| {
-                let (x0, y0, x1, y1) = (r.x0 + ox, r.y0 + oy, r.x1 + ox, r.y1 + oy);
+            .map(|r| mupdf::Rect::new(r.x0 + ox, r.y0 + oy, r.x1 + ox, r.y1 + oy))
+            .collect();
+        let Some(&first) = shifted.first() else {
+            return Err("nothing to annotate".into());
+        };
+        let quads = || {
+            shifted.iter().map(|r| {
                 Quad::new(
-                    Point::new(x0, y0),
-                    Point::new(x1, y0),
-                    Point::new(x0, y1),
-                    Point::new(x1, y1),
+                    Point::new(r.x0, r.y0),
+                    Point::new(r.x1, r.y0),
+                    Point::new(r.x0, r.y1),
+                    Point::new(r.x1, r.y1),
                 )
             })
-            .collect();
-        if quads.is_empty() {
-            return Err("nothing to annotate".into());
-        }
+        };
         let mut page = self.doc.load_pdf_page(spec.page as i32).map_err(err)?;
         let mut annot = match spec.kind {
-            AnnotKind::Highlight => page.add_highlight_annotation(quads),
-            AnnotKind::Underline => page.add_underline_annotation(quads),
+            AnnotKind::Highlight => page.add_highlight_annotation(quads().collect::<Vec<_>>()),
+            AnnotKind::Underline => page.add_underline_annotation(quads().collect::<Vec<_>>()),
+            AnnotKind::Note => page.add_text_annotation(first, ""),
+            AnnotKind::Box => page.add_square_annotation(first),
         }
         .map_err(err)?;
+        if spec.kind == AnnotKind::Box {
+            annot.set_border_width(spec.stroke_pt).map_err(err)?;
+        }
         let [r, g, b] = spec.color.map(|c| c as f32 / 255.0);
         annot
             .set_color(AnnotationColor::Rgb {
@@ -553,6 +581,62 @@ impl Doc {
         if let Some(p) = popup {
             arr.array_push(p).map_err(err)?;
         }
+        Ok(())
+    }
+
+    /// Change the annotation with object number `xref` on page `index` in
+    /// place, so everything else it has (dates, `/NM`, popup) stays.
+    pub fn update_annotation(
+        &self,
+        index: usize,
+        xref: i32,
+        change: &AnnotChange,
+    ) -> Result<(), String> {
+        let mut page = self.doc.load_pdf_page(index as i32).map_err(err)?;
+        let mut annot = page
+            .annotations()
+            .find(|a| a.xref().ok() == Some(xref))
+            .ok_or("annotation not found")?;
+        if let Some(kind) = change.kind {
+            let name = match kind {
+                AnnotKind::Highlight => "Highlight",
+                AnnotKind::Underline => "Underline",
+                AnnotKind::Note => "Text",
+                AnnotKind::Box => "Square",
+            };
+            let mut obj = annot.object();
+            obj.dict_put("Subtype", PdfObject::new_name(name).map_err(err)?)
+                .map_err(err)?;
+            // The old appearance is for the old type; the setters below
+            // mark the annotation for a new one.
+            obj.dict_delete("AP").map_err(err)?;
+        }
+        if let Some([r, g, b]) = change.color.map(|c| c.map(|c| c as f32 / 255.0)) {
+            annot
+                .set_color(AnnotationColor::Rgb {
+                    red: r,
+                    green: g,
+                    blue: b,
+                })
+                .map_err(err)?;
+        }
+        if let Some(o) = change.opacity {
+            annot.set_opacity(o).map_err(err)?;
+        }
+        if let Some(c) = &change.contents {
+            annot.set_contents(c).map_err(err)?;
+        }
+        if let Some(subj) = &change.subject {
+            let mut obj = annot.object();
+            if subj.is_empty() {
+                obj.dict_delete("Subj").map_err(err)?;
+            } else {
+                obj.dict_put("Subj", PdfObject::new_string(subj).map_err(err)?)
+                    .map_err(err)?;
+            }
+        }
+        annot.update().map_err(err)?;
+        page.update().map_err(err)?;
         Ok(())
     }
 

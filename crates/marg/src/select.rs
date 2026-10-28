@@ -37,6 +37,17 @@ pub enum Purpose {
     SelectStart,
     /// Second word; the first was (start, end).
     SelectEnd(TextPos, TextPos),
+    /// Select an annotation: (page, object number) per target box.
+    Annot(Vec<(usize, i32)>),
+}
+
+/// What a hint picked.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Picked {
+    /// (page, character range).
+    Word(usize, Range<usize>),
+    /// Index into the boxes the hints were started with.
+    Box(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +56,8 @@ enum Targets {
     Lines(Vec<(usize, usize)>),
     /// (page, character range).
     Words(Vec<(usize, Range<usize>)>),
+    /// (page, box in points); labels sit on the top-left corner.
+    Boxes(Vec<(usize, BBox)>),
 }
 
 /// An active hint session.
@@ -64,7 +77,7 @@ pub fn screen_rect(view: &View, area: Rect, page: usize, b: BBox) -> Rect {
     )
 }
 
-fn on_screen(view: &View, area: Rect, page: usize, b: BBox) -> bool {
+pub fn on_screen(view: &View, area: Rect, page: usize, b: BBox) -> bool {
     area.intersects(screen_rect(view, area, page, b))
 }
 
@@ -127,6 +140,7 @@ impl Hinting {
         let n = match &targets {
             Targets::Lines(v) => v.len(),
             Targets::Words(v) => v.len(),
+            Targets::Boxes(v) => v.len(),
         };
         if n == 0 {
             let loading = view.visible_pages().any(|p| texts.text(p).is_none());
@@ -143,26 +157,35 @@ impl Hinting {
         })
     }
 
+    /// Start hints on boxes (e.g. annotations), one label each.
+    pub fn boxes(purpose: Purpose, boxes: Vec<(usize, BBox)>, cfg: &HintsConfig) -> Self {
+        Self {
+            purpose,
+            input: HintInput::new(labels(boxes.len(), &alphabet(&cfg.chars))),
+            targets: Targets::Boxes(boxes),
+        }
+    }
+
     pub fn typed(&self) -> &str {
         self.input.typed()
     }
 
-    /// Type a hint character. Returns the picked word (page, characters)
-    /// once one is picked.
+    /// Type a hint character. Returns what was picked, once it is.
     pub fn push(
         &mut self,
         c: char,
         texts: &[Option<PageText>],
         cfg: &HintsConfig,
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<Picked> {
         let i = self.input.push(c)?;
         match &self.targets {
-            Targets::Words(w) => Some(w[i].clone()),
+            Targets::Words(w) => Some(Picked::Word(w[i].0, w[i].1.clone())),
+            Targets::Boxes(_) => Some(Picked::Box(i)),
             Targets::Lines(lines) => {
                 let (page, l) = lines[i];
                 let words = texts.text(page)?.words(l);
                 if words.len() == 1 {
-                    return Some((page, words[0].clone()));
+                    return Some(Picked::Word(page, words[0].clone()));
                 }
                 let chars = alphabet(&format!("{}{}", cfg.chars, cfg.extra_chars));
                 self.input = HintInput::new(labels(words.len(), &chars));
@@ -201,7 +224,9 @@ impl Hinting {
                     let Some(t) = texts.text(*page) else { continue };
                     (*page, word_bbox(t, r), false)
                 }
+                Targets::Boxes(v) => (v[i].0, v[i].1, false),
             };
+            let corner = matches!(self.targets, Targets::Boxes(_));
             let target = screen_rect(view, area, page, bbox);
             let typed = self.input.typed().len();
             let mut job = LayoutJob::default();
@@ -210,7 +235,10 @@ impl Hinting {
             job.append(&label[typed..], 0.0, fmt(HINT_FG));
             let galley = painter.layout_job(job);
             let size = galley.size() + egui::vec2(6.0, 2.0);
-            let min = if left_of {
+            let min = if corner {
+                // On the top-left corner, over the box's edge.
+                Pos2::new(target.min.x - 2.0, target.min.y - size.y / 2.0)
+            } else if left_of {
                 // In the margin left of the line, so labels never cover text.
                 Pos2::new(
                     target.min.x - size.x - 3.0,
@@ -322,6 +350,21 @@ pub fn draw_provisional(painter: &egui::Painter, view: &View, area: Rect, spec: 
                 let t = (rect.height() * 0.07).max(1.0);
                 let line = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - t), rect.max);
                 painter.rect_filled(line, 0.0, Color32::from_rgb(r, g, b));
+            }
+            AnnotKind::Box => {
+                let w = (spec.stroke_pt * view.zoom()).max(1.0);
+                let stroke = egui::Stroke::new(w, Color32::from_rgb(r, g, b));
+                painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+            }
+            AnnotKind::Note => {
+                let edge = egui::Stroke::new(1.0, Color32::from_black_alpha(160));
+                painter.rect(
+                    rect,
+                    2.0,
+                    Color32::from_rgb(r, g, b),
+                    edge,
+                    egui::StrokeKind::Inside,
+                );
             }
         }
     }

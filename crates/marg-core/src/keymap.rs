@@ -47,6 +47,10 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("]a", "annot.next"),
     ("[a", "annot.prev"),
     ("x", "annot.delete"),
+    ("ga", "hint.annot"),
+    ("i", "annotate.note"),
+    ("b", "annotate.box"),
+    ("A", "annot.list"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.
@@ -86,6 +90,19 @@ pub const DEFAULT_VISUAL: &[(&str, &str)] = &[
     ("d", "annotate.erase"),
     ("D", "annotate.erase_whole"),
     ("y", "selection.copy"),
+    ("c", "annotate.comment"),
+];
+
+/// Default bindings while an annotation is selected, on top of the Normal
+/// ones.
+pub const DEFAULT_ANNOT: &[(&str, &str)] = &[
+    ("1", "annot.recolor(1)"),
+    ("2", "annot.recolor(2)"),
+    ("3", "annot.recolor(3)"),
+    ("4", "annot.recolor(4)"),
+    ("5", "annot.recolor(5)"),
+    ("U", "annot.toggle_type"),
+    ("e", "annot.edit"),
 ];
 
 /// A table of default bindings: (key sequence, command name).
@@ -97,6 +114,8 @@ pub enum KeyMode {
     Normal,
     Caret,
     Visual,
+    /// Normal mode with an annotation selected.
+    Annot,
 }
 
 #[derive(Debug, Clone)]
@@ -122,25 +141,25 @@ impl Keymap {
     }
 
     /// The keymap of a mode: Normal defaults and `[keys.normal]`, then for
-    /// Caret and Visual the Caret layer, then for Visual the Visual layer.
+    /// Caret and Visual the Caret layer, then for Visual the Visual layer;
+    /// for Annot the Annot layer on top of Normal.
     /// A later layer replaces bindings it overlaps. Warnings are reported
     /// for the mode's own layer only (the others are reported by their
     /// own keymaps).
     pub fn build(mode: KeyMode, keys: &KeysConfig) -> (Self, Vec<String>) {
-        let layers: [(Defaults, &BTreeMap<String, String>); 3] = [
-            (DEFAULT_NORMAL, &keys.normal),
-            (DEFAULT_CARET, &keys.caret),
-            (DEFAULT_VISUAL, &keys.visual),
-        ];
-        let depth = match mode {
-            KeyMode::Normal => 1,
-            KeyMode::Caret => 2,
-            KeyMode::Visual => 3,
+        let normal: (Defaults, &BTreeMap<String, String>) = (DEFAULT_NORMAL, &keys.normal);
+        let caret = (DEFAULT_CARET, &keys.caret);
+        let layers = match mode {
+            KeyMode::Normal => vec![normal],
+            KeyMode::Caret => vec![normal, caret],
+            KeyMode::Visual => vec![normal, caret, (DEFAULT_VISUAL, &keys.visual)],
+            KeyMode::Annot => vec![normal, (DEFAULT_ANNOT, &keys.annot)],
         };
+        let depth = layers.len();
         let mut map = Self::default();
         let mut warnings = Vec::new();
         let mut ignored = Vec::new();
-        for (i, (defaults, user)) in layers[..depth].iter().enumerate() {
+        for (i, (defaults, user)) in layers.iter().enumerate() {
             let w = if i + 1 == depth {
                 &mut warnings
             } else {
@@ -439,8 +458,10 @@ mod tests {
     fn prefix_conflicts_are_reported_and_later_wins() {
         let user = BTreeMap::from([("g".to_string(), "zoom.in".to_string())]);
         let (map, warnings) = Keymap::normal(&user);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        // One warning per default binding that starts with g.
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings[0].contains("\"gg\""));
+        assert!(warnings[1].contains("\"ga\""));
         let mut m = Matcher::default();
         assert_eq!(feed_str(&mut m, &map, "g"), [run(Command::ZoomIn, None)]);
     }
@@ -565,5 +586,35 @@ mod tests {
         let (map, _) = Keymap::normal(&user);
         let mut m = Matcher::default();
         assert_eq!(feed_str(&mut m, &map, "1"), [run(Command::ZoomIn, None)]);
+    }
+
+    #[test]
+    fn annot_layer_sits_on_normal_only() {
+        let (map, w) = Keymap::build(KeyMode::Annot, &KeysConfig::default());
+        assert!(w.is_empty(), "{w:?}");
+        let mut m = Matcher::default();
+        assert_eq!(
+            feed_str(&mut m, &map, "3"),
+            [run(Command::AnnotRecolor(3), None)]
+        );
+        assert_eq!(
+            feed_str(&mut m, &map, "U"),
+            [run(Command::AnnotToggleType, None)]
+        );
+        assert_eq!(
+            feed_str(&mut m, &map, "x"),
+            [run(Command::AnnotDelete, None)]
+        );
+        // Caret and Visual bindings are not in it.
+        assert_eq!(
+            feed_str(&mut m, &map, "j"),
+            [run(Command::ScrollDown, None)]
+        );
+        // Without an annotation selected, digits are counts.
+        let (normal, _) = Keymap::build(KeyMode::Normal, &KeysConfig::default());
+        assert_eq!(
+            feed_str(&mut m, &normal, "3j"),
+            [Outcome::Pending, run(Command::ScrollDown, Some(3))]
+        );
     }
 }

@@ -36,6 +36,8 @@ pub enum Command {
     HintCaret,
     /// Hints on two words; selects from the first to the second.
     HintSelect,
+    /// Hints on the visible annotations; selects the picked one.
+    HintAnnot,
     /// Move the caret (Caret and Visual mode).
     Motion(Motion),
     /// Start a character-wise selection, or switch to it; in a
@@ -74,6 +76,22 @@ pub enum Command {
     Erase,
     /// Delete every highlight and underline the selection touches, whole.
     EraseWhole,
+    /// Give the selected annotation category 1–5.
+    AnnotRecolor(u8),
+    /// Switch the selected annotation between highlight and underline.
+    AnnotToggleType,
+    /// Edit the comment of the selected annotation.
+    AnnotEdit,
+    /// Highlight the selection in the last-used category and open the
+    /// comment editor on it.
+    Comment,
+    /// A sticky note at the caret (or the top left of the page), with the
+    /// comment editor open.
+    Note,
+    /// Box mode: draw a box with grid hints or the mouse.
+    BoxMode,
+    /// Open the annotation list.
+    AnnotList,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -100,6 +118,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("debug.toggle", Command::DebugToggle, "debug overlay"),
     ("hint.caret", Command::HintCaret, "hint: place caret"),
     ("hint.select", Command::HintSelect, "hint: select range"),
+    ("hint.annot", Command::HintAnnot, "hint: select annotation"),
     (
         "caret.char_next",
         Command::Motion(Motion::CharNext),
@@ -235,6 +254,41 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "annotate.erase_whole",
         Command::EraseWhole,
         "delete highlights the selection touches",
+    ),
+    (
+        "annot.recolor(1)",
+        Command::AnnotRecolor(1),
+        "recolor: category 1",
+    ),
+    (
+        "annot.recolor(2)",
+        Command::AnnotRecolor(2),
+        "recolor: category 2",
+    ),
+    (
+        "annot.recolor(3)",
+        Command::AnnotRecolor(3),
+        "recolor: category 3",
+    ),
+    (
+        "annot.recolor(4)",
+        Command::AnnotRecolor(4),
+        "recolor: category 4",
+    ),
+    (
+        "annot.recolor(5)",
+        Command::AnnotRecolor(5),
+        "recolor: category 5",
+    ),
+    ("annot.edit", Command::AnnotEdit, "edit comment"),
+    ("annotate.comment", Command::Comment, "highlight + comment"),
+    ("annotate.note", Command::Note, "new note"),
+    ("annotate.box", Command::BoxMode, "box mode"),
+    ("annot.list", Command::AnnotList, "annotation list"),
+    (
+        "annot.toggle_type",
+        Command::AnnotToggleType,
+        "switch highlight / underline",
     ),
 ];
 

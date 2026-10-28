@@ -172,6 +172,13 @@ impl View {
         }
     }
 
+    /// A viewport position in points on page `page` (outside the page if
+    /// the position is).
+    pub fn point_on_page(&self, page: usize, sx: f32, sy: f32) -> (f32, f32) {
+        let r = self.page_rect_on_screen(page);
+        ((sx - r.x) / self.zoom, (sy - r.y) / self.zoom)
+    }
+
     /// Index of the page whose vertical span contains `y` (layout space),
     /// or the nearest one.
     fn page_at_y(&self, y: f32) -> usize {

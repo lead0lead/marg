@@ -7,8 +7,8 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use marg_core::annot::{AnnotInfo, AnnotSpec};
-use marg_core::text::PageText;
+use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
+use marg_core::text::{BBox, PageText};
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
 
@@ -61,6 +61,12 @@ pub enum Edit {
         page: usize,
         xref: i32,
     },
+    /// Change an annotation in place.
+    Update {
+        page: usize,
+        xref: i32,
+        change: AnnotChange,
+    },
 }
 
 pub enum Request {
@@ -91,6 +97,8 @@ pub enum Request {
     /// List the annotations of pages. Urgent requests are served with
     /// text (before renders); the others when nothing else is queued.
     Annots { pages: Vec<usize>, urgent: bool },
+    /// Where images are drawn on a page (for box snapping). Served at once.
+    Images(usize),
 }
 
 pub enum Response {
@@ -133,6 +141,11 @@ pub enum Response {
         generation: u64,
         page: usize,
         result: Result<Vec<AnnotInfo>, String>,
+    },
+    Images {
+        generation: u64,
+        page: usize,
+        result: Result<Vec<BBox>, String>,
     },
 }
 
@@ -303,10 +316,27 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         text_queue.push_back(page);
                     }
                 }
+                Request::Images(page) => {
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => d.images(page),
+                    };
+                    let resp = Response::Images {
+                        generation,
+                        page,
+                        result,
+                    };
+                    if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
+                }
                 Request::Edit { tag, edit } => {
                     let page = match &edit {
                         Edit::Create(spec) => spec.page,
-                        Edit::Delete { page, .. } | Edit::Restore { page, .. } => *page,
+                        Edit::Delete { page, .. }
+                        | Edit::Restore { page, .. }
+                        | Edit::Update { page, .. } => *page,
                     };
                     let result = match &mut doc {
                         None => Err("no document open".into()),
@@ -318,6 +348,9 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                                 }
                                 Edit::Restore { page, xref } => {
                                     d.restore_annotation(page, xref).map(|()| xref)
+                                }
+                                Edit::Update { page, xref, change } => {
+                                    d.update_annotation(page, xref, &change).map(|()| xref)
                                 }
                             })
                         }
