@@ -89,6 +89,7 @@ enum AfterSave {
     Report,
     Quit,
     Open(PathBuf),
+    Close,
 }
 
 /// An annotation drawn by the UI while the document thread creates it and
@@ -477,12 +478,14 @@ impl MargApp {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close)
                                 }
                                 AfterSave::Open(path) => self.doc.send(Request::Open(path)),
+                                AfterSave::Close => self.close_doc(ctx),
                             }
                         }
                         Err(e) => {
                             let what = match after {
                                 AfterSave::Quit => "Not quitting: ",
                                 AfterSave::Open(_) => "Not opening the other file: ",
+                                AfterSave::Close => "Not closing: ",
                                 _ => "",
                             };
                             let msg = match e {
@@ -1126,6 +1129,14 @@ impl MargApp {
                 self.reload();
                 return;
             }
+            Command::Close => {
+                if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+                    self.save(false, AfterSave::Close);
+                } else {
+                    self.close_doc(ctx);
+                }
+                return;
+            }
             Command::Undo | Command::Redo => {
                 self.undo(command == Command::Redo);
                 return;
@@ -1224,6 +1235,7 @@ impl MargApp {
             | Command::Save
             | Command::SaveForce
             | Command::Reload
+            | Command::Close
             | Command::Undo
             | Command::Redo => {}
         }
@@ -1241,6 +1253,29 @@ impl MargApp {
         } else {
             self.doc.send(Request::Open(path));
         }
+    }
+
+    /// Close the file (saved or not: callers save first) and show the
+    /// recent files list.
+    fn close_doc(&mut self, ctx: &egui::Context) {
+        if self.open.is_none() {
+            return;
+        }
+        self.save_state();
+        self.doc.send(Request::Close);
+        self.open = None;
+        self.cache.clear();
+        self.last_request.clear();
+        self.caret = None;
+        self.selection = None;
+        self.hinting = None;
+        self.matcher.reset();
+        self.recent = Some(RecentList::new(
+            &self.state,
+            self.config.ui.recent_files_max,
+        ));
+        self.mode = Mode::Recent;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("marg".into()));
     }
 
     /// Open the current file again from disk, keeping the position and

@@ -133,6 +133,11 @@ defaults of `config.toml` (see §8), not scattered in code.
   most recent first, max 50 *(start)*), fuzzy-filterable; Enter opens.
 - `:e <path>` opens another file in the same window, with path completion on
   Tab. The previous file is saved first if it has pending changes.
+- `:close` (alias `:bd`, key `Ctrl-w`) saves pending changes, closes the
+  file and shows the recent files list (added 2026-10-28 at the user's
+  request; nvim has no built-in start page, its dashboards are plugins,
+  and closing the last buffer with `:bd` often brings one back). Like `q`,
+  it does not close if saving fails.
 - Password-protected PDFs: prompt for the password in the command line. PDFs
   whose permissions forbid annotation open read-only, with a status message.
 - Files that fail to open: show the MuPDF error in the status bar and in the
@@ -536,6 +541,7 @@ remappable (§8).
 | | `u` / `Ctrl-r` | undo / redo |
 | | `?` | help |
 | | `q` | save and quit |
+| | `Ctrl-w` | save and close the file, show recent files |
 | Caret | `w b e ge 0 $ j k ( ) { }` | motions |
 | | `v` / `V` | start visual / line-visual |
 | Visual (selection) | motions | extend selection |
@@ -545,7 +551,7 @@ remappable (§8).
 | | `c` | highlight + comment |
 | | `y` | copy text |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
-| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
+| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -593,7 +599,7 @@ word_end_prev|line_start|line_end|line_down|line_up|sentence_prev|
 sentence_next|block_prev|block_next`, `visual.char`, `visual.line`,
 `visual.swap`, `annotate.highlight(1)`…`(5)`, `annotate.underline`,
 `selection.copy`, `undo`, `redo`, `file.save` (`:w`), `file.save_force`
-(`:w!`), `file.reload` (`:e!`). Esc (leave Caret/Visual) is fixed, not a
+(`:w!`), `file.reload` (`:e!`), `file.close` (`:close`, `:bd`, `Ctrl-w`). Esc (leave Caret/Visual) is fixed, not a
 binding. Since `1`–`5` are bound in Visual mode, counts there can only use
 other digits. The status bar shows `HINT`, `CARET`, `VISUAL` and ● for
 unsaved changes; `:` returns to the mode it came from.
@@ -1171,6 +1177,10 @@ Format:
   (also checked in Poppler), autosave, backup, `q` saves first, external
   change reload/conflict, undo/redo. Hints checked on one real paper
   (opened read-only; file unchanged). Feel and speed not judged by Claude.
+- Later the same day, at the user's request: `:close` / `:bd` / `Ctrl-w`
+  saves, closes the file and shows the recent list (user asked which name;
+  Claude suggested `:close` + `:bd` alias + `Ctrl-w`, user left it to
+  Claude). The document thread got `Request::Close`.
 - Next: user uses it on real papers for about a week (decision milestone).
 - Watch out: UI test runs must set **both** `XDG_STATE_HOME` and
   `XDG_DATA_HOME` to scratch dirs (backups go to the data dir), and must

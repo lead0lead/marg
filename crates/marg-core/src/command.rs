@@ -59,6 +59,8 @@ pub enum Command {
     SaveForce,
     /// Reload from disk, discarding unsaved changes (`:e!`).
     Reload,
+    /// Save, close the file and show the recent files list.
+    Close,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -194,6 +196,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         Command::Reload,
         "reload from disk, discarding changes",
     ),
+    (
+        "file.close",
+        Command::Close,
+        "close the file, show recent files",
+    ),
 ];
 
 impl Command {
@@ -246,6 +253,7 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
         "w" | "write" => no_arg(Command::Save),
         "w!" | "write!" => no_arg(Command::SaveForce),
         "e!" | "edit!" => no_arg(Command::Reload),
+        "close" | "bd" => no_arg(Command::Close),
         "q!" | "quit!" => no_arg(Command::QuitForce),
         "e" | "edit" => {
             if rest.is_empty() {
@@ -291,6 +299,8 @@ mod tests {
         assert_eq!(parse_ex("w"), Ok(Command::Save));
         assert_eq!(parse_ex("w!"), Ok(Command::SaveForce));
         assert_eq!(parse_ex("e!"), Ok(Command::Reload));
+        assert_eq!(parse_ex("close"), Ok(Command::Close));
+        assert_eq!(parse_ex("bd"), Ok(Command::Close));
         assert_eq!(parse_ex("annotate.highlight(3)"), Ok(Command::Highlight(3)));
         assert_eq!(parse_ex("zoom.in"), Ok(Command::ZoomIn));
         assert!(parse_ex("0").is_err());

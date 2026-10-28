@@ -43,6 +43,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("F", "hint.select"),
     ("u", "undo"),
     ("Ctrl-r", "redo"),
+    ("Ctrl-w", "file.close"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.

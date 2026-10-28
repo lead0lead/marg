@@ -80,6 +80,9 @@ pub enum Request {
     /// Check whether another program changed the file; answered with
     /// `DiskChanged` only if it did (once per change).
     CheckDisk,
+    /// Close the document without saving. Starts a new generation, so
+    /// responses still in transit can be told apart.
+    Close,
 }
 
 pub enum Response {
@@ -327,6 +330,13 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     wake();
                 }
                 Request::BackupDir(dir) => backup_dir = Some(dir),
+                Request::Close => {
+                    doc = None;
+                    queue.clear();
+                    text_queue.clear();
+                    revs.clear();
+                    generation += 1;
+                }
                 Request::CheckDisk => {
                     if let Some((d, _)) = &mut doc
                         && d.poll_disk()
