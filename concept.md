@@ -284,7 +284,7 @@ loading". `gl` and `ga` come in Phases 4 and 3.
 
 ### 2.7 Caret and visual selection
 
-- **Caret mode** shows a 2 px caret bar at a character position. Motions
+- **Caret mode** shows a block cursor on a character (§6). Motions
   follow MuPDF's reading order of the structured text:
   - `w` / `b` / `e` / `ge`: word motions, as in vim.
   - `0` / `$`: start or end of line.
@@ -497,6 +497,20 @@ Comment on the box.
 `?` shows the bindings active in the current mode, generated from the live
 keymap (so remaps show up). Esc closes.
 
+Added 2026-10-28 at the user's request (Phases 4 and 5):
+
+- **Help page** (Phase 4): `:help` opens a full-window, scrollable page
+  with every mode's bindings grouped by topic (moving, selecting,
+  annotating, files), the `:` commands, and a short explanation of hints
+  and categories. Typing filters it, like the other lists. Generated from
+  the live keymap and the command registry's help texts, so it is never out
+  of date and shows remaps.
+- **Cheat sheet** (Phase 5): a compact one-page summary of the default
+  keys, in the README (which does not exist yet; it comes with the release)
+  and in `docs/cheatsheet.md`. Generated from the default keymap by a small
+  tool or test, and a test fails when the committed cheat sheet no longer
+  matches the defaults.
+
 ---
 
 ## 3. Controls & Interaction
@@ -682,7 +696,11 @@ Reference: Zathura's minimalism. No toolbar, no menu bar, no icons.
 - Hint labels: small rounded badges, black text on yellow `#FFD84D`, bold
   monospace; already-typed characters dimmed. Labels never cover each other
   in two-stage mode (line labels sit in the left margin of the line).
-- Selection: translucent blue (`#3D7EFF` at 35%). Caret: 2 px red bar.
+- Selection: translucent blue (`#3D7EFF` at 35%). Caret: a red block
+  around its character (1.5 px outline, light red fill), like vim's
+  Normal/Visual cursor. Changed 2026-10-28 after the user's feedback: the
+  first build drew a 2 px bar at the character's left edge, which looked
+  like an insert cursor sitting one character behind the selection end.
   Selected annotation: dashed 1 px outline in the annotation's color.
 - Overlays (outline, list, help, comment popup): dark panels matching the
   status bar, monospace text, the current row highlighted.
@@ -1019,8 +1037,8 @@ Each phase ends with something the user can try, and a short check by them.
 | **1. Viewer** | Continuous layout, rendering thread, cache and pre-render, scrolling, page navigation, counts, zoom and fit modes, command registry, TOML keymap with remapping, status bar, command line (`:q`, `:e`), state file (reopen at last position), recent files, debug overlay, startup timing. | The user reads a paper and a book with it and checks the speed targets in the debug overlay. |
 | **2. Select & highlight** — **decision milestone** | Structured text model, two-stage hints (`f`, `F`), Caret and Visual modes with all motions, mouse selection, `y` copy, highlights `1`–`5` and underline `U`, provisional overlays, incremental save, autosave, backups, external-change detection, undo/redo. | **The user reads real papers for about a week and decides whether keyboard selection is fast enough and whether to continue.** |
 | **3. Notes & boxes** | Comment popup (`c`, `e`), notes (`i`), box mode with grid hints, adjust and snap, annotation selection (`]a`, `[a`, `ga`, click), edit/delete/recolor/toggle, tooltips, annotation list panel, reading categories from foreign annotations. | The user annotates a full paper (highlights, comments, boxes) and checks them in another viewer and via Zotero's "Import annotations". |
-| **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay. | The user reads a slide deck and a book chapter with it. |
-| **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
+| **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay, `:help` page. | The user reads a slide deck and a book chapter with it. |
+| **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, README with the cheat sheet (§2.12), tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before

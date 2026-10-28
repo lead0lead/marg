@@ -18,6 +18,7 @@ const HINT_EDGE: Color32 = Color32::from_rgb(0x80, 0x68, 0x10);
 /// `#3D7EFF` at 35%.
 const SELECTION: Color32 = Color32::from_rgba_unmultiplied_const(0x3D, 0x7E, 0xFF, 89);
 const CARET: Color32 = Color32::from_rgb(0xE0, 0x20, 0x20);
+const CARET_FILL: Color32 = Color32::from_rgba_unmultiplied_const(0xE0, 0x20, 0x20, 40);
 
 /// The caret: a character position, and the horizontal position that
 /// vertical motions keep.
@@ -247,7 +248,8 @@ pub fn draw_selection(
     }
 }
 
-/// Draw the caret: a 2 px bar at the left edge of its character.
+/// Draw the caret: a block around its character, like vim's Normal-mode
+/// cursor (the caret is on the character, not between two).
 pub fn draw_caret(
     painter: &egui::Painter,
     view: &View,
@@ -259,13 +261,14 @@ pub fn draw_caret(
         return;
     };
     let r = screen_rect(view, area, caret.pos.page, t.chars[caret.pos.idx].bbox);
-    painter.rect_filled(
-        Rect::from_min_max(
-            Pos2::new(r.min.x - 1.0, r.min.y),
-            Pos2::new(r.min.x + 1.0, r.max.y),
-        ),
-        0.0,
-        CARET,
+    // At least a few pixels wide, so narrow characters (i, l, .) show.
+    let r = r.expand2(egui::vec2(((4.0 - r.width()) / 2.0).max(0.0), 0.0));
+    painter.rect(
+        r,
+        1.0,
+        CARET_FILL,
+        egui::Stroke::new(1.5, CARET),
+        egui::StrokeKind::Outside,
     );
 }
 
