@@ -218,6 +218,11 @@ pub struct UiConfig {
     pub drag_scroll_rate: f32,
     /// Height of that edge zone, in logical pixels.
     pub drag_scroll_edge_px: f32,
+    /// Width of the comment editor, in logical pixels.
+    pub comment_width_px: f32,
+    /// The comment editor grows up to this share of the window height,
+    /// then scrolls.
+    pub comment_max_height: f32,
 }
 
 impl Default for UiConfig {
@@ -232,6 +237,8 @@ impl Default for UiConfig {
             file_check_secs: 1.0,
             drag_scroll_rate: 12.0,
             drag_scroll_edge_px: 16.0,
+            comment_width_px: 360.0,
+            comment_max_height: 0.4,
         }
     }
 }

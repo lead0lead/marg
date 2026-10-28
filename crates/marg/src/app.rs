@@ -23,6 +23,7 @@ use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
+use crate::comment::{self, CommentEditor};
 use crate::complete;
 use crate::input;
 use crate::pages::PageCache;
@@ -164,6 +165,8 @@ enum Mode {
     Visual,
     /// Visual mode, asking which category to highlight with.
     Category,
+    /// The comment editor is open.
+    Insert,
 }
 
 impl Mode {
@@ -174,6 +177,7 @@ impl Mode {
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
             Mode::Visual | Mode::Category => "VISUAL",
+            Mode::Insert => "INSERT",
         }
     }
 }
@@ -196,6 +200,8 @@ pub struct MargApp {
     caret: Option<Caret>,
     selection: Option<Selection>,
     hinting: Option<Hinting>,
+    /// The comment editor (Insert mode).
+    editor: Option<CommentEditor>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
     /// Where a mouse drag started, while the primary button is down.
@@ -321,6 +327,7 @@ impl MargApp {
             caret: None,
             selection: None,
             hinting: None,
+            editor: None,
             selection_before_hints: None,
             drag_anchor: None,
             last_click: None,
@@ -659,6 +666,9 @@ impl MargApp {
         let events = ctx.input(|i| i.events.clone());
         let pointer = ctx.input(|i| i.pointer.hover_pos()).map(|p| p - area.min);
         let mut skip_text = false;
+        if self.mode == Mode::Insert {
+            self.editor_keys(ctx);
+        }
         for e in &events {
             match e {
                 Event::MouseWheel {
@@ -683,6 +693,8 @@ impl MargApp {
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
                 _ if self.mode == Mode::Category => self.category_event(e),
+                // The comment editor's text field takes the keys.
+                _ if self.mode == Mode::Insert => {}
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -1391,6 +1403,11 @@ impl MargApp {
             );
             return;
         };
+        self.change_listed(&a, change, msg);
+    }
+
+    /// Change a listed annotation in place (one undo step).
+    fn change_listed(&mut self, a: &AnnotInfo, change: AnnotChange, msg: String) {
         let before = AnnotChange {
             color: change.color.and(a.color),
             opacity: change.opacity.map(|_| a.opacity),
@@ -1470,6 +1487,64 @@ impl MargApp {
             ..AnnotChange::default()
         };
         self.change_annotation(change, msg.into());
+    }
+
+    /// `e`: edit the comment of the selected annotation.
+    fn edit_comment(&mut self) {
+        let Some(a) = self.selected_info() else {
+            self.show(
+                Level::Info,
+                "No annotation selected (]a, [a or click)".into(),
+            );
+            return;
+        };
+        let target = comment::Target::Annot {
+            page: a.page,
+            xref: a.xref,
+        };
+        let text = a.contents.clone().unwrap_or_default();
+        self.editor = Some(CommentEditor::new(target, a.rect, text));
+        self.mode = Mode::Insert;
+    }
+
+    /// `Ctrl-Enter` and Esc in the comment editor.
+    fn editor_keys(&mut self, ctx: &egui::Context) {
+        let Some(ed) = &mut self.editor else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let text = match ed.keys(ctx) {
+            comment::Outcome::Editing => return,
+            comment::Outcome::Cancel => {
+                self.editor = None;
+                self.mode = Mode::Normal;
+                return;
+            }
+            comment::Outcome::Save(text) => text,
+        };
+        let Some(ed) = self.editor.take() else { return };
+        self.mode = Mode::Normal;
+        if !ed.changed() {
+            return;
+        }
+        match ed.target {
+            comment::Target::Annot { page, xref } => {
+                let Some(a) = self.open.as_ref().and_then(|o| {
+                    o.annots[page]
+                        .as_ref()
+                        .and_then(|l| l.iter().find(|a| a.xref == xref))
+                        .cloned()
+                }) else {
+                    self.error("The annotation is gone; comment not saved".into());
+                    return;
+                };
+                let change = AnnotChange {
+                    contents: Some(text),
+                    ..AnnotChange::default()
+                };
+                self.change_listed(&a, change, "Comment saved".into());
+            }
+        }
     }
 
     /// The annotation under a screen position, if any.
@@ -1623,6 +1698,10 @@ impl MargApp {
                 self.toggle_annotation_type();
                 return;
             }
+            Command::AnnotEdit => {
+                self.edit_comment();
+                return;
+            }
             Command::Erase | Command::EraseWhole => {
                 self.erase_selection(command == Command::EraseWhole);
                 return;
@@ -1746,6 +1825,7 @@ impl MargApp {
             | Command::AnnotDelete
             | Command::AnnotRecolor(_)
             | Command::AnnotToggleType
+            | Command::AnnotEdit
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -1886,7 +1966,12 @@ impl MargApp {
                 ui.label(text(&left, STATUS_FG));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if let Some(m) = &self.message {
+                let editing = self.editor.as_ref().filter(|_| self.mode == Mode::Insert);
+                if let Some(ed) =
+                    editing.filter(|_| self.message.as_ref().is_none_or(|m| m.level == Level::Info))
+                {
+                    ui.label(text(ed.status(), STATUS_FG));
+                } else if let Some(m) = &self.message {
                     let color = match m.level {
                         Level::Info => STATUS_FG,
                         Level::Warn => WARN_FG,
@@ -2035,6 +2120,17 @@ impl eframe::App for MargApp {
                     t.log("first page shown");
                 }
             });
+        if let (Some(ed), Some(open)) = (&mut self.editor, &self.open) {
+            let anchor = select::screen_rect(&open.view, area, ed.target.page(), ed.anchor);
+            let ui_cfg = &self.config.ui;
+            ed.show(
+                &ctx,
+                anchor,
+                area,
+                ui_cfg.comment_width_px,
+                ui_cfg.comment_max_height * screen.height(),
+            );
+        }
         if self.debug {
             self.debug_overlay(&ctx);
         }
@@ -2100,7 +2196,6 @@ impl MargApp {
     }
 }
 
-/// The annotation author: the configured one, else the OS user name.
 /// The kind of a listed annotation, if marg can create it.
 fn annot_kind(subtype: &str) -> Option<AnnotKind> {
     match subtype {
@@ -2110,6 +2205,7 @@ fn annot_kind(subtype: &str) -> Option<AnnotKind> {
     }
 }
 
+/// The annotation author: the configured one, else the OS user name.
 fn annotation_author(configured: &str) -> String {
     if !configured.trim().is_empty() {
         return configured.trim().to_string();

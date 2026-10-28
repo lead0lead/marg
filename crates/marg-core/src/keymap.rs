@@ -97,6 +97,7 @@ pub const DEFAULT_ANNOT: &[(&str, &str)] = &[
     ("4", "annot.recolor(4)"),
     ("5", "annot.recolor(5)"),
     ("U", "annot.toggle_type"),
+    ("e", "annot.edit"),
 ];
 
 /// A table of default bindings: (key sequence, command name).

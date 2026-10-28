@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 use eframe::egui;
 
 mod app;
+mod comment;
 mod complete;
 mod input;
 mod pages;
