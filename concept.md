@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 3 merged into `main` (local, not pushed). Phase 3b (theming) built on branch `phase-3b-theme` (not merged); waiting for the user to try it. |
-| **Current phase** | 3b — theming, built; user check pending |
-| **Next step** | The user rices marg with their own theme (`docs/themes/` as a start), tries a font and dark pages (`gr`); fixes from their feedback; merge into `main`; push when the user says so (CI has not run on Phase 3/3b); Phase 4 in a fresh session. |
+| **Status** | Phases 3 and 3b merged into `main` and pushed on 2026-10-28 after the user's checks. Phase 4 not started. |
+| **Current phase** | 4 — reading features, next |
+| **Next step** | Start Phase 4 in a fresh session, on branch `phase-4-reading`: plan the steps (single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and following, help overlay, `:help` page; §11, §2.3–2.6, §2.12), then one commit per step. New overlays use the theme colors (§6 "Theming"). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (end of Phase 3b build) |
+| **Last updated** | 2026-10-28 (Phase 3b merged) |
 
 ---
 
@@ -1488,8 +1488,12 @@ Format:
   detail it was noise (reading + checking 2.6–7.4 ms).
 - State: builds; 138 tests pass; clippy and fmt clean (local). Nothing
   pushed; CI has not run on Phase 3 or 3b.
-- Next: the user tries the theming (their own theme, a font, dark pages);
-  then merge, push (ask), Phase 4 in a fresh session.
+- User check: the user tried the theming ("tried the theming, merge it
+  and push everything"). Merged into `main` and pushed with all branches.
+- Build time: the user found `cargo run --release` slow at the last step.
+  Local release builds are now incremental without LTO (~80 s → 1–2 s per
+  change, same measured speed); LTO moved to `--profile dist` (§9).
+- Next: Phase 4 (reading features) in a fresh session.
 - Watch out: `PageCache` holds the recolor state (`set_recolor`); the
   paper color under rendering pages follows it.
 
