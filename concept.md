@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 merged into `main` (2026-10-28). Phase 2 (select & highlight) in progress on branch `phase-2-select`: steps 1–4 (text model; motions and selection; per-mode keymaps; hints, Caret and Visual modes, `y`; mouse selection; highlights and underline; saving; external changes) done. |
+| **Status** | Phase 1 merged into `main` (2026-10-28). Phase 2 (select & highlight) in progress on branch `phase-2-select`: steps 1–4 (text model; motions and selection; per-mode keymaps; hints, Caret and Visual modes, `y`; mouse selection; highlights and underline; saving; external changes; undo/redo) done. |
 | **Current phase** | 2 — select & highlight, in progress |
-| **Next step** | Phase 2 step 9: undo/redo (`u`, `Ctrl-r`) of annotation edits. Plan: 1 text model, 2 motions + selection, 3 per-mode keymaps, 4 hints + caret/visual in the app + `y`, 5 mouse selection, 6 highlights/underline + provisional overlay, 7 saving (backup, incremental, autosave, `q`), 8 external changes, 9 undo/redo, 10 docs. |
+| **Next step** | Phase 2 step 10: measure on real papers, update concept.md (as-implemented sections, session log), hand the build to the user. Plan: 1 text model, 2 motions + selection, 3 per-mode keymaps, 4 hints + caret/visual in the app + `y`, 5 mouse selection, 6 highlights/underline + provisional overlay, 7 saving (backup, incremental, autosave, `q`), 8 external changes, 9 undo/redo, 10 docs. |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 2 step 8) |
+| **Last updated** | 2026-10-28 (Phase 2 step 9) |
 
 ---
 

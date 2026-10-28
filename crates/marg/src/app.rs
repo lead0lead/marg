@@ -16,6 +16,7 @@ use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
+use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
@@ -60,6 +61,18 @@ struct OpenDoc {
     /// The file changed on disk while marg has unsaved changes; saving
     /// waits for `:w!` or `:e!`.
     conflict: bool,
+    /// Annotation actions of this session; each creates one annotation per
+    /// page it touches.
+    undo: UndoStack<Vec<Created>>,
+    /// Object numbers of created annotations, by edit tag.
+    xrefs: HashMap<u64, i32>,
+}
+
+/// An annotation created by an undoable action.
+struct Created {
+    spec: AnnotSpec,
+    /// Tag of the edit that created it (most recently, after a redo).
+    tag: u64,
 }
 
 impl OpenDoc {
@@ -410,7 +423,8 @@ impl MargApp {
                         continue;
                     }
                     match result {
-                        Ok(_xref) => {
+                        Ok(xref) => {
+                            open.xrefs.insert(tag, xref);
                             open.revs[page] = open.revs[page].max(rev);
                             open.edits += 1;
                             open.save_due = Some(
@@ -562,6 +576,8 @@ impl MargApp {
             saving: false,
             save_due: None,
             conflict: false,
+            undo: UndoStack::new(self.config.annotation.undo_steps),
+            xrefs: HashMap::new(),
             view,
         }
     }
@@ -935,6 +951,7 @@ impl MargApp {
         for (page, b) in sel.rects(&open.texts) {
             by_page.entry(page).or_default().push(b);
         }
+        let mut group = Vec::new();
         for (page, rects) in by_page {
             let spec = AnnotSpec {
                 page,
@@ -954,11 +971,68 @@ impl MargApp {
             });
             self.doc.send(Request::Edit {
                 tag,
-                edit: Edit::Create(spec),
+                edit: Edit::Create(spec.clone()),
             });
+            group.push(Created { spec, tag });
         }
+        open.undo.push(group);
         self.last_category = category;
         self.leave_text_modes();
+    }
+
+    /// Undo the last annotation action (delete what it created), or redo
+    /// the last undone one (create it again).
+    fn undo(&mut self, redo: bool) {
+        let Some(open) = &mut self.open else { return };
+        let step = if redo {
+            open.undo.redo()
+        } else {
+            open.undo.undo()
+        };
+        let Some(group) = step else {
+            let msg = if redo {
+                "Nothing to redo"
+            } else {
+                "Nothing to undo"
+            };
+            self.show(Level::Info, msg.into());
+            return;
+        };
+        if redo {
+            for c in group.iter_mut() {
+                let tag = self.next_tag;
+                self.next_tag += 1;
+                c.tag = tag;
+                open.provisional.push(Provisional {
+                    tag,
+                    rev: None,
+                    spec: c.spec.clone(),
+                });
+                self.doc.send(Request::Edit {
+                    tag,
+                    edit: Edit::Create(c.spec.clone()),
+                });
+            }
+        } else {
+            let targets: Option<Vec<(usize, i32)>> = group
+                .iter()
+                .map(|c| open.xrefs.get(&c.tag).map(|&x| (c.spec.page, x)))
+                .collect();
+            let Some(targets) = targets else {
+                // The creation has not been confirmed yet; try again later.
+                open.undo.redo();
+                return;
+            };
+            for (page, xref) in targets {
+                let tag = self.next_tag;
+                self.next_tag += 1;
+                self.doc.send(Request::Edit {
+                    tag,
+                    edit: Edit::Delete { page, xref },
+                });
+            }
+        }
+        self.show(Level::Info, if redo { "Redone" } else { "Undone" }.into());
     }
 
     fn copy_selection(&mut self, ctx: &egui::Context) {
@@ -1050,6 +1124,10 @@ impl MargApp {
             }
             Command::Reload => {
                 self.reload();
+                return;
+            }
+            Command::Undo | Command::Redo => {
+                self.undo(command == Command::Redo);
                 return;
             }
             Command::Open(path) => {
@@ -1145,9 +1223,9 @@ impl MargApp {
             | Command::Underline
             | Command::Save
             | Command::SaveForce
-            | Command::Reload => {}
-            // Wired up in the next step.
-            Command::Undo | Command::Redo => {}
+            | Command::Reload
+            | Command::Undo
+            | Command::Redo => {}
         }
     }
 
