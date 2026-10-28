@@ -114,6 +114,10 @@ pub struct MargApp {
     hinting: Option<Hinting>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
+    /// Where a mouse drag started, while the primary button is down.
+    drag_anchor: Option<TextPos>,
+    /// Last primary press: time, position, click count (1–3).
+    last_click: Option<(Instant, egui::Pos2, u8)>,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -215,6 +219,8 @@ impl MargApp {
             selection: None,
             hinting: None,
             selection_before_hints: None,
+            drag_anchor: None,
+            last_click: None,
             cmdline: LineEdit::default(),
             doc,
             open: None,
@@ -419,6 +425,11 @@ impl MargApp {
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
+                Event::PointerButton { .. } | Event::PointerMoved(_)
+                    if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
+                {
+                    self.mouse_event(e)
+                }
                 Event::Text(_) if std::mem::take(&mut skip_text) => {}
                 _ => {
                     if let Some(k) = input::key_press(e) {
@@ -644,6 +655,94 @@ impl MargApp {
             (Mode::Visual, Some(sel)) => sel.linewise = linewise,
             _ => {}
         }
+    }
+
+    /// The character under a screen position, if its page's text is loaded
+    /// (otherwise the text is requested).
+    fn char_at_screen(&mut self, pos: egui::Pos2) -> Option<TextPos> {
+        let open = self.open.as_mut()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        open.request_text(&self.doc, d.page);
+        let t = open.texts[d.page].as_ref()?;
+        t.char_at(d.x, d.y).map(|i| TextPos::new(d.page, i))
+    }
+
+    /// Mouse selection: drag selects characters, a double click a word, a
+    /// triple click a line. The result works like a keyboard selection.
+    fn mouse_event(&mut self, e: &Event) {
+        match *e {
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                ..
+            } if self.area.contains(pos) => {
+                let now = Instant::now();
+                let multi = Duration::from_millis(self.config.ui.multi_click_ms);
+                let count = match self.last_click {
+                    Some((t, p, n)) if now - t < multi && p.distance(pos) < 4.0 => n % 3 + 1,
+                    _ => 1,
+                };
+                self.last_click = Some((now, pos, count));
+                let Some(at) = self.char_at_screen(pos) else {
+                    self.leave_text_modes();
+                    return;
+                };
+                match count {
+                    1 => {
+                        self.leave_text_modes();
+                        self.drag_anchor = Some(at);
+                    }
+                    2 => {
+                        let Some(t) = self.open.as_ref().and_then(|o| o.texts[at.page].as_ref())
+                        else {
+                            return;
+                        };
+                        let word = t
+                            .words(t.line_of(at.idx))
+                            .into_iter()
+                            .find(|w| w.contains(&at.idx));
+                        if let Some(w) = word {
+                            let (a, b) = (
+                                TextPos::new(at.page, w.start),
+                                TextPos::new(at.page, w.end - 1),
+                            );
+                            self.mouse_select(Selection::new(a, b));
+                        }
+                    }
+                    _ => self.mouse_select(Selection {
+                        linewise: true,
+                        ..Selection::new(at, at)
+                    }),
+                }
+            }
+            Event::PointerButton {
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            } => self.drag_anchor = None,
+            Event::PointerMoved(pos) => {
+                let Some(anchor) = self.drag_anchor else {
+                    return;
+                };
+                if let Some(at) = self.char_at_screen(pos)
+                    && (at != anchor || self.selection.is_some())
+                {
+                    self.mouse_select(Selection::new(anchor, at));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn mouse_select(&mut self, sel: Selection) {
+        self.selection = Some(sel);
+        self.caret = Some(Caret {
+            pos: sel.head,
+            want_x: None,
+        });
+        self.mode = Mode::Visual;
     }
 
     fn copy_selection(&mut self, ctx: &egui::Context) {

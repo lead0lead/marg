@@ -140,6 +140,8 @@ pub struct UiConfig {
     /// Files remembered in the state file; the least recently opened are
     /// dropped beyond this.
     pub state_files_max: usize,
+    /// Presses closer together than this count as a double or triple click.
+    pub multi_click_ms: u64,
 }
 
 impl Default for UiConfig {
@@ -150,6 +152,7 @@ impl Default for UiConfig {
             sequence_timeout_ms: 1000,
             recent_files_max: 50,
             state_files_max: 1000,
+            multi_click_ms: 400,
         }
     }
 }
