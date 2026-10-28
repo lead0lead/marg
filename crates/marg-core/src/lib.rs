@@ -1,5 +1,6 @@
 //! Pure logic for marg: no MuPDF, no egui.
 
+pub mod caret;
 pub mod command;
 pub mod config;
 pub mod fuzzy;
