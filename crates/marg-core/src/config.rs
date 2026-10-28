@@ -21,6 +21,9 @@ pub enum Layout {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
+    /// A theme file with `[colors]` (and `[fonts]`); entries here override
+    /// it. Relative to the config folder; empty: none.
+    pub theme: String,
     pub view: ViewConfig,
     pub render: RenderConfig,
     pub ui: UiConfig,
@@ -36,6 +39,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            theme: String::new(),
             view: ViewConfig::default(),
             render: RenderConfig::default(),
             ui: UiConfig::default(),
@@ -269,6 +273,43 @@ impl Config {
     pub fn from_toml(text: &str) -> Result<Self, String> {
         toml::from_str(text).map_err(|e| e.to_string())
     }
+
+    /// Parse a config file on top of a theme file: the theme's values are
+    /// used where the config has none. Errors name the file they are in
+    /// (`Err((in_theme, message))`), with the line number.
+    pub fn with_theme(text: &str, theme: &str) -> Result<Self, (bool, String)> {
+        let own = Self::from_toml(text).map_err(|e| (false, e))?;
+        toml::from_str::<ThemeFile>(theme).map_err(|e| (true, e.to_string()))?;
+        let mut merged: toml::Table = toml::from_str(text).map_err(|e| (false, e.to_string()))?;
+        let theme: toml::Table = toml::from_str(theme).map_err(|e| (true, e.to_string()))?;
+        for (section, values) in theme {
+            let (Some(entry), toml::Value::Table(values)) = (
+                merged
+                    .entry(section)
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                    .as_table_mut(),
+                values,
+            ) else {
+                continue;
+            };
+            for (k, v) in values {
+                entry.entry(k).or_insert(v);
+            }
+        }
+        let merged = Self::deserialize(merged).map_err(|e| (true, e.to_string()))?;
+        Ok(Self {
+            theme: own.theme,
+            ..merged
+        })
+    }
+}
+
+/// What a theme file may hold (parsed only to check it).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThemeFile {
+    #[serde(default, rename = "colors")]
+    _colors: ColorsConfig,
 }
 
 #[cfg(test)]
@@ -325,6 +366,28 @@ mod tests {
         assert_eq!(c.colors.hint_bg, ColorsConfig::default().hint_bg);
         let e = Config::from_toml("[colors]\n\nselection = \"blue\"\n").unwrap_err();
         assert!(e.contains("line 3") && e.contains("not a color"), "{e}");
+    }
+
+    #[test]
+    fn theme_fills_in_what_the_config_leaves_out() {
+        let theme = "[colors]\nbackground = \"#111111\"\nhint_bg = \"#222222\"\n";
+        let text =
+            "theme = \"dark.toml\"\n[colors]\nhint_bg = \"#333333\"\n[view]\nzoom_step = 1.2\n";
+        let c = Config::with_theme(text, theme).unwrap();
+        assert_eq!(c.theme, "dark.toml");
+        assert_eq!(c.colors.background.to_string(), "#111111");
+        assert_eq!(c.colors.hint_bg.to_string(), "#333333", "the config wins");
+        assert_eq!(c.colors.caret, ColorsConfig::default().caret);
+        assert_eq!(c.view.zoom_step, 1.2);
+        // Errors say which file and line.
+        let bad = "[colors]\n\ncaret = \"red\"\n";
+        let (in_theme, e) = Config::with_theme(text, bad).unwrap_err();
+        assert!(in_theme && e.contains("line 3"), "{e}");
+        let (in_theme, e) = Config::with_theme("[view]\nzoom_step = \"x\"\n", theme).unwrap_err();
+        assert!(!in_theme && e.contains("line 2"), "{e}");
+        // A theme holds only looks.
+        let (in_theme, e) = Config::with_theme(text, "[view]\nzoom_step = 2.0\n").unwrap_err();
+        assert!(in_theme && e.contains("view"), "{e}");
     }
 
     #[test]

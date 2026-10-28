@@ -1,11 +1,13 @@
 //! Logging and config loading at startup.
 
 use std::fs;
+use std::path::Path;
 
 use log::LevelFilter;
 use marg_core::config::Config;
 use simplelog::{CombinedLogger, SharedLogger, SimpleLogger, WriteLogger};
 
+use crate::complete;
 use crate::paths::Paths;
 
 /// Log to stderr/stdout and, if possible, to the log file. `MARG_LOG` sets
@@ -69,11 +71,72 @@ pub fn load_config(paths: Option<&Paths>) -> (Config, Option<String>) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
         Err(e) => return (Config::default(), Some(format!("config: {e}"))),
     };
-    match Config::from_toml(&text) {
-        Ok(c) => (c, None),
+    let config = match Config::from_toml(&text) {
+        Ok(c) => c,
         Err(e) => {
             let msg = format!("config {}: {e}", path.display());
-            (Config::default(), Some(msg))
+            return (Config::default(), Some(msg));
         }
+    };
+    if config.theme.trim().is_empty() {
+        return (config, None);
+    }
+    // Relative to the config folder.
+    let theme_path = path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(complete::expand_tilde(config.theme.trim()));
+    let theme = match fs::read_to_string(&theme_path) {
+        Ok(t) => t,
+        Err(e) => return (config, Some(format!("theme {}: {e}", theme_path.display()))),
+    };
+    match Config::with_theme(&text, &theme) {
+        Ok(c) => (c, None),
+        Err((in_theme, e)) => {
+            let file = if in_theme { &theme_path } else { path };
+            (config, Some(format!("theme {}: {e}", file.display())))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paths(dir: &Path) -> Paths {
+        Paths {
+            config_file: dir.join("config.toml"),
+            state_file: dir.join("state.toml"),
+            log_file: dir.join("marg.log"),
+            backup_dir: dir.join("backups"),
+        }
+    }
+
+    #[test]
+    fn theme_file_is_found_next_to_the_config() {
+        let dir = std::env::temp_dir().join(format!("marg-theme-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("themes")).unwrap();
+        fs::write(
+            dir.join("config.toml"),
+            "theme = \"themes/t.toml\"\n[colors]\ncaret = \"#010101\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("themes/t.toml"),
+            "[colors]\ncaret = \"#020202\"\nbackground = \"#030303\"\n",
+        )
+        .unwrap();
+        let (c, err) = load_config(Some(&paths(&dir)));
+        assert_eq!(err, None);
+        assert_eq!(c.colors.caret.to_string(), "#010101");
+        assert_eq!(c.colors.background.to_string(), "#030303");
+
+        // A missing theme: the config alone, and an error.
+        fs::remove_file(dir.join("themes/t.toml")).unwrap();
+        let (c, err) = load_config(Some(&paths(&dir)));
+        assert!(err.is_some_and(|e| e.contains("t.toml")));
+        assert_eq!(c.colors.caret.to_string(), "#010101");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
