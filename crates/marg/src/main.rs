@@ -11,6 +11,7 @@ mod input;
 mod pages;
 mod paths;
 mod recent;
+mod select;
 mod startup;
 mod statefile;
 

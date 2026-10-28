@@ -6,9 +6,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
+use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::Config;
-use marg_core::keymap::{Keymap, Matcher, Outcome};
+use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
@@ -21,6 +22,7 @@ use crate::complete;
 use crate::input;
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
+use crate::select::{self, Caret, Hinting, Purpose};
 use crate::statefile;
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
@@ -44,12 +46,17 @@ struct OpenDoc {
 }
 
 impl OpenDoc {
+    fn request_text(&mut self, doc: &DocThread, page: usize) {
+        if page < self.texts.len() && self.texts[page].is_none() && self.text_requested.insert(page)
+        {
+            doc.send(Request::Text(page));
+        }
+    }
+
     /// Ask for the text of the visible pages that do not have it yet.
     fn request_visible_text(&mut self, doc: &DocThread) {
         for p in self.view.visible_pages() {
-            if self.texts[p].is_none() && self.text_requested.insert(p) {
-                doc.send(Request::Text(p));
-            }
+            self.request_text(doc, p);
         }
     }
 }
@@ -72,15 +79,41 @@ enum Mode {
     Normal,
     Command,
     Recent,
+    Hint,
+    Caret,
+    Visual,
+}
+
+impl Mode {
+    fn label(self) -> &'static str {
+        match self {
+            Mode::Normal | Mode::Command => "NORMAL",
+            Mode::Recent => "RECENT",
+            Mode::Hint => "HINT",
+            Mode::Caret => "CARET",
+            Mode::Visual => "VISUAL",
+        }
+    }
 }
 
 pub struct MargApp {
     config: Config,
     version: String,
     keymap: Keymap,
+    caret_map: Keymap,
+    visual_map: Keymap,
     matcher: Matcher,
     clock: Instant,
     mode: Mode,
+    /// Mode to return to from the command line or hints.
+    return_mode: Mode,
+    /// The page view on screen, as of the last input.
+    area: egui::Rect,
+    caret: Option<Caret>,
+    selection: Option<Selection>,
+    hinting: Option<Hinting>,
+    /// The selection before hints started, restored if they are cancelled.
+    selection_before_hints: Option<Selection>,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -142,7 +175,11 @@ impl MargApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
-        let (keymap, warnings) = Keymap::normal(&s.config.keys.normal);
+        let (keymap, mut warnings) = Keymap::build(KeyMode::Normal, &s.config.keys);
+        let (caret_map, w) = Keymap::build(KeyMode::Caret, &s.config.keys);
+        warnings.extend(w);
+        let (visual_map, w) = Keymap::build(KeyMode::Visual, &s.config.keys);
+        warnings.extend(w);
         for w in &warnings {
             log::warn!("{w}");
         }
@@ -167,9 +204,17 @@ impl MargApp {
             config: s.config,
             version: s.version,
             keymap,
+            caret_map,
+            visual_map,
             matcher: Matcher::default(),
             clock: Instant::now(),
             mode,
+            return_mode: Mode::Normal,
+            area: egui::Rect::NOTHING,
+            caret: None,
+            selection: None,
+            hinting: None,
+            selection_before_hints: None,
             cmdline: LineEdit::default(),
             doc,
             open: None,
@@ -242,6 +287,9 @@ impl MargApp {
                         self.last_request.clear();
                         self.mode = Mode::Normal;
                         self.recent = None;
+                        self.caret = None;
+                        self.selection = None;
+                        self.hinting = None;
                         let doc = self.open_doc(info, generation);
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
                             "{} — marg",
@@ -344,6 +392,7 @@ impl MargApp {
     /// Process this frame's input. `area` is the page view on screen; zoom
     /// anchors are relative to it.
     fn handle_input(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        self.area = area;
         let events = ctx.input(|i| i.events.clone());
         let pointer = ctx.input(|i| i.pointer.hover_pos()).map(|p| p - area.min);
         let mut skip_text = false;
@@ -369,6 +418,7 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
+                _ if self.mode == Mode::Hint => self.hint_event(e),
                 Event::Text(_) if std::mem::take(&mut skip_text) => {}
                 _ => {
                     if let Some(k) = input::key_press(e) {
@@ -448,10 +498,162 @@ impl MargApp {
     fn normal_key(&mut self, ctx: &egui::Context, key: KeyPress) {
         let now = self.now_ms();
         let timeout = self.config.ui.sequence_timeout_ms;
-        match self.matcher.feed(&self.keymap, key, now, timeout) {
+        let map = match self.mode {
+            Mode::Caret => &self.caret_map,
+            Mode::Visual => &self.visual_map,
+            _ => &self.keymap,
+        };
+        match self.matcher.feed(map, key, now, timeout) {
             Outcome::Run { command, count } => self.run(ctx, command, count),
+            Outcome::Unbound if key == KeyPress::named(Named::Esc) => {
+                if matches!(self.mode, Mode::Caret | Mode::Visual) {
+                    self.leave_text_modes();
+                }
+            }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
         }
+    }
+
+    /// Back to Normal mode: no caret, no selection.
+    fn leave_text_modes(&mut self) {
+        self.mode = Mode::Normal;
+        self.caret = None;
+        self.selection = None;
+    }
+
+    fn start_hints(&mut self, purpose: Purpose) {
+        let Some(open) = &self.open else { return };
+        match Hinting::start(
+            purpose,
+            &open.view,
+            self.area,
+            &open.texts,
+            &self.config.hints,
+        ) {
+            Ok(h) => {
+                if self.mode != Mode::Hint {
+                    self.return_mode = self.mode;
+                    self.selection_before_hints = self.selection;
+                }
+                self.hinting = Some(h);
+                self.mode = Mode::Hint;
+            }
+            Err(msg) => {
+                if self.mode == Mode::Hint {
+                    self.cancel_hints();
+                }
+                self.show(Level::Info, msg.into());
+            }
+        }
+    }
+
+    fn cancel_hints(&mut self) {
+        self.hinting = None;
+        self.mode = self.return_mode;
+        self.selection = self.selection_before_hints.take();
+    }
+
+    fn hint_event(&mut self, e: &Event) {
+        let (Some(open), Some(h)) = (&self.open, &mut self.hinting) else {
+            return;
+        };
+        match e {
+            Event::Text(t) => {
+                let picked = t
+                    .chars()
+                    .find_map(|c| h.push(c, &open.texts, &self.config.hints));
+                if let Some((page, r)) = picked {
+                    self.hint_picked(page, r);
+                }
+            }
+            Event::Key { pressed: true, .. } => match input::key_press(e).map(|k| k.code) {
+                Some(KeyCode::Named(Named::Esc)) => self.cancel_hints(),
+                Some(KeyCode::Named(Named::Backspace)) => {
+                    h.pop();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn hint_picked(&mut self, page: usize, word: std::ops::Range<usize>) {
+        let Some(h) = self.hinting.take() else { return };
+        let start = TextPos::new(page, word.start);
+        let end = TextPos::new(page, word.end - 1);
+        match h.purpose {
+            Purpose::Caret => {
+                self.selection = None;
+                self.set_caret(start);
+                self.mode = Mode::Caret;
+            }
+            Purpose::SelectStart => {
+                // Show the first word while the second is picked.
+                self.selection = Some(Selection::new(start, end));
+                self.start_hints(Purpose::SelectEnd(start, end));
+            }
+            Purpose::SelectEnd(s, e) => {
+                self.selection = Some(Selection::new(s.min(start), e.max(end)));
+                self.set_caret(e.max(end));
+                self.mode = Mode::Visual;
+            }
+        }
+    }
+
+    /// Put the caret at `pos` and load the text of the pages around it.
+    fn set_caret(&mut self, pos: TextPos) {
+        let caret = Caret { pos, want_x: None };
+        self.caret = Some(caret);
+        if let Some(open) = &mut self.open {
+            select::keep_visible(&mut open.view, &caret, &open.texts);
+            open.request_text(&self.doc, pos.page.saturating_sub(1));
+            open.request_text(&self.doc, pos.page + 1);
+        }
+    }
+
+    fn move_caret(&mut self, motion: Motion, count: u32) {
+        let (Some(open), Some(c)) = (&self.open, self.caret) else {
+            return;
+        };
+        let (pos, want_x) = caret::apply_n(&open.texts, c.pos, motion, c.want_x, count);
+        self.set_caret(pos);
+        if let Some(c) = &mut self.caret {
+            c.want_x = want_x;
+        }
+        if let Some(sel) = &mut self.selection {
+            sel.head = pos;
+        }
+    }
+
+    /// `v` / `V`: start a selection from Caret mode, switch its kind, or end
+    /// it when it already has that kind.
+    fn visual(&mut self, linewise: bool) {
+        match (self.mode, &mut self.selection) {
+            (Mode::Caret, _) => {
+                let Some(c) = self.caret else { return };
+                self.selection = Some(Selection {
+                    linewise,
+                    ..Selection::new(c.pos, c.pos)
+                });
+                self.mode = Mode::Visual;
+            }
+            (Mode::Visual, Some(sel)) if sel.linewise == linewise => {
+                self.selection = None;
+                self.mode = Mode::Caret;
+            }
+            (Mode::Visual, Some(sel)) => sel.linewise = linewise,
+            _ => {}
+        }
+    }
+
+    fn copy_selection(&mut self, ctx: &egui::Context) {
+        let (Some(open), Some(sel)) = (&self.open, &self.selection) else {
+            return;
+        };
+        let text = sel.text(&open.texts);
+        let n = text.chars().count();
+        ctx.copy_text(text);
+        self.show(Level::Info, format!("Copied {n} characters"));
     }
 
     fn cmdline_event(&mut self, ctx: &egui::Context, e: &Event) {
@@ -460,9 +662,9 @@ impl MargApp {
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {
-                    KeyCode::Named(Named::Esc) => self.mode = Mode::Normal,
+                    KeyCode::Named(Named::Esc) => self.mode = self.return_mode,
                     KeyCode::Named(Named::Enter) => {
-                        self.mode = Mode::Normal;
+                        self.mode = self.return_mode;
                         let line = self.cmdline.submit();
                         match parse_ex(&line) {
                             Ok(c) => self.run(ctx, c, None),
@@ -470,7 +672,7 @@ impl MargApp {
                         }
                     }
                     KeyCode::Named(Named::Backspace) if self.cmdline.is_empty() => {
-                        self.mode = Mode::Normal;
+                        self.mode = self.return_mode;
                     }
                     KeyCode::Named(Named::Backspace) => self.cmdline.backspace(),
                     KeyCode::Named(Named::Delete) => self.cmdline.delete(),
@@ -509,6 +711,7 @@ impl MargApp {
         let n = count.unwrap_or(1).max(1);
         match command {
             Command::CommandLine => {
+                self.return_mode = self.mode;
                 self.mode = Mode::Command;
                 self.cmdline.clear();
                 return;
@@ -528,6 +731,34 @@ impl MargApp {
             }
             Command::DebugToggle => {
                 self.debug = !self.debug;
+                return;
+            }
+            Command::HintCaret => {
+                self.start_hints(Purpose::Caret);
+                return;
+            }
+            Command::HintSelect => {
+                self.start_hints(Purpose::SelectStart);
+                return;
+            }
+            Command::Motion(m) => {
+                self.move_caret(m, n);
+                return;
+            }
+            Command::VisualChar | Command::VisualLine => {
+                self.visual(command == Command::VisualLine);
+                return;
+            }
+            Command::VisualSwap => {
+                if let Some(sel) = &mut self.selection {
+                    sel.swap();
+                    let head = sel.head;
+                    self.set_caret(head);
+                }
+                return;
+            }
+            Command::Copy => {
+                self.copy_selection(ctx);
                 return;
             }
             _ => {}
@@ -563,16 +794,16 @@ impl MargApp {
             | Command::Open(_)
             | Command::Version
             | Command::DebugToggle => {}
-            // Wired up in the next steps.
             Command::HintCaret
             | Command::HintSelect
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
             | Command::VisualSwap
-            | Command::Highlight(_)
+            | Command::Copy => {}
+            // Wired up in the next steps.
+            Command::Highlight(_)
             | Command::Underline
-            | Command::Copy
             | Command::Undo
             | Command::Redo
             | Command::Save
@@ -593,11 +824,9 @@ impl MargApp {
     }
 
     fn status_left(&self) -> String {
-        if self.mode == Mode::Recent {
-            return "RECENT".into();
-        }
-        let Some(open) = &self.open else {
-            return "NORMAL".into();
+        let mode = self.mode.label();
+        let Some(open) = self.open.as_ref().filter(|_| self.mode != Mode::Recent) else {
+            return mode.into();
         };
         let v = &open.view;
         let page = v.current_page();
@@ -609,7 +838,7 @@ impl MargApp {
             _ => format!("{}/{count}", page + 1),
         };
         format!(
-            "NORMAL  {}  {page_text}  {:.0}%  continuous",
+            "{mode}  {}  {page_text}  {:.0}%  continuous",
             open.file_name,
             v.zoom() * 100.0
         )
@@ -637,6 +866,8 @@ impl MargApp {
                         Level::Error => ERROR_FG,
                     };
                     ui.label(text(&m.text, color));
+                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                    ui.label(text(h.typed(), STATUS_FG));
                 } else if self.matcher.is_pending() {
                     ui.label(text(&self.matcher.pending_text(), STATUS_FG));
                 }
@@ -708,6 +939,17 @@ impl eframe::App for MargApp {
                 let exact = self
                     .cache
                     .draw(&painter, area, &open.view, &self.config.render);
+                if let Some(sel) = &self.selection {
+                    select::draw_selection(&painter, &open.view, area, sel, &open.texts);
+                }
+                if matches!(self.mode, Mode::Caret | Mode::Visual)
+                    && let Some(c) = &self.caret
+                {
+                    select::draw_caret(&painter, &open.view, area, c, &open.texts);
+                }
+                if let Some(h) = &self.hinting {
+                    h.draw(&painter, &open.view, area, &open.texts);
+                }
                 if let Some(t) = &mut self.timing
                     && !t.shown
                     && (exact || self.last_request.is_empty())

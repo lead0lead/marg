@@ -4,6 +4,7 @@ pub mod caret;
 pub mod command;
 pub mod config;
 pub mod fuzzy;
+pub mod hints;
 pub mod keymap;
 pub mod keys;
 pub mod lineedit;

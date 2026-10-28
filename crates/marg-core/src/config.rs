@@ -22,7 +22,39 @@ pub struct Config {
     pub view: ViewConfig,
     pub render: RenderConfig,
     pub ui: UiConfig,
+    pub hints: HintsConfig,
     pub keys: KeysConfig,
+}
+
+/// How text hints label targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HintMode {
+    /// Lines first, then the words of the picked line.
+    TwoStage,
+    /// Every visible word at once.
+    Words,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HintsConfig {
+    /// Label alphabet.
+    pub chars: String,
+    pub mode: HintMode,
+    /// Added to `chars` for the word labels of a picked line, so long lines
+    /// still get single-character labels.
+    pub extra_chars: String,
+}
+
+impl Default for HintsConfig {
+    fn default() -> Self {
+        Self {
+            chars: "asdfghjkl".into(),
+            mode: HintMode::TwoStage,
+            extra_chars: "qwertyuiop".into(),
+        }
+    }
 }
 
 /// Key bindings on top of the defaults: key sequence → command name
@@ -151,6 +183,13 @@ mod tests {
     fn layout_names_parse() {
         let c = Config::from_toml("[view]\ndefault_layout_portrait = \"spread\"\n").unwrap();
         assert_eq!(c.view.default_layout_portrait, Layout::Spread);
+    }
+
+    #[test]
+    fn hint_mode_parses() {
+        let c = Config::from_toml("[hints]\nmode = \"words\"\n").unwrap();
+        assert_eq!(c.hints.mode, HintMode::Words);
+        assert_eq!(Config::default().hints.mode, HintMode::TwoStage);
     }
 
     #[test]
