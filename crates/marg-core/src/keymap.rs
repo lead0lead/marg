@@ -457,8 +457,10 @@ mod tests {
     fn prefix_conflicts_are_reported_and_later_wins() {
         let user = BTreeMap::from([("g".to_string(), "zoom.in".to_string())]);
         let (map, warnings) = Keymap::normal(&user);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        // One warning per default binding that starts with g.
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings[0].contains("\"gg\""));
+        assert!(warnings[1].contains("\"ga\""));
         let mut m = Matcher::default();
         assert_eq!(feed_str(&mut m, &map, "g"), [run(Command::ZoomIn, None)]);
     }
