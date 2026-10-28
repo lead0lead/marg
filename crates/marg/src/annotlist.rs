@@ -6,11 +6,8 @@ use marg_core::keys::KeyCode;
 use marg_core::list::{ListAction, ListNav};
 
 use crate::input;
+use crate::theme::Theme;
 
-const FG: Color32 = Color32::from_rgb(0xD0, 0xD0, 0xD0);
-const DIM: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
-const SELECTED_BG: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3A);
-const PANEL_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 /// Characters of marked text shown per row.
 const TEXT_CHARS: usize = 80;
 
@@ -139,10 +136,16 @@ impl AnnotList {
     }
 
     /// Draw the rows. `names`: category names; `labels`: page labels.
-    pub fn draw(&mut self, ui: &mut egui::Ui, names: &[String], labels: Option<&[String]>) {
+    pub fn draw(
+        &mut self,
+        ui: &mut egui::Ui,
+        th: &Theme,
+        names: &[String],
+        labels: Option<&[String]>,
+    ) {
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         egui::Frame::new()
-            .fill(PANEL_BG)
+            .fill(th.panel_bg)
             .inner_margin(10)
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
@@ -159,29 +162,29 @@ impl AnnotList {
                         .nth(self.nav.cursor())
                         .map_or(filter.len(), |(i, _)| i);
                     let (before, after) = filter.split_at(at);
-                    ui.label(text(&format!("{shown_cat}/{before}▏{after}"), FG));
+                    ui.label(text(&format!("{shown_cat}/{before}▏{after}"), th.panel_fg));
                 } else if !filter.is_empty() || !shown_cat.is_empty() {
                     let f = if filter.is_empty() {
                         String::new()
                     } else {
                         format!("/{filter}")
                     };
-                    ui.label(text(&format!("{shown_cat}{f}"), DIM));
+                    ui.label(text(&format!("{shown_cat}{f}"), th.panel_dim));
                 } else {
                     ui.label(text(
                         "/ filter  1-5 category  0 all  ⏎ go  e edit  x delete",
-                        DIM,
+                        th.panel_dim,
                     ));
                 }
                 ui.add_space(6.0);
                 let row_h = 2.0 * ui.text_style_height(&egui::TextStyle::Monospace) + 8.0;
                 self.half_page = ((ui.available_height() / row_h) as usize / 2).max(1);
                 if self.entries.is_empty() {
-                    ui.label(text("No annotations", DIM));
+                    ui.label(text("No annotations", th.panel_dim));
                     return;
                 }
                 if self.shown.is_empty() {
-                    ui.label(text("No matches", DIM));
+                    ui.label(text("No matches", th.panel_dim));
                     return;
                 }
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -190,7 +193,7 @@ impl AnnotList {
                         let selected = Some(row) == self.nav.selected();
                         let frame = egui::Frame::new()
                             .fill(if selected {
-                                SELECTED_BG
+                                th.panel_selected_bg
                             } else {
                                 Color32::TRANSPARENT
                             })
@@ -198,8 +201,9 @@ impl AnnotList {
                         let r = frame.show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                let swatch =
-                                    e.color.map_or(DIM, |[r, g, b]| Color32::from_rgb(r, g, b));
+                                let swatch = e
+                                    .color
+                                    .map_or(th.panel_dim, |[r, g, b]| Color32::from_rgb(r, g, b));
                                 let (rect, _) = ui.allocate_exact_size(
                                     egui::vec2(10.0, 10.0),
                                     egui::Sense::hover(),
@@ -213,18 +217,18 @@ impl AnnotList {
                                     .category
                                     .and_then(|c| names.get(c))
                                     .map_or("Uncategorised", |n| n.as_str());
-                                ui.label(text(&format!("p. {page}  {cat}"), DIM));
+                                ui.label(text(&format!("p. {page}  {cat}"), th.panel_dim));
                             });
                             let mut t: String = e.text.chars().take(TEXT_CHARS).collect();
                             if e.text.chars().count() > TEXT_CHARS {
                                 t.push('…');
                             }
                             if !t.is_empty() {
-                                ui.add(egui::Label::new(text(&t, FG)).wrap());
+                                ui.add(egui::Label::new(text(&t, th.panel_fg)).wrap());
                             }
                             if !e.comment.is_empty() {
                                 let c = e.comment.replace('\n', " ");
-                                ui.add(egui::Label::new(text(&c, DIM).italics()).wrap());
+                                ui.add(egui::Label::new(text(&c, th.panel_dim).italics()).wrap());
                             }
                         });
                         if selected {

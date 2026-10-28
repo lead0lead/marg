@@ -1,0 +1,34 @@
+# marg theme: gruvbox dark (palette by Pavel Pertsev, MIT).
+# Use it with `theme = "themes/gruvbox-dark.toml"` at the top of config.toml
+# (copy this file to ~/.config/marg/themes/). Entries in config.toml win.
+# Pair it with dark pages: `[view] recolor = true`, or `gr` while reading.
+
+[colors]
+background = "#1D2021"
+page_edge = "#00000080"
+statusbar_bg = "#282828"
+statusbar_fg = "#EBDBB2"
+statusbar_warn = "#FABD2F"
+statusbar_error = "#FB4934"
+panel_bg = "#282828"
+panel_fg = "#EBDBB2"
+panel_dim = "#928374"
+panel_border = "#504945"
+panel_selected_bg = "#3C3836"
+editor_selection = "#504945"
+hint_bg = "#FABD2F"
+hint_fg = "#282828"
+hint_typed = "#B57614"
+hint_border = "#D79921"
+selection = "#83A59866"
+caret = "#FE8019"
+caret_fill = "#FE801933"
+grid_line = "#83A59866"
+grid_cell = "#83A59844"
+recolor_fg = "#EBDBB2"
+recolor_bg = "#282828"
+
+[fonts]
+# file = "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf"
+size = 12.0
+hint_size = 12.0

@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 3 (notes & boxes) built on branch `phase-3-notes` (not merged); waiting for the user to try it. |
-| **Current phase** | 3 — notes & boxes, built; user check pending |
-| **Next step** | The user annotates a full paper (highlights, comments, notes, boxes) with the Phase 3 build and checks it in another viewer and via Zotero's "Import annotations"; also dead keys and umlauts in the comment editor on the real keyboard (Xvfb could not test dead keys). Then fixes from their feedback, merge into `main`, Phase 4 in a fresh session. |
+| **Status** | Phases 3 and 3b merged into `main` and pushed on 2026-10-28 after the user's checks. Phase 4 not started. |
+| **Current phase** | 4 — reading features, next |
+| **Next step** | Start Phase 4 in a fresh session, on branch `phase-4-reading`: plan the steps (single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and following, help overlay, `:help` page; §11, §2.3–2.6, §2.12), then one commit per step. New overlays use the theme colors (§6 "Theming"). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (end of Phase 3 build) |
+| **Last updated** | 2026-10-28 (Phase 3b merged) |
 
 ---
 
@@ -758,6 +758,9 @@ annotation is selected): `1`–`5` `annot.recolor(1)`…`(5)`, `U`
 have fixed keys (§2.8, §2.10). New modes in the status bar: `INSERT`,
 `BOX`, `ANNOTATIONS`.
 
+**As implemented (Phase 3b):** Normal `gr` (`view.recolor`) toggles dark
+pages.
+
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
 link, double/triple-click selects a word/line, right-click on a selection or
@@ -844,7 +847,115 @@ Reference: Zathura's minimalism. No toolbar, no menu bar, no icons.
 - Fonts: egui's bundled default fonts. No extra font files in v1 (no licence
   bookkeeping needed). If a font is added later, record its licence in
   `ASSETS.md`.
-- Dark/recolored page rendering is not in v1 (see §13).
+- Dark/recolored page rendering: planned in Phase 3b (below).
+
+### Theming (Phase 3b, as implemented; user's choice "A", 2026-10-28)
+
+Goal: marg's look is fully configurable and shareable, like qutebrowser's
+"ricing", without bloat: no new dependencies, no scripting, theme values
+resolved once at config load (no per-frame cost). Out of scope (options
+B and C, not chosen): runtime `:set`/`:bind`, remappable Insert/Box/list
+keys, aliases, userscripts.
+
+**Colors** — `[colors]`, every color marg draws, `#RRGGBB` or
+`#RRGGBBAA`. Defaults are today's look:
+
+| Key | Default | Used for |
+|---|---|---|
+| `background` | `#2B2B2B` | around the pages |
+| `page_edge` | `#0000005A` | 1 px line at page edges |
+| `statusbar_bg` / `statusbar_fg` | `#1E1E1E` / `#D0D0D0` | status bar, command line |
+| `statusbar_warn` / `statusbar_error` | `#FFC060` / `#FF7070` | messages |
+| `panel_bg` / `panel_fg` / `panel_dim` | `#1E1E1E` / `#D0D0D0` / `#808080` | lists, editor, tooltips, debug overlay |
+| `panel_border` | `#555555` | editor and tooltip border |
+| `panel_selected_bg` | `#3A3A3A` | selected list row |
+| `editor_selection` | `#2D4E8F` | selected text in the comment editor |
+| `hint_bg` / `hint_fg` / `hint_typed` / `hint_border` | `#FFD84D` / `#000000` / `#9A8020` / `#806810` | hint and grid labels |
+| `selection` | `#3D7EFF59` | text selection |
+| `caret` / `caret_fill` | `#E02020` / `#E0202028` | caret block |
+| `grid_line` / `grid_cell` | `#3D7EFF5A` / `#3D7EFF3C` | box grid, picked cell |
+| `recolor_fg` / `recolor_bg` | `#D0D0D0` / `#1E1E1E` | what black and white become on recolored pages |
+
+The recent list's "missing file" grey becomes `panel_dim`. Category
+colors stay in `[[category]]` (they are written into PDFs and must match
+Zotero's), not in themes.
+
+**Fonts** — `[fonts]`: `file = ""` (path to a `.ttf`/`.otf` on the
+user's system, `~` expanded; empty = egui's built-in monospace), `size =
+12.0` (status bar, lists, editor, tooltips), `hint_size = 12.0`. marg
+still ships no font files, so no licence bookkeeping. A font that fails to
+load falls back to the built-in one with an error message. Startup is
+measured with a large font against the 150 ms target.
+
+**Status bar** — `[statusbar]`: `left = ["mode", "file", "page", "zoom",
+"layout", "unsaved"]`, `right = ["keys"]` (typed hint label or pending
+key sequence; `search` joins in Phase 4), `separator = "  "`. Messages
+still replace the right side for `ui.message_secs`. Unknown parts are
+reported at load and skipped. Prompts (`:`, category prompt, Box mode
+help) replace the left side as now.
+
+**Theme files** — top-level `theme = "themes/gruvbox.toml"` in
+`config.toml` (relative to the config folder, `~` expanded). A theme file
+holds only `[colors]` and `[fonts]`; entries in `config.toml` override the
+theme's. A broken theme file: error message, defaults for its values.
+Two example themes ship in `docs/themes/` (a light one and a dark one),
+loaded by a test so they never go stale.
+
+**Dark pages** — `[view] recolor = false`; command `view.recolor`
+toggles it for the session (default key `gr`; Zathura's `Ctrl-r` is redo
+in marg). Recoloring happens on the document thread: page content is
+drawn, tinted (MuPDF `tint`: black → `recolor_fg`, white → `recolor_bg`),
+then annotations and form fields are drawn on top in their own colors.
+The flag is part of the render key, so toggling re-renders. Risk: MuPDF
+draws highlights with multiply blending, which nearly vanishes on a dark
+page; check with screenshots in that step and pick a fix (e.g. draw
+highlights as overlays from the annotation listing) with the user.
+
+**Steps** (branch `phase-3b-theme`, one commit each): 1 `[colors]` and
+the theme struct (all hard-coded colors read from it); 2 theme files; 3
+fonts; 4 status bar parts; 5 dark pages; 6 example themes, docs,
+handover.
+
+**As implemented (Phase 3b):**
+
+- `[colors]`: `marg-core/src/theme.rs` (`Rgba`, `ColorsConfig`); the app
+  converts them once into `marg/src/theme.rs` `Theme` (egui colors and
+  the hint font), passed to every draw function. Small changes from
+  before: comment text is `panel_fg` (was `#DDDDDD`), the debug overlay
+  uses `panel_bg` (was translucent black), the missing-file grey is
+  `panel_dim`. Annotation-derived colors (provisional annotations, the
+  selected annotation's outline) are not theme colors.
+- Theme files: `Config::with_theme` checks the config and the theme file
+  separately (errors name the file and line), then fills in the theme's
+  values where the config has none (per key). Unknown sections in a
+  theme file are an error. A missing or broken theme: the config alone,
+  plus an error message. `theme` is resolved against the config folder
+  (`~` expanded; absolute paths work).
+- `[fonts]`: the file is read and checked with `skrifa` (§9) before egui
+  gets it; it becomes the first font of both egui families, egui's own
+  fonts fill in missing characters. `size` sets the Monospace, Body and
+  Button text styles; `hint_size` the hint and grid labels (both clamped
+  to 4–64). The status bar is at least `size + 8` px high. Reading and
+  checking: 2.6 ms for a 2.5 MB font, 7.4 ms for a 26 MB CJK collection
+  (release); egui builds the font lazily in the first frame, no
+  measurable difference to the first page on Xvfb.
+- `[statusbar]`: parts `mode`, `file`, `page`, `zoom`, `layout`,
+  `unsaved`, `keys`; empty parts are left out with their separator.
+  Unknown names: an error message at start ("statusbar: unknown part …
+  (known: …)"), the rest is used. Messages and the comment editor's hint
+  still replace the right side.
+- Dark pages: `[view] recolor`, `gr` (`view.recolor`, "Dark pages on" /
+  "off"). `RenderKey.recolor` (`marg_pdf::Recolor`); `Doc::render` runs
+  the page content, tints it (`Pixmap::tint`), runs annotations and
+  widgets into a transparent pixmap and composites it (premultiplied
+  "over") on top: drawn directly, a 40% yellow highlight came out as
+  (30, 28, 18). Cost: 64 → 70 ms for a 876×1263 render. Images are
+  recolored like the text (Zathura without "keephue"). Pages still
+  rendering are filled with `recolor_bg`; renders in the other coloring
+  stand in until the new ones arrive (never blank).
+- Example themes: `docs/themes/gruvbox-dark.toml`,
+  `docs/themes/solarized-light.toml`; a test loads both and checks that
+  they set every `[colors]` key.
 
 ---
 
@@ -940,6 +1051,10 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 `comment_max_height = 0.4`, `annot_list_width = 0.35`; new key table
 `[keys.annot]`.
 
+**As implemented (Phase 3b):** top-level `theme = ""`; `[view] recolor =
+false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
+"Theming").
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -1001,6 +1116,7 @@ render.
 | Logging | `log` + `simplelog` (file + stderr) | Simple, file output |
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
+| Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
 Licence note: MuPDF is AGPL-3.0. That is fine for a private personal tool;
@@ -1065,7 +1181,12 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   conversion to screen pixels happens only in the app layer.
 - **All tuning values come from config defaults**, defined in one place in
   `marg-core` (`config.rs`).
-- Release builds: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`;
+- Release builds: `opt-level = 3`. Local `--release` builds are
+  incremental without LTO (changed 2026-10-28 after the user found
+  rebuilds slow: ~80 s per change with LTO, ~6 s without, 1 s
+  incremental; text extraction and render times measured the same).
+  Published binaries use `--profile dist` (`lto = "thin"`,
+  `codegen-units = 1`);
   Windows built with the MSVC toolchain and the **dynamic** CRT: `mupdf-sys`
   builds MuPDF's own `platform/win32/mupdf.sln`, whose projects use `/MD`
   (Release) and `/MDd` (Debug), so `+crt-static` would mismatch. The `.exe`
@@ -1186,6 +1307,7 @@ Each phase ends with something the user can try, and a short check by them.
 | **1. Viewer** | Continuous layout, rendering thread, cache and pre-render, scrolling, page navigation, counts, zoom and fit modes, command registry, TOML keymap with remapping, status bar, command line (`:q`, `:e`), state file (reopen at last position), recent files, debug overlay, startup timing. | The user reads a paper and a book with it and checks the speed targets in the debug overlay. |
 | **2. Select & highlight** — **decision milestone** | Structured text model, two-stage hints (`f`, `F`), Caret and Visual modes with all motions, mouse selection, `y` copy, highlights `1`–`5` and underline `U`, provisional overlays, incremental save, autosave, backups, external-change detection, undo/redo. | **The user reads real papers for about a week and decides whether keyboard selection is fast enough and whether to continue.** |
 | **3. Notes & boxes** | Comment popup (`c`, `e`), notes (`i`), box mode with grid hints, adjust and snap, annotation selection with `ga` (`]a`, `[a`, click and `x` delete were built in Phase 2), edit/recolor/toggle, tooltips, annotation list panel, reading categories from foreign annotations. | The user annotates a full paper (highlights, comments, boxes) and checks them in another viewer and via Zotero's "Import annotations". |
+| **3b. Theming** (added 2026-10-28, user's choice "A") | `[colors]` for every drawn color, `[fonts]` (user font file, sizes), configurable status bar parts, `theme = ` files, dark/recolored pages (§6 "Theming"). | The user rices marg with their own theme and reads with dark pages. |
 | **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay, `:help` page. | The user reads a slide deck and a book chapter with it. |
 | **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, README with the cheat sheet (§2.12), tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
 
@@ -1232,6 +1354,11 @@ building more.
   Decide the defaults after trying.
 - **Words include punctuation** (vim's `W`, not `w`): a selection to a word
   end takes the comma or full stop with it. Confirm or change.
+- **Phase 3b choices to confirm**: dark pages recolor images too (a
+  "keep hue" option like Zathura's is possible: recolor only, then restore
+  image areas from `Request::Images` boxes); `gr` as the key; theme files
+  may not set `[statusbar]` (only colors and fonts); the two example
+  themes.
 - **Phase 3 choices to confirm** (Claude's defaults, the user's call after
   trying): annotation list drawn over the pages instead of beside them;
   note icon above the caret character (or top left of the visible page);
@@ -1347,6 +1474,28 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-28 — Phase 3b: theming
+- Done (branch `phase-3b-theme`, not merged): Phase 3 merged into `main`
+  (local) after the user's check. Plan recorded (§6 "Theming", §11), then
+  one commit per step: `[colors]`; theme files; `[fonts]`; `[statusbar]`;
+  dark pages (`gr`); example themes and docs.
+- Decisions: the user approved adding `skrifa` (to check font files,
+  since egui panics on a broken one) over a `catch_unwind` workaround.
+- Tried and failed: dark pages drawn in one pass made highlights vanish
+  (multiply blending on a dark page); fixed with a separate annotation
+  layer. A first font timing on Xvfb suggested +70 ms; measured in
+  detail it was noise (reading + checking 2.6–7.4 ms).
+- State: builds; 138 tests pass; clippy and fmt clean (local). Nothing
+  pushed; CI has not run on Phase 3 or 3b.
+- User check: the user tried the theming ("tried the theming, merge it
+  and push everything"). Merged into `main` and pushed with all branches.
+- Build time: the user found `cargo run --release` slow at the last step.
+  Local release builds are now incremental without LTO (~80 s → 1–2 s per
+  change, same measured speed); LTO moved to `--profile dist` (§9).
+- Next: Phase 4 (reading features) in a fresh session.
+- Watch out: `PageCache` holds the recolor state (`set_recolor`); the
+  paper color under rendering pages follows it.
 
 ### 2026-10-28 — Phase 3: notes & boxes
 - Done (branch `phase-3-notes`, not merged), one commit per step:

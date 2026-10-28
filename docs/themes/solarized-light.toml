@@ -1,0 +1,33 @@
+# marg theme: solarized light (palette by Ethan Schoonover, MIT).
+# Use it with `theme = "themes/solarized-light.toml"` at the top of
+# config.toml (copy this file to ~/.config/marg/themes/). Entries in
+# config.toml win. Dark pages (`gr`) use recolor_fg on recolor_bg.
+
+[colors]
+background = "#EEE8D5"
+page_edge = "#93A1A1"
+statusbar_bg = "#FDF6E3"
+statusbar_fg = "#586E75"
+statusbar_warn = "#B58900"
+statusbar_error = "#DC322F"
+panel_bg = "#FDF6E3"
+panel_fg = "#586E75"
+panel_dim = "#93A1A1"
+panel_border = "#93A1A1"
+panel_selected_bg = "#EEE8D5"
+editor_selection = "#D5E1E1"
+hint_bg = "#B58900"
+hint_fg = "#FDF6E3"
+hint_typed = "#EEE8D5"
+hint_border = "#946F00"
+selection = "#268BD255"
+caret = "#DC322F"
+caret_fill = "#DC322F28"
+grid_line = "#268BD266"
+grid_cell = "#268BD240"
+recolor_fg = "#586E75"
+recolor_bg = "#FDF6E3"
+
+[fonts]
+size = 12.0
+hint_size = 12.0

@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, text::LayoutJob};
+use eframe::egui::{self, Color32, Pos2, Rect, text::LayoutJob};
 use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
 use marg_core::config::{HintMode, HintsConfig};
@@ -11,14 +11,7 @@ use marg_core::hints::{HintInput, labels};
 use marg_core::text::{BBox, PageText};
 use marg_core::view::View;
 
-const HINT_BG: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x4D);
-const HINT_FG: Color32 = Color32::BLACK;
-const HINT_TYPED: Color32 = Color32::from_rgb(0x9A, 0x80, 0x20);
-const HINT_EDGE: Color32 = Color32::from_rgb(0x80, 0x68, 0x10);
-/// `#3D7EFF` at 35%.
-const SELECTION: Color32 = Color32::from_rgba_unmultiplied_const(0x3D, 0x7E, 0xFF, 89);
-const CARET: Color32 = Color32::from_rgb(0xE0, 0x20, 0x20);
-const CARET_FILL: Color32 = Color32::from_rgba_unmultiplied_const(0xE0, 0x20, 0x20, 40);
+use crate::theme::Theme;
 
 /// The caret: a character position, and the horizontal position that
 /// vertical motions keep.
@@ -204,11 +197,12 @@ impl Hinting {
     pub fn draw(
         &self,
         painter: &egui::Painter,
+        th: &Theme,
         view: &View,
         area: Rect,
         texts: &[Option<PageText>],
     ) {
-        let font = FontId::monospace(12.0);
+        let font = th.hint_font.clone();
         for (i, label) in self.input.labels().iter().enumerate() {
             if !self.input.matches(i) {
                 continue;
@@ -231,8 +225,8 @@ impl Hinting {
             let typed = self.input.typed().len();
             let mut job = LayoutJob::default();
             let fmt = |color| egui::TextFormat::simple(font.clone(), color);
-            job.append(&label[..typed], 0.0, fmt(HINT_TYPED));
-            job.append(&label[typed..], 0.0, fmt(HINT_FG));
+            job.append(&label[..typed], 0.0, fmt(th.hint_typed));
+            job.append(&label[typed..], 0.0, fmt(th.hint_fg));
             let galley = painter.layout_job(job);
             let size = galley.size() + egui::vec2(6.0, 2.0);
             let min = if corner {
@@ -251,11 +245,11 @@ impl Hinting {
             painter.rect(
                 rect,
                 3.0,
-                HINT_BG,
-                egui::Stroke::new(1.0, HINT_EDGE),
+                th.hint_bg,
+                egui::Stroke::new(1.0, th.hint_border),
                 egui::StrokeKind::Inside,
             );
-            painter.galley(rect.min + egui::vec2(3.0, 1.0), galley, HINT_FG);
+            painter.galley(rect.min + egui::vec2(3.0, 1.0), galley, th.hint_fg);
         }
     }
 }
@@ -263,6 +257,7 @@ impl Hinting {
 /// Draw the selection: one translucent box per selected line.
 pub fn draw_selection(
     painter: &egui::Painter,
+    th: &Theme,
     view: &View,
     area: Rect,
     sel: &Selection,
@@ -271,7 +266,7 @@ pub fn draw_selection(
     let visible = view.visible_pages();
     for (page, b) in sel.rects(texts) {
         if visible.contains(&page) {
-            painter.rect_filled(screen_rect(view, area, page, b), 0.0, SELECTION);
+            painter.rect_filled(screen_rect(view, area, page, b), 0.0, th.selection);
         }
     }
 }
@@ -280,6 +275,7 @@ pub fn draw_selection(
 /// cursor (the caret is on the character, not between two).
 pub fn draw_caret(
     painter: &egui::Painter,
+    th: &Theme,
     view: &View,
     area: Rect,
     caret: &Caret,
@@ -294,8 +290,8 @@ pub fn draw_caret(
     painter.rect(
         r,
         1.0,
-        CARET_FILL,
-        egui::Stroke::new(1.5, CARET),
+        th.caret_fill,
+        egui::Stroke::new(1.5, th.caret),
         egui::StrokeKind::Outside,
     );
 }

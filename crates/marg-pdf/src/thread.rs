@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
 use marg_core::text::{BBox, PageText};
 
-use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
+use crate::document::{Doc, DocInfo, PixelRect, Pixels, Recolor, SaveError, SaveReport};
 
 /// Render scale as integer thousandths of a pixel per point, so it can be
 /// used as a cache key.
@@ -38,6 +38,8 @@ pub struct Tile {
 /// One render job: a whole page, or one tile of it, at a scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderKey {
+    /// Dark pages: recolor the page content (not annotations).
+    pub recolor: Option<Recolor>,
     pub page: usize,
     /// The page's revision as the UI knows it: the number of annotation
     /// edits on it. Renders always show the current state; the revision
@@ -470,9 +472,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
         let start = Instant::now();
         let result = match &doc {
             None => Err("no document open".into()),
-            Some((d, info)) => {
-                pixel_rect(info, key).and_then(|r| d.render(key.page, key.scale.get(), r))
-            }
+            Some((d, info)) => pixel_rect(info, key)
+                .and_then(|r| d.render(key.page, key.scale.get(), r, key.recolor)),
         };
         let resp = Response::Rendered {
             generation,

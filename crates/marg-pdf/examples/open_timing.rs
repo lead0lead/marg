@@ -27,6 +27,7 @@ fn main() {
     );
     t.send(Request::Render {
         keys: vec![RenderKey {
+            recolor: None,
             rev: 0,
             page: 0,
             scale: Scale::from_f32(1.5),
@@ -40,6 +41,25 @@ fn main() {
     };
     let px = result.expect("render");
     println!("page 1 at 1.5x: {}x{} in {took:?}", px.width, px.height);
+    t.send(Request::Render {
+        keys: vec![RenderKey {
+            recolor: Some(marg_pdf::Recolor {
+                fg: [0xD0; 3],
+                bg: [0x1E; 3],
+            }),
+            rev: 0,
+            page: 0,
+            scale: Scale::from_f32(1.5),
+            tile: None,
+        }],
+        received: 1,
+    });
+    let Some(Response::Rendered { result, took, .. }) = t.recv_timeout(Duration::from_secs(60))
+    else {
+        panic!("no render response")
+    };
+    result.expect("render");
+    println!("page 1 at 1.5x, dark: {took:?}");
     let text_start = Instant::now();
     t.send(Request::Text(0));
     let Some(Response::Text { result, .. }) = t.recv_timeout(Duration::from_secs(60)) else {

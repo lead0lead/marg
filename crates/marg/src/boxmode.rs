@@ -1,19 +1,14 @@
 //! Box mode: pick two grid cells for the corners (or drag with the
 //! mouse), then adjust the box and confirm it.
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect};
+use eframe::egui::{self, Color32, Pos2, Rect};
 use marg_core::boxsel::{BoxSel, grid_cell, snap_target};
 use marg_core::hints::{HintInput, labels};
 use marg_core::text::BBox;
 use marg_core::view::View;
 
 use crate::select::screen_rect;
-
-const GRID_LINE: Color32 = Color32::from_rgba_unmultiplied_const(0x3D, 0x7E, 0xFF, 90);
-const FIRST_CELL: Color32 = Color32::from_rgba_unmultiplied_const(0x3D, 0x7E, 0xFF, 60);
-const LABEL_BG: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x4D);
-const LABEL_EDGE: Color32 = Color32::from_rgb(0x80, 0x68, 0x10);
-const LABEL_TYPED: Color32 = Color32::from_rgb(0x9A, 0x80, 0x20);
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy)]
 enum Stage {
@@ -148,7 +143,14 @@ impl BoxMode {
     }
 
     /// Draw the grid (while picking cells) or the box.
-    pub fn draw(&self, painter: &egui::Painter, view: &View, area: Rect, color: Color32) {
+    pub fn draw(
+        &self,
+        painter: &egui::Painter,
+        th: &Theme,
+        view: &View,
+        area: Rect,
+        color: Color32,
+    ) {
         if let Some(s) = &self.sel {
             let r = screen_rect(view, area, s.page, s.rect);
             painter.rect_stroke(
@@ -170,9 +172,9 @@ impl BoxMode {
         }
         let shift = area.min.to_vec2();
         if let Stage::Second(first) = self.stage {
-            painter.rect_filled(first.translate(shift), 0.0, FIRST_CELL);
+            painter.rect_filled(first.translate(shift), 0.0, th.grid_cell);
         }
-        let stroke = egui::Stroke::new(1.0, GRID_LINE);
+        let stroke = egui::Stroke::new(1.0, th.grid_line);
         for c in 1..self.cols {
             let x = self.cell(view, c).min.x + shift.x;
             painter.line_segment(
@@ -187,7 +189,7 @@ impl BoxMode {
                 stroke,
             );
         }
-        let font = FontId::monospace(12.0);
+        let font = th.hint_font.clone();
         let typed = self.input.typed().len();
         for (i, label) in self.input.labels().iter().enumerate() {
             if !self.input.matches(i) {
@@ -196,19 +198,19 @@ impl BoxMode {
             let center = self.cell(view, i).translate(shift).center();
             let mut job = egui::text::LayoutJob::default();
             let fmt = |c| egui::TextFormat::simple(font.clone(), c);
-            job.append(&label[..typed], 0.0, fmt(LABEL_TYPED));
-            job.append(&label[typed..], 0.0, fmt(Color32::BLACK));
+            job.append(&label[..typed], 0.0, fmt(th.hint_typed));
+            job.append(&label[typed..], 0.0, fmt(th.hint_fg));
             let galley = painter.layout_job(job);
             let size = galley.size() + egui::vec2(6.0, 2.0);
             let rect = Rect::from_center_size(center, size);
             painter.rect(
                 rect,
                 3.0,
-                LABEL_BG,
-                egui::Stroke::new(1.0, LABEL_EDGE),
+                th.hint_bg,
+                egui::Stroke::new(1.0, th.hint_border),
                 egui::StrokeKind::Inside,
             );
-            painter.galley(rect.min + egui::vec2(3.0, 1.0), galley, Color32::BLACK);
+            painter.galley(rect.min + egui::vec2(3.0, 1.0), galley, th.hint_fg);
         }
     }
 }

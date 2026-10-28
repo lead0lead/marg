@@ -21,7 +21,7 @@ use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
+use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
@@ -32,12 +32,8 @@ use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::statefile;
-
-const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
-const STATUS_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-const STATUS_FG: Color32 = Color32::from_rgb(0xD0, 0xD0, 0xD0);
-const WARN_FG: Color32 = Color32::from_rgb(0xFF, 0xC0, 0x60);
-const ERROR_FG: Color32 = Color32::from_rgb(0xFF, 0x70, 0x70);
+use crate::theme::Theme;
+use marg_core::theme::{StatusPart, status_line};
 
 /// A successfully opened document.
 struct OpenDoc {
@@ -203,6 +199,10 @@ impl Mode {
 
 pub struct MargApp {
     config: Config,
+    /// `config.colors` as egui colors.
+    theme: Theme,
+    /// `[statusbar]` parts, left and right.
+    status_parts: (Vec<StatusPart>, Vec<StatusPart>),
     version: String,
     keymap: Keymap,
     caret_map: Keymap,
@@ -264,6 +264,8 @@ pub struct MargApp {
     frame_ms: Rolling,
     /// Last render time and scale per page, for the debug overlay.
     last_render: HashMap<usize, (Duration, Scale)>,
+    /// Dark pages are on.
+    recolor: bool,
     timing: Option<Timing>,
 }
 
@@ -318,6 +320,9 @@ impl MargApp {
             log::warn!("{w}");
         }
         let mut errors = s.errors;
+        let (left, right, w) = s.config.statusbar.parts();
+        errors.extend(w);
+        errors.extend(crate::theme::install_fonts(&cc.egui_ctx, &s.config.fonts));
         let state = match s.state_path.as_deref().map(statefile::load) {
             Some(Ok(state)) => state,
             Some(Err(e)) => {
@@ -336,6 +341,8 @@ impl MargApp {
         let author = annotation_author(&s.config.annotation.author);
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
+            theme: Theme::new(&s.config.colors, &s.config.fonts),
+            status_parts: (left, right),
             config: s.config,
             version: s.version,
             keymap,
@@ -377,12 +384,14 @@ impl MargApp {
             debug: false,
             frame_ms: Rolling::new(120),
             last_render: HashMap::new(),
+            recolor: false,
             timing: s.timing_start.map(|start| Timing {
                 start,
                 opened: false,
                 shown: false,
             }),
         };
+        app.set_recolor(app.config.view.recolor);
         if let Some(t) = &app.timing {
             t.log("window created");
         }
@@ -1049,6 +1058,17 @@ impl MargApp {
         });
         self.last_category = b.category;
         self.show(Level::Info, format!("Box: {}", cat.name));
+    }
+
+    /// Dark pages on or off; the visible pages are rendered again.
+    fn set_recolor(&mut self, on: bool) {
+        self.recolor = on;
+        let rgb = |c: marg_core::theme::Rgba| [c.0[0], c.0[1], c.0[2]];
+        let colors = &self.config.colors;
+        self.cache.set_recolor(on.then(|| Recolor {
+            fg: rgb(colors.recolor_fg),
+            bg: rgb(colors.recolor_bg),
+        }));
     }
 
     /// `A`: open the annotation list; asks for the text of annotated
@@ -2089,6 +2109,7 @@ impl MargApp {
         let ui_cfg = &self.config.ui;
         comment::tooltip(
             ctx,
+            &self.theme,
             text,
             anchor,
             area,
@@ -2329,6 +2350,16 @@ impl MargApp {
                 self.open_annot_list();
                 return;
             }
+            Command::Recolor => {
+                self.set_recolor(!self.recolor);
+                let msg = if self.recolor {
+                    "Dark pages on"
+                } else {
+                    "Dark pages off"
+                };
+                self.show(Level::Info, msg.into());
+                return;
+            }
             Command::BoxMode => {
                 self.leave_text_modes();
                 self.selected_annot = None;
@@ -2411,6 +2442,7 @@ impl MargApp {
             | Command::Note
             | Command::BoxMode
             | Command::AnnotList
+            | Command::Recolor
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2509,29 +2541,54 @@ impl MargApp {
         }
     }
 
-    fn status_left(&self) -> String {
-        let mode = self.mode.label();
-        let Some(open) = self.open.as_ref().filter(|_| self.mode != Mode::Recent) else {
-            return mode.into();
-        };
-        let v = &open.view;
-        let page = v.current_page();
-        let count = v.page_count();
-        let page_text = match &open.info.labels {
-            Some(labels) if labels[page] != (page + 1).to_string() => {
-                format!("{} ({}/{count})", labels[page], page + 1)
+    /// The text of one status bar part (empty: left out).
+    fn status_part(&self, part: StatusPart) -> String {
+        let open = self.open.as_ref().filter(|_| self.mode != Mode::Recent);
+        match (part, open) {
+            (StatusPart::Mode, _) => self.mode.label().into(),
+            (StatusPart::Keys, _) => {
+                if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                    h.typed().into()
+                } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
+                    b.typed().into()
+                } else if self.matcher.is_pending() {
+                    self.matcher.pending_text()
+                } else {
+                    String::new()
+                }
             }
-            _ => format!("{}/{count}", page + 1),
-        };
-        format!(
-            "{mode}  {}  {page_text}  {:.0}%  continuous{}",
-            open.file_name,
-            v.zoom() * 100.0,
-            if open.unsaved() { "  ●" } else { "" }
-        )
+            (_, None) => String::new(),
+            (StatusPart::File, Some(open)) => open.file_name.clone(),
+            (StatusPart::Page, Some(open)) => {
+                let v = &open.view;
+                let page = v.current_page();
+                let count = v.page_count();
+                match &open.info.labels {
+                    Some(labels) if labels[page] != (page + 1).to_string() => {
+                        format!("{} ({}/{count})", labels[page], page + 1)
+                    }
+                    _ => format!("{}/{count}", page + 1),
+                }
+            }
+            (StatusPart::Zoom, Some(open)) => format!("{:.0}%", open.view.zoom() * 100.0),
+            (StatusPart::Layout, Some(_)) => "continuous".into(),
+            (StatusPart::Unsaved, Some(open)) => {
+                if open.unsaved() {
+                    "●".into()
+                } else {
+                    String::new()
+                }
+            }
+        }
+    }
+
+    fn status_left(&self) -> String {
+        let sep = &self.config.statusbar.separator;
+        status_line(&self.status_parts.0, sep, |p| self.status_part(p))
     }
 
     fn status_bar(&self, ui: &mut egui::Ui) {
+        let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
             if self.mode == Mode::Command {
@@ -2541,7 +2598,7 @@ impl MargApp {
                     .nth(self.cmdline.cursor())
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
-                ui.label(text(&format!(":{before}▏{after}"), STATUS_FG));
+                ui.label(text(&format!(":{before}▏{after}"), th.statusbar_fg));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
@@ -2550,27 +2607,25 @@ impl MargApp {
                 } else {
                     self.status_left()
                 };
-                ui.label(text(&left, STATUS_FG));
+                ui.label(text(&left, th.statusbar_fg));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let editing = self.editor.as_ref().filter(|_| self.mode == Mode::Insert);
                 if let Some(ed) =
                     editing.filter(|_| self.message.as_ref().is_none_or(|m| m.level == Level::Info))
                 {
-                    ui.label(text(ed.status(), STATUS_FG));
+                    ui.label(text(ed.status(), th.statusbar_fg));
                 } else if let Some(m) = &self.message {
                     let color = match m.level {
-                        Level::Info => STATUS_FG,
-                        Level::Warn => WARN_FG,
-                        Level::Error => ERROR_FG,
+                        Level::Info => th.statusbar_fg,
+                        Level::Warn => th.statusbar_warn,
+                        Level::Error => th.statusbar_error,
                     };
                     ui.add(egui::Label::new(text(&m.text, color)).truncate());
-                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
-                    ui.label(text(h.typed(), STATUS_FG));
-                } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
-                    ui.label(text(b.typed(), STATUS_FG));
-                } else if self.matcher.is_pending() {
-                    ui.label(text(&self.matcher.pending_text(), STATUS_FG));
+                } else {
+                    let sep = &self.config.statusbar.separator;
+                    let right = status_line(&self.status_parts.1, sep, |p| self.status_part(p));
+                    ui.label(text(&right, th.statusbar_fg));
                 }
             });
         });
@@ -2605,6 +2660,7 @@ impl eframe::App for MargApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
+        let th = self.theme.clone();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
         // Closing the window saves first, like `q`.
@@ -2631,7 +2687,12 @@ impl eframe::App for MargApp {
         }
 
         // Input first, so the status bar and pages show its effect this frame.
-        let status_h = self.config.ui.status_bar_px;
+        // Tall enough for the font.
+        let status_h = self
+            .config
+            .ui
+            .status_bar_px
+            .max(self.config.fonts.size.clamp(4.0, 64.0) + 8.0);
         let screen = ctx.content_rect();
         let area = egui::Rect::from_min_max(
             screen.min,
@@ -2643,7 +2704,7 @@ impl eframe::App for MargApp {
             .exact_size(status_h)
             .frame(
                 egui::Frame::new()
-                    .fill(STATUS_BG)
+                    .fill(th.statusbar_bg)
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
@@ -2666,19 +2727,19 @@ impl eframe::App for MargApp {
                     .show(&ctx, |ui| {
                         ui.set_min_size(egui::vec2(width, area.height()));
                         ui.set_max_size(egui::vec2(width, area.height()));
-                        list.draw(ui, &names, labels.as_deref());
+                        list.draw(ui, &th, &names, labels.as_deref());
                     });
             }
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BACKGROUND))
+            .frame(egui::Frame::new().fill(th.background))
             .show(ui, |ui| {
                 let area = ui.max_rect();
                 let ppp = ui.ctx().pixels_per_point();
                 if self.mode == Mode::Recent
                     && let Some(list) = &mut self.recent
                 {
-                    list.draw(ui);
+                    list.draw(ui, &th);
                     return;
                 }
                 let Some(open) = &mut self.open else { return };
@@ -2695,9 +2756,14 @@ impl eframe::App for MargApp {
                 }
                 open.request_visible_text(&self.doc);
                 let painter = ui.painter_at(area);
-                let (exact, stale) =
-                    self.cache
-                        .draw(&painter, area, &open.view, &self.config.render, &open.revs);
+                let (exact, stale) = self.cache.draw(
+                    &painter,
+                    area,
+                    &open.view,
+                    &self.config.render,
+                    &open.revs,
+                    th.page_edge,
+                );
                 let cache = &self.cache;
                 open.provisional
                     .retain(|p| p.rev.is_none_or(|r| !cache.has_rev(p.spec.page, r)));
@@ -2707,12 +2773,12 @@ impl eframe::App for MargApp {
                     }
                 }
                 if let Some(sel) = &self.selection {
-                    select::draw_selection(&painter, &open.view, area, sel, &open.texts);
+                    select::draw_selection(&painter, &th, &open.view, area, sel, &open.texts);
                 }
                 if matches!(self.mode, Mode::Caret | Mode::Visual)
                     && let Some(c) = &self.caret
                 {
-                    select::draw_caret(&painter, &open.view, area, c, &open.texts);
+                    select::draw_caret(&painter, &th, &open.view, area, c, &open.texts);
                 }
                 if let Some((page, xref)) = self.selected_annot
                     && let Some(a) = open.annots[page]
@@ -2722,7 +2788,7 @@ impl eframe::App for MargApp {
                     select::draw_selected_annot(&painter, &open.view, area, a);
                 }
                 if let Some(h) = &self.hinting {
-                    h.draw(&painter, &open.view, area, &open.texts);
+                    h.draw(&painter, &th, &open.view, area, &open.texts);
                 }
                 if let Some(b) = &self.boxing {
                     let color = self
@@ -2731,7 +2797,7 @@ impl eframe::App for MargApp {
                         .get(usize::from(b.category) - 1)
                         .and_then(|c| parse_color(&c.color))
                         .map_or(Color32::RED, |[r, g, b]| Color32::from_rgb(r, g, b));
-                    b.draw(&painter, &open.view, area, color);
+                    b.draw(&painter, &th, &open.view, area, color);
                 }
                 if let Some(t) = &mut self.timing
                     && !t.shown
@@ -2747,6 +2813,7 @@ impl eframe::App for MargApp {
             let ui_cfg = &self.config.ui;
             ed.show(
                 &ctx,
+                &th,
                 anchor,
                 area,
                 ui_cfg.comment_width_px,
@@ -2763,6 +2830,7 @@ impl eframe::App for MargApp {
 
 impl MargApp {
     fn debug_overlay(&self, ctx: &egui::Context) {
+        let th = &self.theme;
         let mut lines = Vec::new();
         let ms = |v: Option<f32>| v.map_or("-".into(), |v| format!("{v:.1}"));
         lines.push(format!(
@@ -2807,11 +2875,11 @@ impl MargApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(Color32::from_black_alpha(200))
+                    .fill(th.panel_bg)
                     .inner_margin(8)
                     .show(ui, |ui| {
                         for l in lines {
-                            ui.label(egui::RichText::new(l).monospace().color(STATUS_FG));
+                            ui.label(egui::RichText::new(l).monospace().color(th.panel_fg));
                         }
                     });
             });

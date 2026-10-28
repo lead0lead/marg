@@ -92,6 +92,8 @@ pub enum Command {
     BoxMode,
     /// Open the annotation list.
     AnnotList,
+    /// Switch dark (recolored) pages on or off.
+    Recolor,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -285,6 +287,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("annotate.note", Command::Note, "new note"),
     ("annotate.box", Command::BoxMode, "box mode"),
     ("annot.list", Command::AnnotList, "annotation list"),
+    ("view.recolor", Command::Recolor, "dark pages on/off"),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,

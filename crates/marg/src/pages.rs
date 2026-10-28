@@ -5,12 +5,12 @@ use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use marg_core::config::RenderConfig;
 use marg_core::lru::ByteLru;
 use marg_core::view::View;
-use marg_pdf::{Pixels, RenderKey, Scale, Tile};
-
-const PAGE_EDGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 90);
+use marg_pdf::{Pixels, Recolor, RenderKey, Scale, Tile};
 
 pub struct PageCache {
     textures: ByteLru<RenderKey, egui::TextureHandle>,
+    /// Dark pages: how renders are wanted now.
+    recolor: Option<Recolor>,
 }
 
 /// The renders wanted for the current frame, most urgent first.
@@ -22,7 +22,14 @@ impl PageCache {
     pub fn new(cfg: &RenderConfig) -> Self {
         Self {
             textures: ByteLru::new(cfg.cache_mb * 1024 * 1024),
+            recolor: None,
         }
+    }
+
+    /// Recolor the pages from now on (or not). Renders with the old colors
+    /// stay as stand-ins until the new ones arrive.
+    pub fn set_recolor(&mut self, recolor: Option<Recolor>) {
+        self.recolor = recolor;
     }
 
     pub fn clear(&mut self) {
@@ -62,7 +69,8 @@ impl PageCache {
     /// Returns the keys not in the cache, most urgent first.
     pub fn plan(&mut self, view: &View, cfg: &RenderConfig, ppp: f32, revs: &[u32]) -> Plan {
         self.textures.next_frame();
-        let full = |page: usize, scale| full(page, revs[page], scale);
+        let recolor = self.recolor;
+        let full = |page: usize, scale| full(page, revs[page], scale, recolor);
         let scale = Scale::from_f32(view.zoom() * ppp);
         let tiled = view.zoom() > cfg.tile_above_zoom;
         let visible = view.visible_pages();
@@ -79,6 +87,7 @@ impl PageCache {
                     scale,
                     cfg.tile_px,
                     ppp,
+                    recolor,
                 ));
             }
             for page in visible.clone() {
@@ -109,7 +118,7 @@ impl PageCache {
     /// Returns whether every visible page was drawn from a full-page
     /// texture at the exact scale (not tiled, no fallback), and the visible
     /// pages drawn from a render older than their revision in `revs` (or
-    /// not at all).
+    /// not at all). `edge`: the line around each page.
     pub fn draw(
         &mut self,
         painter: &egui::Painter,
@@ -117,22 +126,27 @@ impl PageCache {
         view: &View,
         cfg: &RenderConfig,
         revs: &[u32],
+        edge: Color32,
     ) -> (bool, Vec<usize>) {
         let mut all_exact = true;
         let mut stale = Vec::new();
         let ppp = painter.pixels_per_point();
         let scale = Scale::from_f32(view.zoom() * ppp);
         let tiled = view.zoom() > cfg.tile_above_zoom;
+        // Under pages still rendering.
+        let paper = self.recolor.map_or(Color32::WHITE, |r| {
+            Color32::from_rgb(r.bg[0], r.bg[1], r.bg[2])
+        });
         for page in view.visible_pages() {
             let r = view.page_rect_on_screen(page);
             // Snap the page origin to device pixels so 1:1 textures are sharp.
             let snap = |v: f32| (v * ppp).round() / ppp;
             let origin = Pos2::new(snap(area.min.x + r.x), snap(area.min.y + r.y));
             let page_rect = Rect::from_min_size(origin, Vec2::new(r.w, r.h));
-            painter.rect_filled(page_rect, 0.0, Color32::WHITE);
+            painter.rect_filled(page_rect, 0.0, paper);
 
             let rev = revs[page];
-            let exact = full(page, rev, scale);
+            let exact = full(page, rev, scale, self.recolor);
             if !tiled && let Some(tex) = self.textures.get(&exact) {
                 let size = tex.size_vec2() / ppp;
                 painter.image(
@@ -159,7 +173,7 @@ impl PageCache {
             painter.rect_stroke(
                 page_rect,
                 0.0,
-                egui::Stroke::new(1.0 / ppp, PAGE_EDGE),
+                egui::Stroke::new(1.0 / ppp, edge),
                 egui::StrokeKind::Outside,
             );
         }
@@ -180,6 +194,7 @@ impl PageCache {
             .iter()
             .filter(|(k, _)| {
                 k.page == want.page
+                    && k.recolor == want.recolor
                     && k.rev == want.rev
                     && k.scale == want.scale
                     && k.tile.is_some()
@@ -200,7 +215,7 @@ impl PageCache {
     }
 
     /// The cached full-page texture of `page` closest in scale to
-    /// `target`, preferring revision `rev`.
+    /// `target`, preferring the current colors, then revision `rev`.
     fn best_fallback(&self, page: usize, rev: u32, target: Scale) -> Option<RenderKey> {
         let t = target.get();
         self.textures
@@ -210,15 +225,17 @@ impl PageCache {
             .min_by(|a, b| {
                 let da = (a.scale.get() / t).ln().abs();
                 let db = (b.scale.get() / t).ln().abs();
-                (a.rev != rev).cmp(&(b.rev != rev)).then(da.total_cmp(&db))
+                let other = |k: &RenderKey| (k.recolor != self.recolor, k.rev != rev);
+                other(a).cmp(&other(b)).then(da.total_cmp(&db))
             })
     }
 }
 
 const UV: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
 
-fn full(page: usize, rev: u32, scale: Scale) -> RenderKey {
+fn full(page: usize, rev: u32, scale: Scale, recolor: Option<Recolor>) -> RenderKey {
     RenderKey {
+        recolor,
         page,
         rev,
         scale,
@@ -234,6 +251,7 @@ fn visible_tiles(
     scale: Scale,
     size: u32,
     ppp: f32,
+    recolor: Option<Recolor>,
 ) -> impl Iterator<Item = RenderKey> {
     let r = view.page_rect_on_screen(page);
     let (vw, vh) = view.viewport();
@@ -256,6 +274,7 @@ fn visible_tiles(
     let (col_range, row_range) = (range(x0, x1, cols), range(y0, y1, rows));
     row_range.flat_map(move |row| {
         col_range.clone().map(move |col| RenderKey {
+            recolor,
             page,
             rev,
             scale,

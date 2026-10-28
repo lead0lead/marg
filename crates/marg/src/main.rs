@@ -17,6 +17,7 @@ mod recent;
 mod select;
 mod startup;
 mod statefile;
+mod theme;
 
 const GIT_HASH: &str = env!("MARG_GIT_HASH");
 
