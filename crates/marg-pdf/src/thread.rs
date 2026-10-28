@@ -426,7 +426,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                 return;
             }
             // An idle scan of many pages wakes the UI only now and then.
-            if annots_idle.is_empty() || annots_idle.len() % 64 == 0 {
+            if annots_idle.len().is_multiple_of(64) {
                 wake();
             }
             continue;
