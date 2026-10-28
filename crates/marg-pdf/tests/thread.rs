@@ -21,7 +21,7 @@ fn open(t: &DocThread, path: PathBuf) -> (u64, Result<DocInfo, String>) {
         Response::Opened {
             generation, result, ..
         } => (generation, result),
-        Response::Rendered { .. } => panic!("expected Opened"),
+        _ => panic!("expected Opened"),
     }
 }
 
@@ -38,7 +38,7 @@ fn render(t: &DocThread, key: RenderKey) -> (u64, RenderKey, Result<Pixels, Stri
             result,
             ..
         } => (generation, key, result),
-        Response::Opened { .. } => panic!("expected Rendered"),
+        _ => panic!("expected Rendered"),
     }
 }
 
@@ -216,8 +216,38 @@ fn keys_in_transit_are_not_rendered_twice() {
     let pages: Vec<usize> = std::iter::from_fn(|| t.recv_timeout(Duration::from_secs(2)))
         .map(|r| match r {
             Response::Rendered { key, .. } => key.page,
-            Response::Opened { .. } => panic!("unexpected Opened"),
+            _ => panic!("expected Rendered"),
         })
         .collect();
     assert_eq!(pages, [0, 1]);
+}
+
+#[test]
+fn text_requests_are_served_before_renders() {
+    let t = DocThread::spawn(|| ());
+    let (generation, _) = open(&t, fixture("columns.pdf"));
+    let keys = (0..2)
+        .map(|page| RenderKey {
+            page,
+            scale: Scale::from_f32(1.0),
+            tile: None,
+        })
+        .collect();
+    t.send(Request::Render { keys, received: 0 });
+    t.send(Request::Text(1));
+    let mut first_text = None;
+    for i in 0..3 {
+        if let Response::Text {
+            generation: g,
+            page,
+            result,
+        } = t.recv_timeout(WAIT).expect("response")
+        {
+            assert_eq!((g, page), (generation, 1));
+            assert_eq!(result.unwrap().lines.len(), 1);
+            first_text = Some(i);
+        }
+    }
+    // At most the render already started comes first.
+    assert!(first_text.is_some_and(|i| i <= 1), "{first_text:?}");
 }

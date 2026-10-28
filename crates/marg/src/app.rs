@@ -1,6 +1,6 @@
 //! The marg window: page view, status bar and command line.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
+use marg_core::text::PageText;
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response, Scale};
 
@@ -36,6 +37,21 @@ struct OpenDoc {
     generation: u64,
     file_name: String,
     view: View,
+    /// Text of each page, once extracted.
+    texts: Vec<Option<PageText>>,
+    /// Pages whose text has been requested.
+    text_requested: HashSet<usize>,
+}
+
+impl OpenDoc {
+    /// Ask for the text of the visible pages that do not have it yet.
+    fn request_visible_text(&mut self, doc: &DocThread) {
+        for p in self.view.visible_pages() {
+            if self.texts[p].is_none() && self.text_requested.insert(p) {
+                doc.send(Request::Text(p));
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -258,6 +274,20 @@ impl MargApp {
                         Err(e) => log::error!("render {key:?} failed: {e}"),
                     }
                 }
+                Response::Text {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(text) => open.texts[page] = Some(text),
+                        Err(e) => log::error!("text of page {} failed: {e}", page + 1),
+                    }
+                }
             }
         }
     }
@@ -305,6 +335,8 @@ impl MargApp {
             key,
             generation,
             file_name,
+            texts: vec![None; view.page_count()],
+            text_requested: HashSet::new(),
             view,
         }
     }
@@ -656,6 +688,7 @@ impl eframe::App for MargApp {
                     });
                     self.last_request = plan.keys;
                 }
+                open.request_visible_text(&self.doc);
                 let painter = ui.painter_at(area);
                 let exact = self
                     .cache

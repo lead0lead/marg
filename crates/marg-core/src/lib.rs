@@ -10,6 +10,7 @@ pub mod list;
 pub mod lru;
 pub mod state;
 pub mod stats;
+pub mod text;
 pub mod view;
 
 /// Crate version from `Cargo.toml`.

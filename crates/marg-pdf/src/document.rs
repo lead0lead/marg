@@ -2,8 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use marg_core::text::{BBox, Char, PageText};
 use mupdf::pdf::{PdfDocument, PdfObject};
-use mupdf::{Colorspace, Device, Matrix, MetadataName, Pixmap};
+use mupdf::{Colorspace, Device, Matrix, MetadataName, Pixmap, TextBlockContent, TextPageFlags};
 
 /// Page size in PDF points.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -234,5 +235,51 @@ impl Doc {
             height: rect.height,
             rgba,
         })
+    }
+
+    /// The structured text of page `index`, in points from the page's
+    /// top-left corner (the same frame as renders).
+    pub fn text(&self, index: usize) -> Result<PageText, String> {
+        let page = self.doc.load_page(index as i32).map_err(err)?;
+        let b = page.bounds().map_err(err)?;
+        let st = page
+            .to_text_page(TextPageFlags::empty())
+            .map_err(err)?
+            .structured();
+        let blocks = st
+            .blocks
+            .into_iter()
+            .filter_map(|block| match block.content {
+                TextBlockContent::Text { lines } => Some(lines),
+                _ => None,
+            })
+            .map(|lines| {
+                lines
+                    .into_iter()
+                    .map(|line| {
+                        line.chars
+                            .into_iter()
+                            .map(|c| {
+                                let q = c.quad;
+                                let xs = [q.ul.x, q.ur.x, q.ll.x, q.lr.x];
+                                let ys = [q.ul.y, q.ur.y, q.ll.y, q.lr.y];
+                                let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
+                                let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
+                                Char {
+                                    c: c.ch,
+                                    bbox: BBox::new(
+                                        min(xs) - b.x0,
+                                        min(ys) - b.y0,
+                                        max(xs) - b.x0,
+                                        max(ys) - b.y0,
+                                    ),
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        Ok(PageText::from_blocks(blocks))
     }
 }

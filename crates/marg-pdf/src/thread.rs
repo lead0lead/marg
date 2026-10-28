@@ -7,6 +7,8 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use marg_core::text::PageText;
+
 use crate::document::{Doc, DocInfo, PixelRect, Pixels};
 
 /// Render scale as integer thousandths of a pixel per point, so it can be
@@ -49,6 +51,8 @@ pub enum Request {
     /// number of `Rendered` responses the caller has taken so far: keys
     /// rendered after that are still in transit and are not rendered again.
     Render { keys: Vec<RenderKey>, received: u64 },
+    /// Extract the text of a page. Served before renders.
+    Text(usize),
 }
 
 pub enum Response {
@@ -64,6 +68,11 @@ pub enum Response {
         key: RenderKey,
         result: Result<Pixels, String>,
         took: Duration,
+    },
+    Text {
+        generation: u64,
+        page: usize,
+        result: Result<PageText, String>,
     },
 }
 
@@ -145,6 +154,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut doc: Option<(Doc, DocInfo)> = None;
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
+    let mut text_queue: VecDeque<usize> = VecDeque::new();
     // Rendered responses sent so far, and the keys of those the UI may not
     // have received yet, with their sequence numbers.
     let mut sent = 0u64;
@@ -152,7 +162,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     loop {
         // Block only when idle; otherwise take whatever arrived meanwhile.
         let mut incoming = Vec::new();
-        if queue.is_empty() {
+        if queue.is_empty() && text_queue.is_empty() {
             match rx.recv() {
                 Ok(r) => incoming.push(r),
                 Err(_) => return,
@@ -172,6 +182,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     let info = match Doc::open(&path) {
                         Ok((d, info)) => {
                             queue.clear();
+                            text_queue.clear();
                             generation += 1;
                             doc = Some((d, info.clone()));
                             Ok(info)
@@ -200,7 +211,30 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         .filter(|k| !in_transit.iter().any(|(_, t)| t == k))
                         .collect();
                 }
+                Request::Text(page) => {
+                    if !text_queue.contains(&page) {
+                        text_queue.push_back(page);
+                    }
+                }
             }
+        }
+        if let Some(page) = text_queue.pop_front() {
+            let result = match &doc {
+                None => Err("no document open".into()),
+                Some((d, _)) => d.text(page),
+            };
+            if tx
+                .send(Response::Text {
+                    generation,
+                    page,
+                    result,
+                })
+                .is_err()
+            {
+                return;
+            }
+            wake();
+            continue;
         }
         let Some(key) = queue.pop_front() else {
             continue;

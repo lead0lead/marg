@@ -1,0 +1,68 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 531 >>
+stream
+BT /F1 14 Tf 16 TL 72 740 Td
+(Two columns: a reading order test) Tj T*
+ET
+BT /F1 10 Tf 14 TL 72 700 Td
+(Readers mark what matters. Most) Tj T*
+(tools need a mouse for this; marg) Tj T*
+(uses hints and a caret instead.) Tj T*
+() Tj T*
+(The second paragraph starts here.) Tj T*
+(It talks about annota-) Tj T*
+(tions in the PDF itself.) Tj T*
+ET
+BT /F1 10 Tf 14 TL 320 700 Td
+(The right column comes next in) Tj T*
+(reading order. Does selection) Tj T*
+(follow it? It should!) Tj T*
+() Tj T*
+(A last paragraph ends the page.) Tj T*
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 72 >>
+stream
+BT /F1 10 Tf 16 TL 72 740 Td
+(Page two has one column of text.) Tj T*
+ET
+endstream
+endobj
+8 0 obj
+<< /Producer (marg gen_fixtures.py) /Title (marg columns fixture) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000253 00000 n 
+0000000379 00000 n 
+0000000476 00000 n 
+0000001058 00000 n 
+0000001180 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R /Info 8 0 R /ID [<6d617267636f6c756d6e736669787431> <6d617267636f6c756d6e736669787431>] >>
+startxref
+1264
+%%EOF
