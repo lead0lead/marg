@@ -65,6 +65,7 @@ fn open_missing_file_is_an_error() {
     assert!(info.is_err());
     // Rendering without a document is an error, not a crash.
     let key = RenderKey {
+        recolor: None,
         rev: 0,
         page: 0,
         scale: Scale::from_f32(1.0),
@@ -78,6 +79,7 @@ fn renders_whole_page_opaque() {
     let t = DocThread::spawn(|| ());
     open(&t, fixture("text.pdf")).1.unwrap();
     let key = RenderKey {
+        recolor: None,
         rev: 0,
         page: 0,
         scale: Scale::from_f32(1.5),
@@ -98,6 +100,7 @@ fn renders_edge_tile_clipped_to_page() {
     open(&t, fixture("text.pdf")).1.unwrap();
     // 612x792 at scale 1 with 512 px tiles: tile (1, 1) is 100x280.
     let key = RenderKey {
+        recolor: None,
         rev: 0,
         page: 0,
         scale: Scale::from_f32(1.0),
@@ -110,6 +113,7 @@ fn renders_edge_tile_clipped_to_page() {
     let px = render(&t, key).2.unwrap();
     assert_eq!((px.width, px.height), (100, 280));
     let outside = RenderKey {
+        recolor: None,
         rev: 0,
         tile: Some(Tile {
             col: 2,
@@ -136,6 +140,7 @@ fn failed_open_keeps_current_document() {
     assert!(result.is_err());
     assert_eq!(generation, 1);
     let key = RenderKey {
+        recolor: None,
         rev: 0,
         page: 1,
         scale: Scale::from_f32(0.5),
@@ -175,6 +180,7 @@ fn offset_page_renders_from_its_top_left() {
     let t = DocThread::spawn(|| ());
     open(&t, fixture("boxes.pdf")).1.unwrap();
     let key = RenderKey {
+        recolor: None,
         rev: 0,
         page: 2,
         scale: Scale::from_f32(1.0),
@@ -200,6 +206,7 @@ fn keys_in_transit_are_not_rendered_twice() {
     });
     open(&t, fixture("text.pdf")).1.unwrap();
     let key = |page| RenderKey {
+        recolor: None,
         rev: 0,
         page,
         scale: Scale::from_f32(0.5),
@@ -235,6 +242,7 @@ fn text_requests_are_served_before_renders() {
     let (generation, _) = open(&t, fixture("columns.pdf"));
     let keys = (0..2)
         .map(|page| RenderKey {
+            recolor: None,
             rev: 0,
             page,
             scale: Scale::from_f32(1.0),
@@ -277,6 +285,7 @@ fn edit(t: &DocThread, tag: u64, e: Edit) -> (u64, usize, u32, Result<i32, Strin
 /// RGB of the pixel at (x, y) points on page 0 rendered at scale 1.
 fn pixel(t: &DocThread, rev: u32, x: u32, y: u32) -> [u8; 3] {
     let key = RenderKey {
+        recolor: None,
         page: 0,
         rev,
         scale: Scale::from_f32(1.0),

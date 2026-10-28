@@ -21,7 +21,7 @@ use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
+use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
@@ -264,6 +264,8 @@ pub struct MargApp {
     frame_ms: Rolling,
     /// Last render time and scale per page, for the debug overlay.
     last_render: HashMap<usize, (Duration, Scale)>,
+    /// Dark pages are on.
+    recolor: bool,
     timing: Option<Timing>,
 }
 
@@ -382,12 +384,14 @@ impl MargApp {
             debug: false,
             frame_ms: Rolling::new(120),
             last_render: HashMap::new(),
+            recolor: false,
             timing: s.timing_start.map(|start| Timing {
                 start,
                 opened: false,
                 shown: false,
             }),
         };
+        app.set_recolor(app.config.view.recolor);
         if let Some(t) = &app.timing {
             t.log("window created");
         }
@@ -1054,6 +1058,17 @@ impl MargApp {
         });
         self.last_category = b.category;
         self.show(Level::Info, format!("Box: {}", cat.name));
+    }
+
+    /// Dark pages on or off; the visible pages are rendered again.
+    fn set_recolor(&mut self, on: bool) {
+        self.recolor = on;
+        let rgb = |c: marg_core::theme::Rgba| [c.0[0], c.0[1], c.0[2]];
+        let colors = &self.config.colors;
+        self.cache.set_recolor(on.then(|| Recolor {
+            fg: rgb(colors.recolor_fg),
+            bg: rgb(colors.recolor_bg),
+        }));
     }
 
     /// `A`: open the annotation list; asks for the text of annotated
@@ -2335,6 +2350,16 @@ impl MargApp {
                 self.open_annot_list();
                 return;
             }
+            Command::Recolor => {
+                self.set_recolor(!self.recolor);
+                let msg = if self.recolor {
+                    "Dark pages on"
+                } else {
+                    "Dark pages off"
+                };
+                self.show(Level::Info, msg.into());
+                return;
+            }
             Command::BoxMode => {
                 self.leave_text_modes();
                 self.selected_annot = None;
@@ -2417,6 +2442,7 @@ impl MargApp {
             | Command::Note
             | Command::BoxMode
             | Command::AnnotList
+            | Command::Recolor
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo

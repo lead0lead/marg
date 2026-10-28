@@ -7,5 +7,5 @@
 pub mod document;
 pub mod thread;
 
-pub use document::{DocInfo, PageSize, Pixels, SaveError, SaveReport};
+pub use document::{DocInfo, PageSize, Pixels, Recolor, SaveError, SaveReport};
 pub use thread::{DocThread, Edit, RenderKey, Request, Response, Scale, Tile};

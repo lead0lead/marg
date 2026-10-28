@@ -69,7 +69,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | Phase 3 merged into `main` on 2026-10-28 after the user's check (local, not pushed). Phase 3b (theming) in progress on branch `phase-3b-theme`. |
 | **Current phase** | 3b — theming |
-| **Next step** | Phase 3b step 5 of 6: dark pages (`view.recolor`). Done: 1 `[colors]`, 2 theme files, 3 `[fonts]`, 4 status bar parts. |
+| **Next step** | Phase 3b step 6 of 6: example themes, docs, handover. Done: 1 `[colors]`, 2 theme files, 3 `[fonts]`, 4 status bar parts, 5 dark pages. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |

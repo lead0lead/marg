@@ -51,6 +51,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("i", "annotate.note"),
     ("b", "annotate.box"),
     ("A", "annot.list"),
+    ("gr", "view.recolor"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.
@@ -459,9 +460,10 @@ mod tests {
         let user = BTreeMap::from([("g".to_string(), "zoom.in".to_string())]);
         let (map, warnings) = Keymap::normal(&user);
         // One warning per default binding that starts with g.
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
         assert!(warnings[0].contains("\"gg\""));
         assert!(warnings[1].contains("\"ga\""));
+        assert!(warnings[2].contains("\"gr\""));
         let mut m = Matcher::default();
         assert_eq!(feed_str(&mut m, &map, "g"), [run(Command::ZoomIn, None)]);
     }

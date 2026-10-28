@@ -42,6 +42,14 @@ pub struct PixelRect {
     pub height: u32,
 }
 
+/// Page colors for dark pages: black becomes `fg`, white `bg`, and the
+/// colors in between follow (each channel separately).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Recolor {
+    pub fg: [u8; 3],
+    pub bg: [u8; 3],
+}
+
 /// Rendered pixels: opaque RGBA, tightly packed, `width * height * 4` bytes.
 pub struct Pixels {
     pub width: u32,
@@ -291,7 +299,15 @@ impl Doc {
 
     /// Render part of page `index` at `scale` pixels per point, with
     /// annotations, on a white background.
-    pub fn render(&self, index: usize, scale: f32, rect: PixelRect) -> Result<Pixels, String> {
+    /// With `recolor`, the page content is tinted and annotations and form
+    /// fields are drawn on top in their own colors.
+    pub fn render(
+        &self,
+        index: usize,
+        scale: f32,
+        rect: PixelRect,
+        recolor: Option<Recolor>,
+    ) -> Result<Pixels, String> {
         let page = self.doc.load_page(index as i32).map_err(err)?;
         // Bounds may not start at (0, 0) (offset boxes).
         let b = page.bounds().map_err(err)?;
@@ -311,7 +327,46 @@ impl Doc {
         {
             let dev = Device::from_pixmap(&pix).map_err(err)?;
             let ctm = Matrix::new(scale, 0.0, 0.0, scale, -ox * scale, -oy * scale);
-            page.run(&dev, &ctm).map_err(err)?;
+            match recolor {
+                None => page.run(&dev, &ctm).map_err(err)?,
+                Some(_) => page.run_contents(&dev, &ctm).map_err(err)?,
+            }
+        }
+        if let Some(rc) = recolor {
+            let int = |[r, g, b]: [u8; 3]| i32::from_be_bytes([0, r, g, b]);
+            pix.tint(int(rc.fg), int(rc.bg)).map_err(err)?;
+            // Annotations go on a transparent layer, then over the page:
+            // drawn onto the dark page directly, highlights (multiply
+            // blending) would almost vanish.
+            let mut layer = Pixmap::new(
+                &Colorspace::device_rgb(),
+                rect.x as i32,
+                rect.y as i32,
+                rect.width as i32,
+                rect.height as i32,
+                true,
+            )
+            .map_err(err)?;
+            layer.clear().map_err(err)?;
+            {
+                let dev = Device::from_pixmap(&layer).map_err(err)?;
+                let ctm = Matrix::new(scale, 0.0, 0.0, scale, -ox * scale, -oy * scale);
+                page.run_annotations(&dev, &ctm).map_err(err)?;
+                page.run_widgets(&dev, &ctm).map_err(err)?;
+            }
+            // Both are premultiplied: out = layer + page × (1 − layer alpha).
+            for (d, s) in pix
+                .samples_mut()
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(layer.samples().as_chunks::<4>().0)
+            {
+                let keep = 255 - u16::from(s[3]);
+                for i in 0..3 {
+                    d[i] = s[i].saturating_add(((u16::from(d[i]) * keep + 127) / 255) as u8);
+                }
+            }
         }
         let (w, h) = (rect.width as usize, rect.height as usize);
         let stride = pix.stride() as usize;

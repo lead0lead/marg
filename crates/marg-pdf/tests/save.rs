@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use marg_core::annot::{AnnotChange, AnnotKind, AnnotSpec};
 use marg_core::text::BBox;
 use marg_pdf::document::{Doc, PixelRect};
-use marg_pdf::{SaveError, SaveReport};
+use marg_pdf::{Recolor, SaveError, SaveReport};
 use mupdf::pdf::{PdfAnnotationType, PdfDocument};
 
 fn fixture(name: &str) -> PathBuf {
@@ -203,6 +203,7 @@ fn colored_pixels(doc: &Doc, b: BBox) -> usize {
                 width: (b.x1 - b.x0) as u32,
                 height: (b.y1 - b.y0) as u32,
             },
+            None,
         )
         .unwrap();
     px.rgba
@@ -301,4 +302,45 @@ fn box_and_note_round_trip() {
         "{r:?}"
     );
     assert!(r.x1 <= 302.0 && r.y1 <= 262.0, "{r:?}");
+}
+
+#[test]
+fn recolored_pages_keep_annotation_colors() {
+    let (_dir, path) = copy("text.pdf", "recolor");
+    let (doc, _) = Doc::open(&path).unwrap();
+    let mut hl = spec(AnnotKind::Highlight);
+    hl.color = [0xFF, 0xD4, 0x00];
+    doc.create_annotation(&hl).unwrap();
+    let rc = Recolor {
+        fg: [0xD0, 0xD0, 0xD0],
+        bg: [0x1E, 0x1E, 0x1E],
+    };
+    let px = |x: u32, y: u32, recolor| {
+        let p = doc
+            .render(
+                0,
+                1.0,
+                PixelRect {
+                    x,
+                    y,
+                    width: 1,
+                    height: 1,
+                },
+                recolor,
+            )
+            .unwrap();
+        [p.rgba[0], p.rgba[1], p.rgba[2]]
+    };
+    // Empty paper: white, or the dark background.
+    assert_eq!(px(500, 500, None), [255, 255, 255]);
+    assert_eq!(px(500, 500, Some(rc)), rc.bg);
+    // In the highlight, right of the text on its second line: yellowish
+    // either way (red and green well above blue).
+    for recolor in [None, Some(rc)] {
+        let [r, g, b] = px(245, 110, recolor);
+        assert!(
+            r > 80 && g > 60 && i32::from(b) < i32::from(r) - 60,
+            "{recolor:?}: {r},{g},{b}"
+        );
+    }
 }
