@@ -7,8 +7,6 @@ use marg_core::lru::ByteLru;
 use marg_core::view::View;
 use marg_pdf::{Pixels, RenderKey, Scale, Tile};
 
-const PAGE_EDGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 90);
-
 pub struct PageCache {
     textures: ByteLru<RenderKey, egui::TextureHandle>,
 }
@@ -109,7 +107,7 @@ impl PageCache {
     /// Returns whether every visible page was drawn from a full-page
     /// texture at the exact scale (not tiled, no fallback), and the visible
     /// pages drawn from a render older than their revision in `revs` (or
-    /// not at all).
+    /// not at all). `edge`: the line around each page.
     pub fn draw(
         &mut self,
         painter: &egui::Painter,
@@ -117,6 +115,7 @@ impl PageCache {
         view: &View,
         cfg: &RenderConfig,
         revs: &[u32],
+        edge: Color32,
     ) -> (bool, Vec<usize>) {
         let mut all_exact = true;
         let mut stale = Vec::new();
@@ -159,7 +158,7 @@ impl PageCache {
             painter.rect_stroke(
                 page_rect,
                 0.0,
-                egui::Stroke::new(1.0 / ppp, PAGE_EDGE),
+                egui::Stroke::new(1.0 / ppp, edge),
                 egui::StrokeKind::Outside,
             );
         }

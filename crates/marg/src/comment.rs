@@ -1,7 +1,9 @@
 //! The comment editor: a popup next to an annotation (Insert mode).
 
-use eframe::egui::{self, Color32, Key, Modifiers, Rect};
+use eframe::egui::{self, Key, Modifiers, Rect};
 use marg_core::text::BBox;
+
+use crate::theme::Theme;
 
 /// Which annotation the comment belongs to.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,21 +94,29 @@ impl CommentEditor {
     }
 
     /// Draw the popup next to `anchor` (on screen), inside `area`.
-    pub fn show(&mut self, ctx: &egui::Context, anchor: Rect, area: Rect, width: f32, max_h: f32) {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        th: &Theme,
+        anchor: Rect,
+        area: Rect,
+        width: f32,
+        max_h: f32,
+    ) {
         let [x, y] = popup_pos(anchor, area, width);
         egui::Area::new(egui::Id::unique("marg-comment"))
             .fixed_pos([x, y])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(PANEL_BG)
-                    .stroke(egui::Stroke::new(1.0, PANEL_EDGE))
+                    .fill(th.panel_bg)
+                    .stroke(egui::Stroke::new(1.0, th.panel_border))
                     .inner_margin(6)
                     .show(ui, |ui| {
                         ui.set_width(width - 12.0);
                         let v = ui.visuals_mut();
-                        v.text_cursor.stroke.color = TEXT;
-                        v.selection.bg_fill = SELECTION;
+                        v.text_cursor.stroke.color = th.panel_fg;
+                        v.selection.bg_fill = th.editor_selection;
                         egui::ScrollArea::vertical()
                             .max_height(max_h.min(area.bottom() - y - 12.0).max(40.0))
                             .stick_to_bottom(true)
@@ -117,7 +127,7 @@ impl CommentEditor {
                                         .desired_width(f32::INFINITY)
                                         .desired_rows(3)
                                         .lock_focus(true)
-                                        .text_color(TEXT)
+                                        .text_color(th.panel_fg)
                                         .font(egui::TextStyle::Monospace),
                                 );
                                 // Keys always go to the comment, also after
@@ -148,7 +158,15 @@ fn popup_pos(anchor: Rect, area: Rect, width: f32) -> [f32; 2] {
 
 /// Show a comment next to its annotation (`anchor`, on screen), at most
 /// `width` wide and `max_h` high (longer text is cut off).
-pub fn tooltip(ctx: &egui::Context, text: &str, anchor: Rect, area: Rect, width: f32, max_h: f32) {
+pub fn tooltip(
+    ctx: &egui::Context,
+    th: &Theme,
+    text: &str,
+    anchor: Rect,
+    area: Rect,
+    width: f32,
+    max_h: f32,
+) {
     let [x, y] = popup_pos(anchor, area, width);
     egui::Area::new(egui::Id::unique("marg-tooltip"))
         .fixed_pos([x, y])
@@ -156,23 +174,19 @@ pub fn tooltip(ctx: &egui::Context, text: &str, anchor: Rect, area: Rect, width:
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(PANEL_BG)
-                .stroke(egui::Stroke::new(1.0, PANEL_EDGE))
+                .fill(th.panel_bg)
+                .stroke(egui::Stroke::new(1.0, th.panel_border))
                 .inner_margin(6)
                 .show(ui, |ui| {
                     ui.set_max_width(width - 12.0);
                     ui.set_max_height(max_h.min(area.bottom() - y - 12.0).max(40.0));
                     ui.add(
-                        egui::Label::new(egui::RichText::new(text).monospace().color(TEXT)).wrap(),
+                        egui::Label::new(egui::RichText::new(text).monospace().color(th.panel_fg))
+                            .wrap(),
                     );
                 });
         });
 }
-
-const PANEL_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-const PANEL_EDGE: Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
-const TEXT: Color32 = Color32::from_rgb(0xDD, 0xDD, 0xDD);
-const SELECTION: Color32 = Color32::from_rgb(0x2D, 0x4E, 0x8F);
 
 #[cfg(test)]
 mod tests {

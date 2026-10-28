@@ -16,6 +16,7 @@ pub mod lru;
 pub mod state;
 pub mod stats;
 pub mod text;
+pub mod theme;
 pub mod undo;
 pub mod view;
 

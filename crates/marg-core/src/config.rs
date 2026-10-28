@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::theme::ColorsConfig;
+
 /// Page layout of a document view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +30,7 @@ pub struct Config {
     #[serde(rename = "category")]
     pub categories: Vec<Category>,
     pub keys: KeysConfig,
+    pub colors: ColorsConfig,
 }
 
 impl Default for Config {
@@ -40,6 +43,7 @@ impl Default for Config {
             annotation: AnnotationConfig::default(),
             categories: default_categories(),
             keys: KeysConfig::default(),
+            colors: ColorsConfig::default(),
         }
     }
 }
@@ -312,6 +316,15 @@ mod tests {
     fn key_tables_parse() {
         let c = Config::from_toml("[keys.normal]\n\"Ctrl-o\" = \"page.prev\"\n").unwrap();
         assert_eq!(c.keys.normal["Ctrl-o"], "page.prev");
+    }
+
+    #[test]
+    fn colors_override_one_by_one_and_report_bad_values() {
+        let c = Config::from_toml("[colors]\nbackground = \"#000000\"\n").unwrap();
+        assert_eq!(c.colors.background.to_string(), "#000000");
+        assert_eq!(c.colors.hint_bg, ColorsConfig::default().hint_bg);
+        let e = Config::from_toml("[colors]\n\nselection = \"blue\"\n").unwrap_err();
+        assert!(e.contains("line 3") && e.contains("not a color"), "{e}");
     }
 
     #[test]

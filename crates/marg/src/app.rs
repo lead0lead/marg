@@ -32,12 +32,7 @@ use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::statefile;
-
-const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
-const STATUS_BG: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-const STATUS_FG: Color32 = Color32::from_rgb(0xD0, 0xD0, 0xD0);
-const WARN_FG: Color32 = Color32::from_rgb(0xFF, 0xC0, 0x60);
-const ERROR_FG: Color32 = Color32::from_rgb(0xFF, 0x70, 0x70);
+use crate::theme::Theme;
 
 /// A successfully opened document.
 struct OpenDoc {
@@ -203,6 +198,8 @@ impl Mode {
 
 pub struct MargApp {
     config: Config,
+    /// `config.colors` as egui colors.
+    theme: Theme,
     version: String,
     keymap: Keymap,
     caret_map: Keymap,
@@ -336,6 +333,7 @@ impl MargApp {
         let author = annotation_author(&s.config.annotation.author);
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
+            theme: Theme::new(&s.config.colors),
             config: s.config,
             version: s.version,
             keymap,
@@ -2089,6 +2087,7 @@ impl MargApp {
         let ui_cfg = &self.config.ui;
         comment::tooltip(
             ctx,
+            &self.theme,
             text,
             anchor,
             area,
@@ -2532,6 +2531,7 @@ impl MargApp {
     }
 
     fn status_bar(&self, ui: &mut egui::Ui) {
+        let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
             if self.mode == Mode::Command {
@@ -2541,7 +2541,7 @@ impl MargApp {
                     .nth(self.cmdline.cursor())
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
-                ui.label(text(&format!(":{before}▏{after}"), STATUS_FG));
+                ui.label(text(&format!(":{before}▏{after}"), th.statusbar_fg));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
@@ -2550,27 +2550,27 @@ impl MargApp {
                 } else {
                     self.status_left()
                 };
-                ui.label(text(&left, STATUS_FG));
+                ui.label(text(&left, th.statusbar_fg));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let editing = self.editor.as_ref().filter(|_| self.mode == Mode::Insert);
                 if let Some(ed) =
                     editing.filter(|_| self.message.as_ref().is_none_or(|m| m.level == Level::Info))
                 {
-                    ui.label(text(ed.status(), STATUS_FG));
+                    ui.label(text(ed.status(), th.statusbar_fg));
                 } else if let Some(m) = &self.message {
                     let color = match m.level {
-                        Level::Info => STATUS_FG,
-                        Level::Warn => WARN_FG,
-                        Level::Error => ERROR_FG,
+                        Level::Info => th.statusbar_fg,
+                        Level::Warn => th.statusbar_warn,
+                        Level::Error => th.statusbar_error,
                     };
                     ui.add(egui::Label::new(text(&m.text, color)).truncate());
                 } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
-                    ui.label(text(h.typed(), STATUS_FG));
+                    ui.label(text(h.typed(), th.statusbar_fg));
                 } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
-                    ui.label(text(b.typed(), STATUS_FG));
+                    ui.label(text(b.typed(), th.statusbar_fg));
                 } else if self.matcher.is_pending() {
-                    ui.label(text(&self.matcher.pending_text(), STATUS_FG));
+                    ui.label(text(&self.matcher.pending_text(), th.statusbar_fg));
                 }
             });
         });
@@ -2605,6 +2605,7 @@ impl eframe::App for MargApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
+        let th = self.theme.clone();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
         // Closing the window saves first, like `q`.
@@ -2643,7 +2644,7 @@ impl eframe::App for MargApp {
             .exact_size(status_h)
             .frame(
                 egui::Frame::new()
-                    .fill(STATUS_BG)
+                    .fill(th.statusbar_bg)
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
@@ -2666,19 +2667,19 @@ impl eframe::App for MargApp {
                     .show(&ctx, |ui| {
                         ui.set_min_size(egui::vec2(width, area.height()));
                         ui.set_max_size(egui::vec2(width, area.height()));
-                        list.draw(ui, &names, labels.as_deref());
+                        list.draw(ui, &th, &names, labels.as_deref());
                     });
             }
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BACKGROUND))
+            .frame(egui::Frame::new().fill(th.background))
             .show(ui, |ui| {
                 let area = ui.max_rect();
                 let ppp = ui.ctx().pixels_per_point();
                 if self.mode == Mode::Recent
                     && let Some(list) = &mut self.recent
                 {
-                    list.draw(ui);
+                    list.draw(ui, &th);
                     return;
                 }
                 let Some(open) = &mut self.open else { return };
@@ -2695,9 +2696,14 @@ impl eframe::App for MargApp {
                 }
                 open.request_visible_text(&self.doc);
                 let painter = ui.painter_at(area);
-                let (exact, stale) =
-                    self.cache
-                        .draw(&painter, area, &open.view, &self.config.render, &open.revs);
+                let (exact, stale) = self.cache.draw(
+                    &painter,
+                    area,
+                    &open.view,
+                    &self.config.render,
+                    &open.revs,
+                    th.page_edge,
+                );
                 let cache = &self.cache;
                 open.provisional
                     .retain(|p| p.rev.is_none_or(|r| !cache.has_rev(p.spec.page, r)));
@@ -2707,12 +2713,12 @@ impl eframe::App for MargApp {
                     }
                 }
                 if let Some(sel) = &self.selection {
-                    select::draw_selection(&painter, &open.view, area, sel, &open.texts);
+                    select::draw_selection(&painter, &th, &open.view, area, sel, &open.texts);
                 }
                 if matches!(self.mode, Mode::Caret | Mode::Visual)
                     && let Some(c) = &self.caret
                 {
-                    select::draw_caret(&painter, &open.view, area, c, &open.texts);
+                    select::draw_caret(&painter, &th, &open.view, area, c, &open.texts);
                 }
                 if let Some((page, xref)) = self.selected_annot
                     && let Some(a) = open.annots[page]
@@ -2722,7 +2728,7 @@ impl eframe::App for MargApp {
                     select::draw_selected_annot(&painter, &open.view, area, a);
                 }
                 if let Some(h) = &self.hinting {
-                    h.draw(&painter, &open.view, area, &open.texts);
+                    h.draw(&painter, &th, &open.view, area, &open.texts);
                 }
                 if let Some(b) = &self.boxing {
                     let color = self
@@ -2731,7 +2737,7 @@ impl eframe::App for MargApp {
                         .get(usize::from(b.category) - 1)
                         .and_then(|c| parse_color(&c.color))
                         .map_or(Color32::RED, |[r, g, b]| Color32::from_rgb(r, g, b));
-                    b.draw(&painter, &open.view, area, color);
+                    b.draw(&painter, &th, &open.view, area, color);
                 }
                 if let Some(t) = &mut self.timing
                     && !t.shown
@@ -2747,6 +2753,7 @@ impl eframe::App for MargApp {
             let ui_cfg = &self.config.ui;
             ed.show(
                 &ctx,
+                &th,
                 anchor,
                 area,
                 ui_cfg.comment_width_px,
@@ -2763,6 +2770,7 @@ impl eframe::App for MargApp {
 
 impl MargApp {
     fn debug_overlay(&self, ctx: &egui::Context) {
+        let th = &self.theme;
         let mut lines = Vec::new();
         let ms = |v: Option<f32>| v.map_or("-".into(), |v| format!("{v:.1}"));
         lines.push(format!(
@@ -2807,11 +2815,11 @@ impl MargApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(Color32::from_black_alpha(200))
+                    .fill(th.panel_bg)
                     .inner_margin(8)
                     .show(ui, |ui| {
                         for l in lines {
-                            ui.label(egui::RichText::new(l).monospace().color(STATUS_FG));
+                            ui.label(egui::RichText::new(l).monospace().color(th.panel_fg));
                         }
                     });
             });
