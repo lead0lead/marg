@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
 
+mod annotlist;
 mod app;
 mod boxmode;
 mod comment;

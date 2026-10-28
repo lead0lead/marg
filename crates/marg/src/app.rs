@@ -23,6 +23,7 @@ use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
+use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
@@ -181,6 +182,8 @@ enum Mode {
     Insert,
     /// Drawing a box.
     Box,
+    /// The annotation list is open.
+    Annots,
 }
 
 impl Mode {
@@ -193,6 +196,7 @@ impl Mode {
             Mode::Visual | Mode::Category => "VISUAL",
             Mode::Insert => "INSERT",
             Mode::Box => "BOX",
+            Mode::Annots => "ANNOTATIONS",
         }
     }
 }
@@ -219,6 +223,8 @@ pub struct MargApp {
     editor: Option<CommentEditor>,
     /// The box being drawn (Box mode).
     boxing: Option<BoxMode>,
+    /// The annotation list (Annots mode).
+    annot_list: Option<AnnotList>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
     /// Where a mouse drag started, while the primary button is down.
@@ -346,6 +352,7 @@ impl MargApp {
             hinting: None,
             editor: None,
             boxing: None,
+            annot_list: None,
             selection_before_hints: None,
             drag_anchor: None,
             last_click: None,
@@ -410,6 +417,11 @@ impl MargApp {
 
     fn handle_responses(&mut self, ctx: &egui::Context) {
         while let Some(resp) = self.doc.try_recv() {
+            if matches!(resp, Response::Annots { .. } | Response::Text { .. })
+                && let Some(list) = &mut self.annot_list
+            {
+                list.dirty = true;
+            }
             match resp {
                 Response::Opened {
                     generation,
@@ -748,6 +760,7 @@ impl MargApp {
                 // The comment editor's text field takes the keys.
                 _ if self.mode == Mode::Insert => {}
                 _ if self.mode == Mode::Box => self.box_event(e),
+                _ if self.mode == Mode::Annots => self.annot_list_event(e),
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -1036,6 +1049,83 @@ impl MargApp {
         });
         self.last_category = b.category;
         self.show(Level::Info, format!("Box: {}", cat.name));
+    }
+
+    /// `A`: open the annotation list; asks for the text of annotated
+    /// pages that do not have it yet.
+    fn open_annot_list(&mut self) {
+        let Some(open) = &mut self.open else { return };
+        let pages: Vec<usize> = open
+            .annots
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_ref().is_some_and(|a| !a.is_empty()))
+            .map(|(p, _)| p)
+            .collect();
+        for p in pages {
+            open.request_text(&self.doc, p);
+        }
+        self.leave_text_modes();
+        self.annot_list = Some(AnnotList::new());
+        self.mode = Mode::Annots;
+    }
+
+    /// Rebuild the rows of the annotation list if they changed.
+    fn refresh_annot_list(&mut self) {
+        let Some(list) = self.annot_list.as_mut().filter(|l| l.dirty) else {
+            return;
+        };
+        let Some(open) = &self.open else { return };
+        let all: Vec<AnnotInfo> = open.annots.iter().flatten().flatten().cloned().collect();
+        let cats: Vec<_> = self
+            .config
+            .categories
+            .iter()
+            .map(|c| (c.name.as_str(), parse_color(&c.color)))
+            .collect();
+        list.set_entries(marg_core::annotlist::entries(&all, &open.texts, &cats));
+    }
+
+    /// A key in the annotation list.
+    fn annot_list_event(&mut self, e: &Event) {
+        let Some(list) = &mut self.annot_list else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let find = |s: &Self, page: usize, xref: i32| {
+            s.open.as_ref().and_then(|o| {
+                o.annots[page]
+                    .as_ref()
+                    .and_then(|l| l.iter().find(|a| a.xref == xref))
+                    .cloned()
+            })
+        };
+        match list.event(e, self.config.categories.len().min(9)) {
+            annotlist::Action::None => {}
+            annotlist::Action::Close => {
+                self.annot_list = None;
+                self.mode = Mode::Normal;
+            }
+            annotlist::Action::Jump { page, xref } => {
+                self.annot_list = None;
+                self.mode = Mode::Normal;
+                if let Some(a) = find(self, page, xref) {
+                    self.reveal_annot(&a);
+                }
+            }
+            annotlist::Action::Edit { page, xref } => {
+                self.annot_list = None;
+                self.mode = Mode::Normal;
+                if let Some(a) = find(self, page, xref) {
+                    self.reveal_annot(&a);
+                    self.edit_comment();
+                }
+            }
+            annotlist::Action::Delete { page, xref } => {
+                self.selected_annot = Some((page, xref));
+                self.delete_annotation();
+            }
+        }
     }
 
     /// The status line in Box mode.
@@ -1630,6 +1720,12 @@ impl MargApp {
             self.show(Level::Info, msg.into());
             return;
         };
+        self.reveal_annot(&a);
+    }
+
+    /// Scroll an annotation into view (a third from the top, if it was
+    /// not visible) and select it.
+    fn reveal_annot(&mut self, a: &AnnotInfo) {
         if let Some(open) = &mut self.open {
             let v = &mut open.view;
             let r = select::screen_rect(
@@ -1653,7 +1749,7 @@ impl MargApp {
             }
         }
         self.leave_text_modes();
-        self.select_annot(Some(&a));
+        self.select_annot(Some(a));
     }
 
     /// Visual `d`: remove highlights and underlines from the selected text.
@@ -2229,6 +2325,10 @@ impl MargApp {
                 self.new_note();
                 return;
             }
+            Command::AnnotList => {
+                self.open_annot_list();
+                return;
+            }
             Command::BoxMode => {
                 self.leave_text_modes();
                 self.selected_annot = None;
@@ -2310,6 +2410,7 @@ impl MargApp {
             | Command::Comment
             | Command::Note
             | Command::BoxMode
+            | Command::AnnotList
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2546,6 +2647,29 @@ impl eframe::App for MargApp {
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
+        if self.mode == Mode::Annots {
+            self.refresh_annot_list();
+            let names: Vec<String> = self
+                .config
+                .categories
+                .iter()
+                .map(|c| c.name.clone())
+                .collect();
+            let labels = self.open.as_ref().and_then(|o| o.info.labels.clone());
+            let width = screen.width() * self.config.ui.annot_list_width;
+            // Over the pages, not beside them: the view keeps its size, so
+            // pages are not re-fitted and re-rendered.
+            if let Some(list) = &mut self.annot_list {
+                egui::Area::new(egui::Id::unique("marg-annotations"))
+                    .fixed_pos([area.right() - width, area.top()])
+                    .order(egui::Order::Foreground)
+                    .show(&ctx, |ui| {
+                        ui.set_min_size(egui::vec2(width, area.height()));
+                        ui.set_max_size(egui::vec2(width, area.height()));
+                        list.draw(ui, &names, labels.as_deref());
+                    });
+            }
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BACKGROUND))
             .show(ui, |ui| {

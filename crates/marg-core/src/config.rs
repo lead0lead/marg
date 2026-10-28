@@ -236,6 +236,8 @@ pub struct UiConfig {
     /// The comment editor grows up to this share of the window height,
     /// then scrolls.
     pub comment_max_height: f32,
+    /// Width of the annotation list, as a share of the window width.
+    pub annot_list_width: f32,
 }
 
 impl Default for UiConfig {
@@ -252,6 +254,7 @@ impl Default for UiConfig {
             drag_scroll_edge_px: 16.0,
             comment_width_px: 360.0,
             comment_max_height: 0.4,
+            annot_list_width: 0.35,
         }
     }
 }

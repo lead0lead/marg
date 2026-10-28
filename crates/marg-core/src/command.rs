@@ -90,6 +90,8 @@ pub enum Command {
     Note,
     /// Box mode: draw a box with grid hints or the mouse.
     BoxMode,
+    /// Open the annotation list.
+    AnnotList,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -282,6 +284,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("annotate.comment", Command::Comment, "highlight + comment"),
     ("annotate.note", Command::Note, "new note"),
     ("annotate.box", Command::BoxMode, "box mode"),
+    ("annot.list", Command::AnnotList, "annotation list"),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,

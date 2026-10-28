@@ -409,16 +409,7 @@ impl Selection {
         let mut out = String::new();
         for (page, _, r) in self.line_parts(src) {
             let Some(t) = src.text(page) else { continue };
-            let part = t.string(r);
-            let joins = out.ends_with('-')
-                && part.chars().next().is_some_and(|c| c.is_lowercase())
-                && out.chars().rev().nth(1).is_some_and(|c| c.is_alphabetic());
-            if joins {
-                out.pop();
-            } else if !out.is_empty() {
-                out.push(' ');
-            }
-            out.push_str(&part);
+            crate::text::join_part(&mut out, &t.string(r));
         }
         out
     }

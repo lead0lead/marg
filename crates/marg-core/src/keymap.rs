@@ -50,6 +50,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("ga", "hint.annot"),
     ("i", "annotate.note"),
     ("b", "annotate.box"),
+    ("A", "annot.list"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.
