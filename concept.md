@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 3 merged into `main` on 2026-10-28 after the user's check (local, not pushed). Phase 3b (theming) in progress on branch `phase-3b-theme`. |
-| **Current phase** | 3b — theming |
-| **Next step** | Phase 3b step 6 of 6: example themes, docs, handover. Done: 1 `[colors]`, 2 theme files, 3 `[fonts]`, 4 status bar parts, 5 dark pages. |
+| **Status** | Phase 3 merged into `main` (local, not pushed). Phase 3b (theming) built on branch `phase-3b-theme` (not merged); waiting for the user to try it. |
+| **Current phase** | 3b — theming, built; user check pending |
+| **Next step** | The user rices marg with their own theme (`docs/themes/` as a start), tries a font and dark pages (`gr`); fixes from their feedback; merge into `main`; push when the user says so (CI has not run on Phase 3/3b); Phase 4 in a fresh session. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 3b planned) |
+| **Last updated** | 2026-10-28 (end of Phase 3b build) |
 
 ---
 
@@ -758,6 +758,9 @@ annotation is selected): `1`–`5` `annot.recolor(1)`…`(5)`, `U`
 have fixed keys (§2.8, §2.10). New modes in the status bar: `INSERT`,
 `BOX`, `ANNOTATIONS`.
 
+**As implemented (Phase 3b):** Normal `gr` (`view.recolor`) toggles dark
+pages.
+
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
 link, double/triple-click selects a word/line, right-click on a selection or
@@ -846,7 +849,7 @@ Reference: Zathura's minimalism. No toolbar, no menu bar, no icons.
   `ASSETS.md`.
 - Dark/recolored page rendering: planned in Phase 3b (below).
 
-### Theming (Phase 3b, planned; user's choice "A", 2026-10-28)
+### Theming (Phase 3b, as implemented; user's choice "A", 2026-10-28)
 
 Goal: marg's look is fully configurable and shareable, like qutebrowser's
 "ricing", without bloat: no new dependencies, no scripting, theme values
@@ -912,6 +915,47 @@ highlights as overlays from the annotation listing) with the user.
 the theme struct (all hard-coded colors read from it); 2 theme files; 3
 fonts; 4 status bar parts; 5 dark pages; 6 example themes, docs,
 handover.
+
+**As implemented (Phase 3b):**
+
+- `[colors]`: `marg-core/src/theme.rs` (`Rgba`, `ColorsConfig`); the app
+  converts them once into `marg/src/theme.rs` `Theme` (egui colors and
+  the hint font), passed to every draw function. Small changes from
+  before: comment text is `panel_fg` (was `#DDDDDD`), the debug overlay
+  uses `panel_bg` (was translucent black), the missing-file grey is
+  `panel_dim`. Annotation-derived colors (provisional annotations, the
+  selected annotation's outline) are not theme colors.
+- Theme files: `Config::with_theme` checks the config and the theme file
+  separately (errors name the file and line), then fills in the theme's
+  values where the config has none (per key). Unknown sections in a
+  theme file are an error. A missing or broken theme: the config alone,
+  plus an error message. `theme` is resolved against the config folder
+  (`~` expanded; absolute paths work).
+- `[fonts]`: the file is read and checked with `skrifa` (§9) before egui
+  gets it; it becomes the first font of both egui families, egui's own
+  fonts fill in missing characters. `size` sets the Monospace, Body and
+  Button text styles; `hint_size` the hint and grid labels (both clamped
+  to 4–64). The status bar is at least `size + 8` px high. Reading and
+  checking: 2.6 ms for a 2.5 MB font, 7.4 ms for a 26 MB CJK collection
+  (release); egui builds the font lazily in the first frame, no
+  measurable difference to the first page on Xvfb.
+- `[statusbar]`: parts `mode`, `file`, `page`, `zoom`, `layout`,
+  `unsaved`, `keys`; empty parts are left out with their separator.
+  Unknown names: an error message at start ("statusbar: unknown part …
+  (known: …)"), the rest is used. Messages and the comment editor's hint
+  still replace the right side.
+- Dark pages: `[view] recolor`, `gr` (`view.recolor`, "Dark pages on" /
+  "off"). `RenderKey.recolor` (`marg_pdf::Recolor`); `Doc::render` runs
+  the page content, tints it (`Pixmap::tint`), runs annotations and
+  widgets into a transparent pixmap and composites it (premultiplied
+  "over") on top: drawn directly, a 40% yellow highlight came out as
+  (30, 28, 18). Cost: 64 → 70 ms for a 876×1263 render. Images are
+  recolored like the text (Zathura without "keephue"). Pages still
+  rendering are filled with `recolor_bg`; renders in the other coloring
+  stand in until the new ones arrive (never blank).
+- Example themes: `docs/themes/gruvbox-dark.toml`,
+  `docs/themes/solarized-light.toml`; a test loads both and checks that
+  they set every `[colors]` key.
 
 ---
 
@@ -1006,6 +1050,10 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 `box_fine_step_pt = 1`; `[ui]` adds `comment_width_px = 360`,
 `comment_max_height = 0.4`, `annot_list_width = 0.35`; new key table
 `[keys.annot]`.
+
+**As implemented (Phase 3b):** top-level `theme = ""`; `[view] recolor =
+false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
+"Theming").
 
 ### State file
 
@@ -1301,6 +1349,11 @@ building more.
   Decide the defaults after trying.
 - **Words include punctuation** (vim's `W`, not `w`): a selection to a word
   end takes the comma or full stop with it. Confirm or change.
+- **Phase 3b choices to confirm**: dark pages recolor images too (a
+  "keep hue" option like Zathura's is possible: recolor only, then restore
+  image areas from `Request::Images` boxes); `gr` as the key; theme files
+  may not set `[statusbar]` (only colors and fonts); the two example
+  themes.
 - **Phase 3 choices to confirm** (Claude's defaults, the user's call after
   trying): annotation list drawn over the pages instead of beside them;
   note icon above the caret character (or top left of the visible page);
@@ -1416,6 +1469,24 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-28 — Phase 3b: theming
+- Done (branch `phase-3b-theme`, not merged): Phase 3 merged into `main`
+  (local) after the user's check. Plan recorded (§6 "Theming", §11), then
+  one commit per step: `[colors]`; theme files; `[fonts]`; `[statusbar]`;
+  dark pages (`gr`); example themes and docs.
+- Decisions: the user approved adding `skrifa` (to check font files,
+  since egui panics on a broken one) over a `catch_unwind` workaround.
+- Tried and failed: dark pages drawn in one pass made highlights vanish
+  (multiply blending on a dark page); fixed with a separate annotation
+  layer. A first font timing on Xvfb suggested +70 ms; measured in
+  detail it was noise (reading + checking 2.6–7.4 ms).
+- State: builds; 138 tests pass; clippy and fmt clean (local). Nothing
+  pushed; CI has not run on Phase 3 or 3b.
+- Next: the user tries the theming (their own theme, a font, dark pages);
+  then merge, push (ask), Phase 4 in a fresh session.
+- Watch out: `PageCache` holds the recolor state (`set_recolor`); the
+  paper color under rendering pages follows it.
 
 ### 2026-10-28 — Phase 3: notes & boxes
 - Done (branch `phase-3-notes`, not merged), one commit per step:

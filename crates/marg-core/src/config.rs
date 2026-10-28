@@ -404,6 +404,24 @@ mod tests {
     }
 
     #[test]
+    fn example_themes_load_and_set_every_color() {
+        let themes = [
+            include_str!("../../../docs/themes/gruvbox-dark.toml"),
+            include_str!("../../../docs/themes/solarized-light.toml"),
+        ];
+        // Every [colors] key, as the default config writes them.
+        let keys = toml::Table::try_from(ColorsConfig::default()).unwrap();
+        for theme in themes {
+            let c = Config::with_theme("", theme).unwrap();
+            assert_ne!(c.colors, ColorsConfig::default());
+            let t: toml::Table = toml::from_str(theme).unwrap();
+            let set = t["colors"].as_table().unwrap();
+            let missing: Vec<_> = keys.keys().filter(|k| !set.contains_key(*k)).collect();
+            assert!(missing.is_empty(), "theme does not set {missing:?}");
+        }
+    }
+
+    #[test]
     fn error_mentions_line() {
         let e = Config::from_toml("[view]\n\nzoom_step = \"x\"\n").unwrap_err();
         assert!(e.contains("line 3"), "{e}");
