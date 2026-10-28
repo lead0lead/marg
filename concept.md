@@ -422,8 +422,9 @@ leaves two; Zotero imports them as two). The comment stays with the first
 part; other fields of foreign annotations (dates, `/NM`, popups) are not
 copied to the parts. One undo step: undo deletes the parts and puts the
 original objects back. Squiggly and strike-out annotations are left alone.
-Option A (remove whole highlights touching the selection) was the
-alternative.
+Option A (remove whole highlights touching the selection) is Visual `D`
+(`annotate.erase_whole`), added as a second key at the user's request; by
+analogy with vim, where Visual `D` deletes whole lines.
 
 **Comment editor**
 
@@ -598,6 +599,7 @@ remappable (§8).
 | | `c` | highlight + comment |
 | | `y` | copy text |
 | | `d` | erase highlights/underlines from the selected text |
+| | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
 | Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
 
@@ -1236,7 +1238,9 @@ Format:
   not obvious) and chose Visual `d` as an eraser for the selected part
   only ("option B" over removing whole highlights). Built; undo is now one
   type for any mix of deleted and created annotations. `AnnotInfo` got
-  opacity and author, `AnnotSpec` the comment.
+  opacity and author, `AnnotSpec` the comment. Then, as a second option,
+  Visual `D` deletes touched highlights whole (Claude suggested `D` by
+  analogy with vim's line-wise Visual `D`).
 - State: builds; 117 tests pass; clippy and fmt clean.
 - Next: the user's test week; then the milestone decision.
 

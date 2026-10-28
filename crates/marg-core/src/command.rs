@@ -72,6 +72,8 @@ pub enum Command {
     /// Remove highlights and underlines from the selected text (parts of
     /// them outside the selection stay).
     Erase,
+    /// Delete every highlight and underline the selection touches, whole.
+    EraseWhole,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -228,6 +230,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "annotate.erase",
         Command::Erase,
         "remove highlights from the selection",
+    ),
+    (
+        "annotate.erase_whole",
+        Command::EraseWhole,
+        "delete highlights the selection touches",
     ),
 ];
 

@@ -1238,7 +1238,9 @@ impl MargApp {
     /// The parts of them outside the selection become new annotations with
     /// the same color, category and author (the comment stays with the first
     /// part). One undo step.
-    fn erase_selection(&mut self) {
+    /// With `whole` (Visual `D`), the touched annotations are deleted
+    /// completely instead.
+    fn erase_selection(&mut self, whole: bool) {
         let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
             return;
         };
@@ -1274,6 +1276,7 @@ impl MargApp {
                     },
                 ));
                 self.next_tag += 1;
+                let groups = if whole { Vec::new() } else { groups };
                 for (i, rects) in groups.into_iter().enumerate() {
                     let spec = AnnotSpec {
                         page: *page,
@@ -1308,7 +1311,8 @@ impl MargApp {
         }
         self.leave_text_modes();
         let what = if n == 1 { "annotation" } else { "annotations" };
-        self.show(Level::Info, format!("Erased from {n} {what} (u to undo)"));
+        let verb = if whole { "Deleted" } else { "Erased from" };
+        self.show(Level::Info, format!("{verb} {n} {what} (u to undo)"));
     }
 
     /// `x`: delete the selected annotation (undo puts it back).
@@ -1477,8 +1481,8 @@ impl MargApp {
                 self.delete_annotation();
                 return;
             }
-            Command::Erase => {
-                self.erase_selection();
+            Command::Erase | Command::EraseWhole => {
+                self.erase_selection(command == Command::EraseWhole);
                 return;
             }
             Command::Close => {
@@ -1599,6 +1603,7 @@ impl MargApp {
             | Command::AnnotPrev
             | Command::AnnotDelete
             | Command::Erase
+            | Command::EraseWhole
             | Command::Undo
             | Command::Redo => {}
         }
