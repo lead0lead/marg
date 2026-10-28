@@ -21,7 +21,17 @@ simplelog = { version = "0.12", default-features = false }
 # Same version and a subset of the features egui uses: only checks font files.
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 
+# Local release builds (`cargo run --release`): fully optimized, but quick
+# to rebuild. LTO and a single codegen unit made every change take ~80 s
+# instead of ~6 s (1 s incremental), with no measurable runtime difference
+# (text extraction and rendering are MuPDF, which is C).
 [profile.release]
 opt-level = 3
+incremental = true
+
+# Published binaries (Phase 5): `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
 lto = "thin"
 codegen-units = 1
+incremental = false

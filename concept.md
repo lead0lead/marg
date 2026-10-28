@@ -1181,7 +1181,12 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   conversion to screen pixels happens only in the app layer.
 - **All tuning values come from config defaults**, defined in one place in
   `marg-core` (`config.rs`).
-- Release builds: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`;
+- Release builds: `opt-level = 3`. Local `--release` builds are
+  incremental without LTO (changed 2026-10-28 after the user found
+  rebuilds slow: ~80 s per change with LTO, ~6 s without, 1 s
+  incremental; text extraction and render times measured the same).
+  Published binaries use `--profile dist` (`lto = "thin"`,
+  `codegen-units = 1`);
   Windows built with the MSVC toolchain and the **dynamic** CRT: `mupdf-sys`
   builds MuPDF's own `platform/win32/mupdf.sln`, whose projects use `/MD`
   (Release) and `/MDd` (Debug), so `+crt-static` would mismatch. The `.exe`
