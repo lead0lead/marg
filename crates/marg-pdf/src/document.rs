@@ -62,6 +62,8 @@ pub struct Doc {
     /// File name of the backup copy in the backup folder.
     backup_name: String,
     backed_up: bool,
+    /// The last external version reported by `poll_disk`.
+    reported: Option<Stamp>,
 }
 
 /// What identifies a version of a file on disk.
@@ -245,6 +247,7 @@ impl Doc {
             disk,
             backup_name: backup_name(path, info.id.as_deref()),
             backed_up: false,
+            reported: disk,
         };
         Ok((doc, info))
     }
@@ -471,6 +474,17 @@ impl Doc {
         Stamp::of(&self.path) != self.disk
     }
 
+    /// True once for each new version of the file written by another
+    /// program.
+    pub fn poll_disk(&mut self) -> bool {
+        let now = Stamp::of(&self.path);
+        if now == self.disk || now == self.reported {
+            return false;
+        }
+        self.reported = now;
+        true
+    }
+
     /// Save the annotation changes. Incremental (appended) when possible;
     /// otherwise, or with `force`, the whole file is written to a temporary
     /// file and renamed over the original. Without `force`, a file changed
@@ -499,6 +513,7 @@ impl Doc {
             self.save_full().map_err(SaveError::Failed)?;
         }
         self.disk = Stamp::of(&self.path);
+        self.reported = self.disk;
         Ok(Some(SaveReport { full: !incremental }))
     }
 

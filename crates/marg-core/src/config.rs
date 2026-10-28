@@ -208,6 +208,8 @@ pub struct UiConfig {
     pub state_files_max: usize,
     /// Presses closer together than this count as a double or triple click.
     pub multi_click_ms: u64,
+    /// How often the open file is checked for changes by other programs.
+    pub file_check_secs: f32,
 }
 
 impl Default for UiConfig {
@@ -219,6 +221,7 @@ impl Default for UiConfig {
             recent_files_max: 50,
             state_files_max: 1000,
             multi_click_ms: 400,
+            file_check_secs: 1.0,
         }
     }
 }

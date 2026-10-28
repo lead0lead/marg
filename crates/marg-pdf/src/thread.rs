@@ -77,6 +77,9 @@ pub enum Request {
     Save { force: bool },
     /// Folder for backups of files before their first change.
     BackupDir(PathBuf),
+    /// Check whether another program changed the file; answered with
+    /// `DiskChanged` only if it did (once per change).
+    CheckDisk,
 }
 
 pub enum Response {
@@ -111,6 +114,9 @@ pub enum Response {
         generation: u64,
         /// `Ok(None)`: there was nothing to save.
         result: Result<Option<SaveReport>, SaveError>,
+    },
+    DiskChanged {
+        generation: u64,
     },
 }
 
@@ -321,6 +327,16 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     wake();
                 }
                 Request::BackupDir(dir) => backup_dir = Some(dir),
+                Request::CheckDisk => {
+                    if let Some((d, _)) = &mut doc
+                        && d.poll_disk()
+                    {
+                        if tx.send(Response::DiskChanged { generation }).is_err() {
+                            return;
+                        }
+                        wake();
+                    }
+                }
             }
         }
         if let Some(page) = text_queue.pop_front() {

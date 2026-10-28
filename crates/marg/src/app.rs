@@ -169,6 +169,10 @@ pub struct MargApp {
     after_save: AfterSave,
     /// `:q!`: close without saving.
     discard: bool,
+    /// When to ask whether the file changed on disk next.
+    next_disk_check: Instant,
+    /// The pending open is a reload of the current file.
+    reloading: bool,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -277,6 +281,8 @@ impl MargApp {
             next_tag: 1,
             after_save: AfterSave::Nothing,
             discard: false,
+            next_disk_check: Instant::now(),
+            reloading: false,
             author,
             cmdline: LineEdit::default(),
             doc,
@@ -346,6 +352,10 @@ impl MargApp {
                             t.log(&format!("document opened (open took {took:?})"));
                         }
                         self.save_state();
+                        if std::mem::take(&mut self.reloading) {
+                            self.show(Level::Info, "Reloaded from disk".into());
+                        }
+                        self.after_save = AfterSave::Nothing;
                         self.cache.clear();
                         self.last_request.clear();
                         self.mode = Mode::Normal;
@@ -363,7 +373,10 @@ impl MargApp {
                         // if marg does not exit cleanly.
                         self.save_state();
                     }
-                    Err(e) => self.error(format!("Cannot open: {e}")),
+                    Err(e) => {
+                        self.reloading = false;
+                        self.error(format!("Cannot open: {e}"));
+                    }
                 },
                 Response::Rendered {
                     generation,
@@ -412,6 +425,21 @@ impl MargApp {
                             open.provisional.retain(|p| p.tag != tag);
                             self.error(format!("Annotation failed: {e}"));
                         }
+                    }
+                }
+                Response::DiskChanged { generation } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    if open.unsaved() {
+                        open.conflict = true;
+                        self.show(
+                            Level::Warn,
+                            "File changed on disk; :w! keeps marg's version, :e! reloads".into(),
+                        );
+                    } else {
+                        self.reload();
                     }
                 }
                 Response::Saved { generation, result } => {
@@ -1020,6 +1048,10 @@ impl MargApp {
                 self.save(command == Command::SaveForce, AfterSave::Report);
                 return;
             }
+            Command::Reload => {
+                self.reload();
+                return;
+            }
             Command::Open(path) => {
                 self.open_path(&path);
                 return;
@@ -1112,9 +1144,10 @@ impl MargApp {
             | Command::Highlight(_)
             | Command::Underline
             | Command::Save
-            | Command::SaveForce => {}
-            // Wired up in the next steps.
-            Command::Undo | Command::Redo | Command::Reload => {}
+            | Command::SaveForce
+            | Command::Reload => {}
+            // Wired up in the next step.
+            Command::Undo | Command::Redo => {}
         }
     }
 
@@ -1130,6 +1163,31 @@ impl MargApp {
         } else {
             self.doc.send(Request::Open(path));
         }
+    }
+
+    /// Open the current file again from disk, keeping the position and
+    /// dropping unsaved changes.
+    fn reload(&mut self) {
+        let Some(open) = &self.open else { return };
+        let path = open.info.path.clone();
+        self.save_state();
+        self.reloading = true;
+        self.doc.send(Request::Open(path));
+    }
+
+    /// Ask the document thread whether the file changed, every
+    /// `file_check_secs`.
+    fn check_disk(&mut self, ctx: &egui::Context) {
+        if self.open.is_none() {
+            return;
+        }
+        let now = Instant::now();
+        let every = Duration::from_secs_f32(self.config.ui.file_check_secs);
+        if now >= self.next_disk_check {
+            self.doc.send(Request::CheckDisk);
+            self.next_disk_check = now + every;
+        }
+        ctx.request_repaint_after(self.next_disk_check - now);
     }
 
     /// Ask the document thread to save, then do `after` if it worked.
@@ -1203,7 +1261,7 @@ impl MargApp {
                         Level::Warn => WARN_FG,
                         Level::Error => ERROR_FG,
                     };
-                    ui.label(text(&m.text, color));
+                    ui.add(egui::Label::new(text(&m.text, color)).truncate());
                 } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
                     ui.label(text(h.typed(), STATUS_FG));
                 } else if self.matcher.is_pending() {
@@ -1255,6 +1313,7 @@ impl eframe::App for MargApp {
             }
         }
         self.autosave(&ctx);
+        self.check_disk(&ctx);
         if self
             .message
             .as_ref()

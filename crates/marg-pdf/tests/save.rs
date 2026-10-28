@@ -123,11 +123,14 @@ fn changed_on_disk_blocks_save_until_forced() {
     bytes.extend_from_slice(b"\n% changed elsewhere\n");
     std::fs::write(&path, &bytes).unwrap();
     assert!(doc.changed_on_disk());
+    assert!(doc.poll_disk());
+    assert!(!doc.poll_disk(), "reported once");
     assert_eq!(doc.save(false), Err(SaveError::ChangedOnDisk));
     assert_eq!(std::fs::read(&path).unwrap(), bytes, "untouched");
 
     assert_eq!(doc.save(true), Ok(Some(SaveReport { full: true })));
     assert!(!doc.changed_on_disk());
+    assert!(!doc.poll_disk(), "own saves are not changes");
     assert_eq!(annotations(&path).len(), 1);
     // No temporary files left behind.
     let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
