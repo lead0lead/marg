@@ -174,17 +174,29 @@ mod tests {
             Outcome::Save("notes".into())
         );
         // Plain Enter is the text field's (a newline).
-        assert_eq!(press(&mut ed, Key::Enter, Modifiers::NONE), Outcome::Editing);
+        assert_eq!(
+            press(&mut ed, Key::Enter, Modifiers::NONE),
+            Outcome::Editing
+        );
     }
 
     #[test]
     fn esc_cancels_at_once_unless_changed() {
         let mut ed = editor("same");
-        assert_eq!(press(&mut ed, Key::Escape, Modifiers::NONE), Outcome::Cancel);
+        assert_eq!(
+            press(&mut ed, Key::Escape, Modifiers::NONE),
+            Outcome::Cancel
+        );
         let mut ed = editor("old");
         ed.text = "new".into();
-        assert_eq!(press(&mut ed, Key::Escape, Modifiers::NONE), Outcome::Editing);
+        assert_eq!(
+            press(&mut ed, Key::Escape, Modifiers::NONE),
+            Outcome::Editing
+        );
         assert_eq!(ed.status(), "Esc again to discard the changes");
-        assert_eq!(press(&mut ed, Key::Escape, Modifiers::NONE), Outcome::Cancel);
+        assert_eq!(
+            press(&mut ed, Key::Escape, Modifiers::NONE),
+            Outcome::Cancel
+        );
     }
 }
