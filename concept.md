@@ -67,10 +67,10 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 2 (select & highlight) built on branch `phase-2-select`, not merged; the user is in the test week (decision milestone) and chose to stay in Phase 2 until it ends. Added since the first Phase 2 build: `:close`, category prompt on `Enter`, block caret, annotation selection (`]a`, `[a`, click) and `x` delete, scroll while dragging. |
-| **Current phase** | 2 — select & highlight, user test week (decision milestone) |
-| **Next step** | User keeps reading with it and decides at the end of the week: is keyboard selection fast enough; Visual highlight keys (§12); the other §12 questions. Then merge `phase-2-select`; Phase 3 only after the user's go-ahead. |
-| **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
+| **Status** | Phase 2 (select & highlight) merged into `main` on 2026-10-28 after the user's go-ahead at the decision milestone. Phase 3 (notes & boxes) not started. |
+| **Current phase** | 3 — notes & boxes, next |
+| **Next step** | Start Phase 3 in a fresh session, on branch `phase-3-notes`: plan the steps (comment popup `c`/`e` with umlauts and dead keys, notes `i`, box mode with grid hints, adjust and snap, `ga`, recolor and `U` toggle, tooltips, annotation list `A`, categories of foreign annotations), then one commit per step. |
+| **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection, highlights and underlines saved into the PDF; no file → recent files list) |
@@ -1126,8 +1126,9 @@ building more.
   (§9 spike report). Two small ones are covered by raw object access.
 - **Building MuPDF on Windows** (toolchain, clang/bindgen requirements).
   Checked in Phase 0 with CI on Windows.
-- **Hint/caret selection not feeling faster than a mouse.** This is the core
-  bet. Checked at the decision milestone with a week of real use.
+- ~~**Hint/caret selection not feeling faster than a mouse.**~~ The core bet.
+  The user tried it on real papers and passed the decision milestone on
+  2026-10-28 (reading, navigating and selecting "work great").
 - **Reading order in multi-column papers** (caret motions, selection across
   columns). Checked in Phase 2 with the two-column fixture and the user's
   papers.
@@ -1241,8 +1242,15 @@ Format:
   opacity and author, `AnnotSpec` the comment. Then, as a second option,
   Visual `D` deletes touched highlights whole (Claude suggested `D` by
   analogy with vim's line-wise Visual `D`).
-- State: builds; 117 tests pass; clippy and fmt clean.
-- Next: the user's test week; then the milestone decision.
+- State: builds; 117 tests pass; clippy and fmt clean; CI green on Linux
+  and Windows for `ea919c7`.
+- Decision milestone: the user decided to move on ("I feel like we are
+  ready to move on to building the next phase"), a few hours into the test
+  week instead of a week; recorded in §0. Phase 2 merged into `main`.
+  Still open from §12: Visual highlight keys default (user's config uses
+  `g1`–`g5` + `Enter`), `y` stays in Visual, punctuation in words, word
+  hint placement, categories.
+- Next: Phase 3 in a fresh session (this one is long).
 
 ### 2026-10-28 — Phase 2: select & highlight
 - Done (branch `phase-2-select`, not merged): Phase 1 merged into `main`
