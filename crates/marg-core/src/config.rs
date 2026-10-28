@@ -210,6 +210,12 @@ pub struct UiConfig {
     pub multi_click_ms: u64,
     /// How often the open file is checked for changes by other programs.
     pub file_check_secs: f32,
+    /// Dragging a selection near or past the top or bottom edge scrolls by
+    /// this many pixels per second for each pixel of distance into the
+    /// edge zone.
+    pub drag_scroll_rate: f32,
+    /// Height of that edge zone, in logical pixels.
+    pub drag_scroll_edge_px: f32,
 }
 
 impl Default for UiConfig {
@@ -222,6 +228,8 @@ impl Default for UiConfig {
             state_files_max: 1000,
             multi_click_ms: 400,
             file_check_secs: 1.0,
+            drag_scroll_rate: 12.0,
+            drag_scroll_edge_px: 16.0,
         }
     }
 }

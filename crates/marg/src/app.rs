@@ -680,6 +680,7 @@ impl MargApp {
                 }
             }
         }
+        self.drag_scroll(ctx, area);
         if self
             .matcher
             .expire(self.now_ms(), self.config.ui.sequence_timeout_ms)
@@ -978,6 +979,38 @@ impl MargApp {
             }
             _ => {}
         }
+    }
+
+    /// While a mouse selection is dragged into the top or bottom edge zone
+    /// (or past it), scroll and extend the selection, every frame.
+    fn drag_scroll(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        let Some(anchor) = self.drag_anchor else {
+            return;
+        };
+        let (pos, down, dt) = ctx.input(|i| {
+            (
+                i.pointer.latest_pos(),
+                i.pointer.primary_down(),
+                i.stable_dt.min(0.1),
+            )
+        });
+        let (Some(p), true) = (pos, down) else { return };
+        let edge = self.config.ui.drag_scroll_edge_px;
+        let over = if p.y < area.min.y + edge {
+            p.y - (area.min.y + edge)
+        } else if p.y > area.max.y - edge {
+            p.y - (area.max.y - edge)
+        } else {
+            return;
+        };
+        let Some(open) = &mut self.open else { return };
+        open.view
+            .scroll_by(0.0, over * self.config.ui.drag_scroll_rate * dt);
+        let inside = egui::pos2(p.x, p.y.clamp(area.min.y + 1.0, area.max.y - 1.0));
+        if let Some(at) = self.char_at_screen(inside) {
+            self.mouse_select(Selection::new(anchor, at));
+        }
+        ctx.request_repaint();
     }
 
     fn mouse_select(&mut self, sel: Selection) {
