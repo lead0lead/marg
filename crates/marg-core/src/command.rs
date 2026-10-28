@@ -63,6 +63,12 @@ pub enum Command {
     Reload,
     /// Save, close the file and show the recent files list.
     Close,
+    /// Select the next annotation in reading order.
+    AnnotNext,
+    /// Select the previous annotation.
+    AnnotPrev,
+    /// Delete the selected annotation.
+    AnnotDelete,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -207,6 +213,13 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "file.close",
         Command::Close,
         "close the file, show recent files",
+    ),
+    ("annot.next", Command::AnnotNext, "next annotation"),
+    ("annot.prev", Command::AnnotPrev, "previous annotation"),
+    (
+        "annot.delete",
+        Command::AnnotDelete,
+        "delete the selected annotation",
     ),
 ];
 

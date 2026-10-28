@@ -6,7 +6,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
-use marg_core::annot::{AnnotKind, AnnotSpec, parse_color};
+use marg_core::annot::{
+    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, parse_color, step_annot,
+};
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::Config;
@@ -61,11 +63,20 @@ struct OpenDoc {
     /// The file changed on disk while marg has unsaved changes; saving
     /// waits for `:w!` or `:e!`.
     conflict: bool,
-    /// Annotation actions of this session; each creates one annotation per
-    /// page it touches.
-    undo: UndoStack<Vec<Created>>,
+    /// Annotation actions of this session.
+    undo: UndoStack<UndoOp>,
     /// Object numbers of created annotations, by edit tag.
     xrefs: HashMap<u64, i32>,
+    /// The annotations of each page, once listed by the document thread.
+    annots: Vec<Option<Vec<AnnotInfo>>>,
+}
+
+/// An undoable annotation action.
+enum UndoOp {
+    /// A highlight or underline: one annotation per page it touches.
+    Created(Vec<Created>),
+    /// A deleted annotation; undo puts the same object back.
+    Deleted { page: usize, xref: i32 },
 }
 
 /// An annotation created by an undoable action.
@@ -178,6 +189,8 @@ pub struct MargApp {
     last_click: Option<(Instant, egui::Pos2, u8)>,
     /// Category used by the last highlight; underlines use it.
     last_category: u8,
+    /// The selected annotation: (page, object number).
+    selected_annot: Option<(usize, i32)>,
     /// Tag of the next annotation edit.
     next_tag: u64,
     /// Annotation author.
@@ -294,6 +307,7 @@ impl MargApp {
             drag_anchor: None,
             last_click: None,
             last_category: 1,
+            selected_annot: None,
             next_tag: 1,
             after_save: AfterSave::Nothing,
             discard: false,
@@ -380,6 +394,11 @@ impl MargApp {
                         self.selection = None;
                         self.hinting = None;
                         let doc = self.open_doc(info, generation);
+                        self.selected_annot = None;
+                        self.doc.send(Request::Annots {
+                            pages: (0..doc.view.page_count()).collect(),
+                            urgent: false,
+                        });
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
                             "{} — marg",
                             doc.file_name
@@ -428,6 +447,10 @@ impl MargApp {
                     match result {
                         Ok(xref) => {
                             open.xrefs.insert(tag, xref);
+                            self.doc.send(Request::Annots {
+                                pages: vec![page],
+                                urgent: true,
+                            });
                             open.revs[page] = open.revs[page].max(rev);
                             open.edits += 1;
                             open.save_due = Some(
@@ -511,6 +534,29 @@ impl MargApp {
                         }
                     }
                 }
+                Response::Annots {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(list) => {
+                            if self.selected_annot.is_some_and(|(p, x)| {
+                                p == page && !list.iter().any(|a| a.xref == x)
+                            }) {
+                                self.selected_annot = None;
+                            }
+                            open.annots[page] = Some(list);
+                        }
+                        Err(e) => {
+                            log::error!("annotations of page {} failed: {e}", page + 1)
+                        }
+                    }
+                }
                 Response::Text {
                     generation,
                     page,
@@ -583,6 +629,7 @@ impl MargApp {
             conflict: false,
             undo: UndoStack::new(self.config.annotation.undo_steps),
             xrefs: HashMap::new(),
+            annots: vec![None; view.page_count()],
             view,
         }
     }
@@ -712,6 +759,8 @@ impl MargApp {
             Outcome::Unbound if key == KeyPress::named(Named::Esc) => {
                 if matches!(self.mode, Mode::Caret | Mode::Visual) {
                     self.leave_text_modes();
+                } else {
+                    self.selected_annot = None;
                 }
             }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
@@ -878,15 +927,17 @@ impl MargApp {
                     _ => 1,
                 };
                 self.last_click = Some((now, pos, count));
-                let Some(at) = self.char_at_screen(pos) else {
+                if count == 1 {
+                    // A click selects the annotation under it (or none).
+                    let hit = self.annot_at_screen(pos);
                     self.leave_text_modes();
+                    self.select_annot(hit.as_ref());
+                }
+                let Some(at) = self.char_at_screen(pos) else {
                     return;
                 };
                 match count {
-                    1 => {
-                        self.leave_text_modes();
-                        self.drag_anchor = Some(at);
-                    }
+                    1 => self.drag_anchor = Some(at),
                     2 => {
                         let Some(t) = self.open.as_ref().and_then(|o| o.texts[at.page].as_ref())
                         else {
@@ -930,6 +981,7 @@ impl MargApp {
     }
 
     fn mouse_select(&mut self, sel: Selection) {
+        self.selected_annot = None;
         self.selection = Some(sel);
         self.caret = Some(Caret {
             pos: sel.head,
@@ -981,13 +1033,12 @@ impl MargApp {
             });
             group.push(Created { spec, tag });
         }
-        open.undo.push(group);
+        open.undo.push(UndoOp::Created(group));
         self.last_category = category;
         self.leave_text_modes();
     }
 
-    /// Undo the last annotation action (delete what it created), or redo
-    /// the last undone one (create it again).
+    /// Undo the last annotation action, or redo the last undone one.
     fn undo(&mut self, redo: bool) {
         let Some(open) = &mut self.open else { return };
         let step = if redo {
@@ -995,7 +1046,7 @@ impl MargApp {
         } else {
             open.undo.undo()
         };
-        let Some(group) = step else {
+        let Some(op) = step else {
             let msg = if redo {
                 "Nothing to redo"
             } else {
@@ -1004,41 +1055,172 @@ impl MargApp {
             self.show(Level::Info, msg.into());
             return;
         };
-        if redo {
-            for c in group.iter_mut() {
-                let tag = self.next_tag;
-                self.next_tag += 1;
-                c.tag = tag;
-                open.provisional.push(Provisional {
-                    tag,
-                    rev: None,
-                    spec: c.spec.clone(),
-                });
-                self.doc.send(Request::Edit {
-                    tag,
-                    edit: Edit::Create(c.spec.clone()),
-                });
+        let mut edits = Vec::new();
+        match (op, redo) {
+            // Create again (new object numbers).
+            (UndoOp::Created(group), true) => {
+                for c in group.iter_mut() {
+                    c.tag = self.next_tag;
+                    self.next_tag += 1;
+                    open.provisional.push(Provisional {
+                        tag: c.tag,
+                        rev: None,
+                        spec: c.spec.clone(),
+                    });
+                    edits.push((c.tag, Edit::Create(c.spec.clone())));
+                }
             }
-        } else {
-            let targets: Option<Vec<(usize, i32)>> = group
-                .iter()
-                .map(|c| open.xrefs.get(&c.tag).map(|&x| (c.spec.page, x)))
-                .collect();
-            let Some(targets) = targets else {
-                // The creation has not been confirmed yet; try again later.
-                open.undo.redo();
-                return;
-            };
-            for (page, xref) in targets {
-                let tag = self.next_tag;
+            (UndoOp::Created(group), false) => {
+                let targets: Option<Vec<Edit>> = group
+                    .iter()
+                    .map(|c| {
+                        open.xrefs.get(&c.tag).map(|&xref| Edit::Delete {
+                            page: c.spec.page,
+                            xref,
+                        })
+                    })
+                    .collect();
+                let Some(targets) = targets else {
+                    // The creation has not been confirmed yet; try again later.
+                    open.undo.redo();
+                    return;
+                };
+                for e in targets {
+                    edits.push((self.next_tag, e));
+                    self.next_tag += 1;
+                }
+            }
+            (&mut UndoOp::Deleted { page, xref }, redo) => {
+                let e = if redo {
+                    Edit::Delete { page, xref }
+                } else {
+                    Edit::Restore { page, xref }
+                };
+                edits.push((self.next_tag, e));
                 self.next_tag += 1;
-                self.doc.send(Request::Edit {
-                    tag,
-                    edit: Edit::Delete { page, xref },
-                });
             }
         }
+        for (tag, edit) in edits {
+            self.doc.send(Request::Edit { tag, edit });
+        }
+        self.selected_annot = None;
         self.show(Level::Info, if redo { "Redone" } else { "Undone" }.into());
+    }
+
+    /// All annotations listed so far.
+    fn known_annots(&self) -> Vec<AnnotInfo> {
+        self.open
+            .as_ref()
+            .map(|o| o.annots.iter().flatten().flatten().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Select an annotation (or none), and say what it is.
+    fn select_annot(&mut self, a: Option<&AnnotInfo>) {
+        self.selected_annot = a.map(|a| (a.page, a.xref));
+        let Some(a) = a else { return };
+        let mut text = format!("{} p. {}", a.kind, a.page + 1);
+        if let Some(s) = &a.subject {
+            text.push_str(&format!("  {s}"));
+        }
+        if let Some(c) = &a.contents {
+            let c: String = c.chars().take(80).collect();
+            text.push_str(&format!("  “{}”", c.replace('\n', " ")));
+        }
+        self.show(Level::Info, text);
+    }
+
+    /// `]a` / `[a`: the next or previous annotation in reading order, from
+    /// the selected one or from the top of the view; scrolls to it.
+    fn step_annotation(&mut self, forward: bool, count: u32) {
+        let Some(open) = &self.open else { return };
+        let all = self.known_annots();
+        let mut from = match self.selected_annot {
+            Some((page, xref)) => AnnotFrom::Selected { page, xref },
+            None => {
+                let top = open.view.position();
+                AnnotFrom::Pos {
+                    page: top.page,
+                    y: top.y,
+                }
+            }
+        };
+        let mut found = None;
+        for _ in 0..count.max(1) {
+            match step_annot(&all, from, forward) {
+                Some(a) => {
+                    from = AnnotFrom::Selected {
+                        page: a.page,
+                        xref: a.xref,
+                    };
+                    found = Some(a.clone());
+                }
+                None => break,
+            }
+        }
+        let Some(a) = found else {
+            let loading = open.annots.iter().any(|p| p.is_none());
+            let msg = match (loading, forward) {
+                (true, _) => "Still reading the annotations",
+                (false, true) => "No more annotations below",
+                (false, false) => "No more annotations above",
+            };
+            self.show(Level::Info, msg.into());
+            return;
+        };
+        if let Some(open) = &mut self.open {
+            let v = &mut open.view;
+            let r = select::screen_rect(
+                v,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::from(v.viewport())),
+                a.page,
+                a.rect,
+            );
+            let (vw, vh) = v.viewport();
+            if r.min.y < 0.0 || r.max.y > vh || r.max.x < 0.0 || r.min.x > vw {
+                let x = r.min.x.clamp(0.0, vw);
+                v.put_doc_pos_at(
+                    marg_core::view::DocPos {
+                        page: a.page,
+                        x: a.rect.x0,
+                        y: a.rect.y0,
+                    },
+                    x,
+                    vh / 3.0,
+                );
+            }
+        }
+        self.leave_text_modes();
+        self.select_annot(Some(&a));
+    }
+
+    /// `x`: delete the selected annotation (undo puts it back).
+    fn delete_annotation(&mut self) {
+        let Some((page, xref)) = self.selected_annot.take() else {
+            self.show(
+                Level::Info,
+                "No annotation selected (]a, [a or click)".into(),
+            );
+            return;
+        };
+        let Some(open) = &mut self.open else { return };
+        open.undo.push(UndoOp::Deleted { page, xref });
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        self.doc.send(Request::Edit {
+            tag,
+            edit: Edit::Delete { page, xref },
+        });
+        self.show(Level::Info, "Deleted (u to undo)".into());
+    }
+
+    /// The annotation under a screen position, if any.
+    fn annot_at_screen(&self, pos: egui::Pos2) -> Option<AnnotInfo> {
+        let open = self.open.as_ref()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        let list = open.annots[d.page].as_ref()?;
+        annot_at(list, d.page, d.x, d.y).cloned()
     }
 
     /// The category prompt: a digit highlights with that category, Enter
@@ -1167,6 +1349,14 @@ impl MargApp {
                 self.reload();
                 return;
             }
+            Command::AnnotNext | Command::AnnotPrev => {
+                self.step_annotation(command == Command::AnnotNext, n);
+                return;
+            }
+            Command::AnnotDelete => {
+                self.delete_annotation();
+                return;
+            }
             Command::Close => {
                 if self.open.as_ref().is_some_and(|o| o.unsaved()) {
                     self.save(false, AfterSave::Close);
@@ -1281,6 +1471,9 @@ impl MargApp {
             | Command::SaveForce
             | Command::Reload
             | Command::Close
+            | Command::AnnotNext
+            | Command::AnnotPrev
+            | Command::AnnotDelete
             | Command::Undo
             | Command::Redo => {}
         }
@@ -1306,6 +1499,7 @@ impl MargApp {
         if self.open.is_none() {
             return;
         }
+        self.selected_annot = None;
         self.save_state();
         self.doc.send(Request::Close);
         self.open = None;
@@ -1548,6 +1742,13 @@ impl eframe::App for MargApp {
                     && let Some(c) = &self.caret
                 {
                     select::draw_caret(&painter, &open.view, area, c, &open.texts);
+                }
+                if let Some((page, xref)) = self.selected_annot
+                    && let Some(a) = open.annots[page]
+                        .as_ref()
+                        .and_then(|l| l.iter().find(|a| a.xref == xref))
+                {
+                    select::draw_selected_annot(&painter, &open.view, area, a);
                 }
                 if let Some(h) = &self.hinting {
                     h.draw(&painter, &open.view, area, &open.texts);

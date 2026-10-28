@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use marg_core::annot::AnnotSpec;
+use marg_core::annot::{AnnotInfo, AnnotSpec};
 use marg_core::text::PageText;
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
@@ -56,6 +56,11 @@ pub enum Edit {
         page: usize,
         xref: i32,
     },
+    /// Put a deleted annotation back (undo of `Delete`).
+    Restore {
+        page: usize,
+        xref: i32,
+    },
 }
 
 pub enum Request {
@@ -83,6 +88,9 @@ pub enum Request {
     /// Close the document without saving. Starts a new generation, so
     /// responses still in transit can be told apart.
     Close,
+    /// List the annotations of pages. Urgent requests are served with
+    /// text (before renders); the others when nothing else is queued.
+    Annots { pages: Vec<usize>, urgent: bool },
 }
 
 pub enum Response {
@@ -120,6 +128,11 @@ pub enum Response {
     },
     DiskChanged {
         generation: u64,
+    },
+    Annots {
+        generation: u64,
+        page: usize,
+        result: Result<Vec<AnnotInfo>, String>,
     },
 }
 
@@ -218,6 +231,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
     let mut text_queue: VecDeque<usize> = VecDeque::new();
+    let mut annots_urgent: VecDeque<usize> = VecDeque::new();
+    let mut annots_idle: VecDeque<usize> = VecDeque::new();
     // Annotation edits per page since the document was opened.
     let mut revs: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     // Rendered responses sent so far, and the keys of those the UI may not
@@ -227,7 +242,11 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     loop {
         // Block only when idle; otherwise take whatever arrived meanwhile.
         let mut incoming = Vec::new();
-        if queue.is_empty() && text_queue.is_empty() {
+        if queue.is_empty()
+            && text_queue.is_empty()
+            && annots_urgent.is_empty()
+            && annots_idle.is_empty()
+        {
             match rx.recv() {
                 Ok(r) => incoming.push(r),
                 Err(_) => return,
@@ -248,6 +267,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         Ok((d, info)) => {
                             queue.clear();
                             text_queue.clear();
+                            annots_urgent.clear();
+                            annots_idle.clear();
                             revs.clear();
                             generation += 1;
                             doc = Some((d, info.clone()));
@@ -285,7 +306,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                 Request::Edit { tag, edit } => {
                     let page = match &edit {
                         Edit::Create(spec) => spec.page,
-                        Edit::Delete { page, .. } => *page,
+                        Edit::Delete { page, .. } | Edit::Restore { page, .. } => *page,
                     };
                     let result = match &mut doc {
                         None => Err("no document open".into()),
@@ -294,6 +315,9 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                                 Edit::Create(spec) => d.create_annotation(&spec),
                                 Edit::Delete { page, xref } => {
                                     d.delete_annotation(page, xref).map(|()| xref)
+                                }
+                                Edit::Restore { page, xref } => {
+                                    d.restore_annotation(page, xref).map(|()| xref)
                                 }
                             })
                         }
@@ -330,10 +354,24 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     wake();
                 }
                 Request::BackupDir(dir) => backup_dir = Some(dir),
+                Request::Annots { pages, urgent } => {
+                    let q = if urgent {
+                        &mut annots_urgent
+                    } else {
+                        &mut annots_idle
+                    };
+                    for p in pages {
+                        if !q.contains(&p) {
+                            q.push_back(p);
+                        }
+                    }
+                }
                 Request::Close => {
                     doc = None;
                     queue.clear();
                     text_queue.clear();
+                    annots_urgent.clear();
+                    annots_idle.clear();
                     revs.clear();
                     generation += 1;
                 }
@@ -365,6 +403,32 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                 return;
             }
             wake();
+            continue;
+        }
+        let annot_page = annots_urgent.pop_front().or_else(|| {
+            if queue.is_empty() {
+                annots_idle.pop_front()
+            } else {
+                None
+            }
+        });
+        if let Some(page) = annot_page {
+            let result = match &doc {
+                None => Err("no document open".into()),
+                Some((d, _)) => d.annotations(page),
+            };
+            let resp = Response::Annots {
+                generation,
+                page,
+                result,
+            };
+            if tx.send(resp).is_err() {
+                return;
+            }
+            // An idle scan of many pages wakes the UI only now and then.
+            if annots_idle.is_empty() || annots_idle.len() % 64 == 0 {
+                wake();
+            }
             continue;
         }
         let Some(key) = queue.pop_front() else {

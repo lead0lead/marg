@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
-use marg_core::annot::{AnnotKind, AnnotSpec};
+use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::text::{BBox, Char, PageText};
 use mupdf::color::AnnotationColor;
-use mupdf::pdf::{PdfDocument, PdfObject, PdfWriteOptions};
+use mupdf::pdf::{PdfAnnotationType, PdfDocument, PdfObject, PdfWriteOptions};
 use mupdf::{
     Colorspace, Device, Matrix, MetadataName, Pixmap, Point, Quad, TextBlockContent, TextPageFlags,
 };
@@ -432,6 +432,116 @@ impl Doc {
         annot.update().map_err(err)?;
         page.update().map_err(err)?;
         annot.xref().map_err(err)
+    }
+
+    /// The annotations on page `index`, except links, form fields and
+    /// popups.
+    pub fn annotations(&self, index: usize) -> Result<Vec<AnnotInfo>, String> {
+        let page = self.doc.load_pdf_page(index as i32).map_err(err)?;
+        let b = page.bounds().map_err(err)?;
+        let rel = |r: mupdf::Rect| BBox::new(r.x0 - b.x0, r.y0 - b.y0, r.x1 - b.x0, r.y1 - b.y0);
+        let mut out = Vec::new();
+        for a in page.annotations() {
+            let kind = a.r#type().map_err(err)?;
+            if matches!(
+                kind,
+                PdfAnnotationType::Link | PdfAnnotationType::Widget | PdfAnnotationType::Popup
+            ) {
+                continue;
+            }
+            let quads = if a.has_quads().unwrap_or(false) {
+                a.quad_points()
+                    .map_err(err)?
+                    .into_iter()
+                    .map(|q| {
+                        let xs = [q.ul.x, q.ur.x, q.ll.x, q.lr.x];
+                        let ys = [q.ul.y, q.ur.y, q.ll.y, q.lr.y];
+                        let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
+                        let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
+                        BBox::new(
+                            min(xs) - b.x0,
+                            min(ys) - b.y0,
+                            max(xs) - b.x0,
+                            max(ys) - b.y0,
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let color = match a.color().ok().flatten() {
+                Some(AnnotationColor::Rgb { red, green, blue }) => {
+                    Some([to_u8(red), to_u8(green), to_u8(blue)])
+                }
+                Some(AnnotationColor::Gray(g)) => Some([to_u8(g); 3]),
+                Some(AnnotationColor::Cmyk {
+                    cyan,
+                    magenta,
+                    yellow,
+                    key,
+                }) => Some([
+                    to_u8((1.0 - cyan) * (1.0 - key)),
+                    to_u8((1.0 - magenta) * (1.0 - key)),
+                    to_u8((1.0 - yellow) * (1.0 - key)),
+                ]),
+                None => None,
+            };
+            let subject = a
+                .object()
+                .get_dict("Subj")
+                .ok()
+                .flatten()
+                .and_then(|s| s.as_string().ok().map(|s| s.to_string()))
+                .filter(|s| !s.is_empty());
+            out.push(AnnotInfo {
+                xref: a.xref().map_err(err)?,
+                page: index,
+                kind: format!("{kind:?}"),
+                rect: rel(a.rect().map_err(err)?),
+                quads,
+                color,
+                subject,
+                contents: a
+                    .contents()
+                    .ok()
+                    .flatten()
+                    .map(str::to_string)
+                    .filter(|s| !s.is_empty()),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Put a deleted annotation back on page `index`. Deleting only removes
+    /// it (and its popup) from the page's `/Annots` array; the object stays,
+    /// so this restores it with everything it had.
+    pub fn restore_annotation(&self, index: usize, xref: i32) -> Result<(), String> {
+        let page = self.doc.load_pdf_page(index as i32).map_err(err)?;
+        let mut page_obj = page.object();
+        let annot = self.doc.new_indirect(xref, 0).map_err(err)?;
+        let mut arr = match page_obj.get_dict("Annots").map_err(err)? {
+            Some(a) => a,
+            None => {
+                let a = self.doc.new_array().map_err(err)?;
+                page_obj.dict_put("Annots", a).map_err(err)?;
+                page_obj
+                    .get_dict("Annots")
+                    .map_err(err)?
+                    .ok_or("cannot create /Annots")?
+            }
+        };
+        let popup = annot
+            .resolve()
+            .map_err(err)?
+            .ok_or("annotation object not found")?
+            .get_dict("Popup")
+            .map_err(err)?;
+        arr.array_push(annot).map_err(err)?;
+        if let Some(p) = popup {
+            arr.array_push(p).map_err(err)?;
+        }
+        Ok(())
     }
 
     /// Delete the annotation with object number `xref` from page `index`.

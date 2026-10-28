@@ -44,6 +44,9 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("u", "undo"),
     ("Ctrl-r", "redo"),
     ("Ctrl-w", "file.close"),
+    ("]a", "annot.next"),
+    ("[a", "annot.prev"),
+    ("x", "annot.delete"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.

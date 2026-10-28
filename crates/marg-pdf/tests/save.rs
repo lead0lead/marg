@@ -157,3 +157,30 @@ fn backup_name_is_hex_id_and_file_name() {
     let name = b.file_name().unwrap().to_string_lossy().into_owned();
     assert_eq!(name, "6d61726762786573666978747572653031-boxes.pdf");
 }
+
+#[test]
+fn list_delete_restore_round_trip() {
+    let (_dir, path) = copy("text.pdf", "restore");
+    let (mut doc, _) = Doc::open(&path).unwrap();
+    // text.pdf has two links; they are not listed.
+    assert!(doc.annotations(0).unwrap().is_empty());
+    let xref = doc.create_annotation(&spec(AnnotKind::Highlight)).unwrap();
+    let a = doc.annotations(0).unwrap();
+    assert_eq!(a.len(), 1);
+    assert_eq!((a[0].xref, a[0].kind.as_str()), (xref, "Highlight"));
+    assert_eq!(a[0].subject.as_deref(), Some("Question"));
+    assert_eq!(a[0].color, Some([0xA2, 0x8A, 0xE5]));
+    assert_eq!(a[0].quads.len(), 2);
+    assert!((a[0].quads[0].x0 - 72.0).abs() < 0.5 && (a[0].quads[0].y0 - 90.0).abs() < 0.5);
+
+    doc.delete_annotation(0, xref).unwrap();
+    assert!(doc.annotations(0).unwrap().is_empty());
+    doc.restore_annotation(0, xref).unwrap();
+    let back = doc.annotations(0).unwrap();
+    assert_eq!(back, a, "restored with everything it had");
+
+    assert_eq!(doc.save(false), Ok(Some(SaveReport { full: false })));
+    drop(doc);
+    let (doc, _) = Doc::open(&path).unwrap();
+    assert_eq!(doc.annotations(0).unwrap(), a);
+}

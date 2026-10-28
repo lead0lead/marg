@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, text::LayoutJob};
-use marg_core::annot::{AnnotKind, AnnotSpec};
+use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
 use marg_core::config::{HintMode, HintsConfig};
 use marg_core::hints::{HintInput, labels};
@@ -324,5 +324,31 @@ pub fn draw_provisional(painter: &egui::Painter, view: &View, area: Rect, spec: 
                 painter.rect_filled(line, 0.0, Color32::from_rgb(r, g, b));
             }
         }
+    }
+}
+
+/// Draw the selected annotation: a dashed outline in its color around each
+/// of its boxes.
+pub fn draw_selected_annot(painter: &egui::Painter, view: &View, area: Rect, a: &AnnotInfo) {
+    if !view.visible_pages().contains(&a.page) {
+        return;
+    }
+    let color = a.color.map_or(Color32::from_gray(90), |[r, g, b]| {
+        Color32::from_rgb(r, g, b)
+    });
+    // A dark line under the colored dashes, so light colors show on white.
+    let stroke = egui::Stroke::new(1.5, color);
+    let under = egui::Stroke::new(2.5, Color32::from_black_alpha(110));
+    for &b in a.boxes() {
+        let r = screen_rect(view, area, a.page, b).expand(2.0);
+        let pts = [
+            r.left_top(),
+            r.right_top(),
+            r.right_bottom(),
+            r.left_bottom(),
+            r.left_top(),
+        ];
+        painter.add(egui::Shape::dashed_line(&pts, under, 5.0, 3.0));
+        painter.add(egui::Shape::dashed_line(&pts, stroke, 5.0, 3.0));
     }
 }
