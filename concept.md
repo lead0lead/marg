@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 3 (notes & boxes) in progress on branch `phase-3-notes`. Done: 1 categories of foreign annotations, 2 `[keys.annot]` (recolor, `U` toggle, in place via `Edit::Update`), 3 comment editor (`e`, Insert mode), 4 Visual `c`, 5 `i` note, 6 comment tooltips, 7 `ga`, 8 box mode `b`, 9 box snap `s`, 10 annotation list `A`. |
-| **Current phase** | 3 — notes & boxes |
-| **Next step** | Phase 3 step 11 of 11: concept.md as-implemented sections, session log, handover. Plan: 1 categories, 2 annot keys, 3 comment editor + `e`, 4 Visual `c`, 5 `i` note, 6 tooltips, 7 `ga`, 8 box mode (grid over the viewport, box clamped to the first corner's page; user's choice 2026-10-28), 9 box snap `s`, 10 list `A`, 11 docs + handover. |
+| **Status** | Phase 3 (notes & boxes) built on branch `phase-3-notes` (not merged); waiting for the user to try it. |
+| **Current phase** | 3 — notes & boxes, built; user check pending |
+| **Next step** | The user annotates a full paper (highlights, comments, notes, boxes) with the Phase 3 build and checks it in another viewer and via Zotero's "Import annotations"; also dead keys and umlauts in the comment editor on the real keyboard (Xvfb could not test dead keys). Then fixes from their feedback, merge into `main`, Phase 4 in a fresh session. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
-| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection, highlights and underlines saved into the PDF; no file → recent files list) |
+| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 3 in progress) |
+| **Last updated** | 2026-10-28 (end of Phase 3 build) |
 
 ---
 
@@ -280,7 +280,14 @@ label are ignored; Backspace removes one; Esc cancels and restores the
 previous selection. While the second word of `F` is picked, the first is
 shown selected. The typed prefix appears at the right of the status bar.
 If the visible text is still loading, the message is "Text is still
-loading". `gl` and `ga` come in Phases 4 and 3.
+loading". `gl` comes in Phase 4.
+
+**As implemented (Phase 3):** `ga` (`hint.annot`) labels every visible
+annotation (those whose boxes are on screen, in reading order) with the
+`[hints] chars` labels, on the top-left corner of its first box; picking
+one selects it (and leaves Caret/Visual). "Still reading the
+annotations" while a visible page is not listed yet, "No annotations in
+view" if there are none.
 
 ### 2.7 Caret and visual selection
 
@@ -426,6 +433,76 @@ Option A (remove whole highlights touching the selection) is Visual `D`
 (`annotate.erase_whole`), added as a second key at the user's request; by
 analogy with vim, where Visual `D` deletes whole lines.
 
+**As implemented (Phase 3):**
+
+- **Categories of foreign annotations** (`annot::category_of`): `/Subj`
+  matching a category name (ignoring case and surrounding spaces), else
+  the category with the nearest color (squared RGB distance; Zotero's
+  colors match the defaults exactly), else Uncategorised (no color). The
+  status bar of a selected annotation shows the category, not `/Subj`;
+  subtypes show as Note (`Text`) and Box (`Square`).
+- **Selected annotation keys**: a keymap layer `[keys.annot]` on top of
+  Normal, active while an annotation is selected: `1`–`5`
+  `annot.recolor(n)` (color and `/Subj`), `U` `annot.toggle_type`
+  (highlight ↔ underline; opacity becomes 1, or `highlight_opacity` for a
+  highlight), `e` `annot.edit`. `x` stays in Normal. Without a selection
+  digits are counts as before.
+- **Edits in place** (`Edit::Update`, `Doc::update_annotation`): recolor,
+  type switch and comments change the existing object, so `/NM`, dates
+  and popups survive (Zotero sees the same annotation). The type switch
+  rewrites `/Subtype` and drops `/AP`; MuPDF draws a new appearance
+  (checked by rendering). Each is one undo step (`UndoOp.changed`, old
+  values from the listing).
+- **Undo/redo of created annotations**: undo deletes (unlinks), redo now
+  puts the *same object* back (`Edit::Restore`) instead of creating a new
+  one, so later steps that name its object number keep working.
+- **Comment editor** (`marg/src/comment.rs`, Insert mode, `INSERT`):
+  a popup right of the annotation (left if there is no room, else over
+  it), `ui.comment_width_px` (360) wide, up to `ui.comment_max_height`
+  (0.4) of the window, then scrolling; monospace; egui `TextEdit`, which
+  always keeps the focus. Enter adds a line, `Ctrl-Enter` saves (trailing
+  whitespace trimmed; unchanged text saves nothing), Esc cancels, and on
+  changed text the first Esc shows "Esc again to discard the changes".
+  The status bar shows the editor's hint instead of info messages.
+  Umlauts and ß typed directly work (Xvfb); dead keys could not be tested
+  there (see §12).
+- **Visual `c`** (`annotate.comment`): highlight in the last-used category,
+  then the editor on its first part. The comment is part of the
+  highlight's undo step (redo restores the object with it); Esc keeps the
+  highlight. If the creation is not confirmed yet when saving, the comment
+  is applied when it is (`AfterCreate`).
+- **Notes** (`i`, `annotate.note`, Normal/Caret/Visual): a PDF `Text`
+  annotation in the last-used category, icon `annotation.note_size_pt`
+  (20) square, its bottom-left corner at the caret character's top-left;
+  without a caret at the top left of the visible part of the current page
+  (half an icon in from the edges). The editor opens at once; leaving it
+  without text (Esc, or saving empty) removes the note and its undo step.
+- **Tooltips**: the comment of the annotation under the mouse, else of the
+  selected one, in a panel like the editor's (wrapped, cut off at the
+  same height); not in Insert, Hint, Box or list modes.
+- **Box mode** (`b`, `annotate.box`, `BOX`; `marg/src/boxmode.rs`,
+  geometry in `marg-core/src/boxsel.rs`): a `box_grid_cols` × 
+  `box_grid_rows` (9 × 12) grid over the whole view (user's choice
+  2026-10-28), labeled with `[hints] chars` (two or three characters). The
+  first label picks a cell, the second another; the box spans both cells,
+  in either order, on the page under the first cell's top-left corner,
+  clamped to that page. Backspace removes a typed character, or goes back
+  to the first cell. Then: `hjkl` move the bottom-right corner, `HJKL`
+  the top-left one, by `box_step_pt` (4), with Ctrl by `box_fine_step_pt`
+  (1) (`Ctrl-Shift-hjkl` for the top-left corner); corners stop at the page
+  edge and at a 2 pt minimum size. `1`–`5` set the category (shown in the
+  status bar), `s` snaps, Enter saves (a `Square` with
+  `box_stroke_pt` line width, no fill, category color and `/Subj`), Esc
+  cancels. A mouse drag in Box mode draws the box (on the page where the
+  drag starts) and goes straight to adjusting. Box mode keys are fixed,
+  not in the keymap (like the list keys).
+- **Snap** (`s`): the image the box overlaps most (by area), from
+  `Request::Images` (MuPDF text page with `PRESERVE_IMAGES`, image blocks
+  only), asked for on the first `s` per page and cached. Not part of the
+  page text: with images kept, a Springer book cover's text took 394 ms
+  instead of < 80 ms, which would delay the first render (text is
+  requested before renders). "No image under the box" if none overlaps.
+
 **Comment editor**
 
 - An inline popup anchored next to the annotation, 360 px wide *(start)*,
@@ -489,6 +566,22 @@ changed on disk; :w! keeps marg's version, :e! reloads".
   `0` clears the filter.
 - `j/k` move, Enter jumps to the annotation and selects it, `e` edits the
   comment, `x` deletes. Esc or `A` closes the panel.
+
+**As implemented (Phase 3):** `A` (`annot.list`), mode `ANNOTATIONS`;
+rows from `marg-core/src/annotlist.rs`, panel in `marg/src/annotlist.rs`.
+The panel is drawn **over** the right `ui.annot_list_width` (0.35) of the
+pages, not beside them, so the view keeps its size and pages are not
+re-fitted and re-rendered when it opens (Claude's choice; the user may
+prefer a real side panel). Each row: color swatch, `p. <label>`, category,
+the marked text (characters whose centre lies in the annotation's boxes,
+lines joined like `y`; first 80 characters), or `[Box]`, `[Note]`,
+`[<Subtype>]`; the comment in italics. The list keys of §3 "Lists"
+(`/` fuzzy filter over text and comment, Esc clears it, then closes),
+plus `1`–`5` (one category, shown as `[Name]` in the header), `0` (all),
+`e` (go to it and edit; closes the list), `x` (delete; the list stays),
+`A` closes. Enter goes to the annotation (a third from the top if it was
+off screen) and selects it. Opening the list asks for the text of
+annotated pages; rows update as annotations and texts arrive.
 
 ### 2.11 Markdown export
 
@@ -656,6 +749,14 @@ digit highlights, `Enter` uses the last category, Esc goes back),
 binding. Since `1`–`5` are bound in Visual mode, counts there can only use
 other digits. The status bar shows `HINT`, `CARET`, `VISUAL` and ● for
 unsaved changes; `:` returns to the mode it came from.
+
+**As implemented (Phase 3):** new Normal keys `ga` (`hint.annot`), `i`
+(`annotate.note`), `b` (`annotate.box`), `A` (`annot.list`); Visual `c`
+(`annotate.comment`); new table `[keys.annot]` (Normal while an
+annotation is selected): `1`–`5` `annot.recolor(1)`…`(5)`, `U`
+`annot.toggle_type`, `e` `annot.edit`. Insert, Box and the annotation list
+have fixed keys (§2.8, §2.10). New modes in the status bar: `INSERT`,
+`BOX`, `ANNOTATIONS`.
 
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
@@ -833,6 +934,12 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 1.0`, `drag_scroll_rate = 12.0`, `drag_scroll_edge_px = 16.0`. Backups go to `<data_local_dir>/marg/backups` (Linux
 `~/.local/share/marg/backups`, respects `XDG_DATA_HOME`).
 
+**As implemented (Phase 3):** `[annotation]` adds `note_size_pt = 20`,
+`box_grid_cols = 9`, `box_grid_rows = 12`, `box_step_pt = 4`,
+`box_fine_step_pt = 1`; `[ui]` adds `comment_width_px = 360`,
+`comment_max_height = 0.4`, `annot_list_width = 0.35`; new key table
+`[keys.annot]`.
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -861,7 +968,13 @@ come in Phase 4.
 
 **UI checks without a screen:** `scripts/xvfb-drive.sh` runs the release
 build on Xvfb, sends keys with `xdotool` and saves screenshots (usage in the
-script). Set `XDG_STATE_HOME` to a scratch dir.
+script; Phase 3 added `move`, `click` and `drag` steps). Set
+`XDG_STATE_HOME`, `XDG_CONFIG_HOME` (the user's config remaps keys) and
+`XDG_DATA_HOME` to scratch dirs. Dead keys cannot be sent there:
+`setxkbmap` has no effect on this Xvfb, and xdotool types keysyms missing
+from the layout on a spare keycode that winit's keymap (read at startup)
+does not know. `cargo run --release -p marg-pdf --example text_timing --
+*.pdf` times text extraction of every page.
 
 **As implemented (Phase 1):** `:debug` shows UI frame time (last / p95 over
 120 frames), number of renders requested, cache MB and texture count, zoom,
@@ -1119,6 +1232,14 @@ building more.
   Decide the defaults after trying.
 - **Words include punctuation** (vim's `W`, not `w`): a selection to a word
   end takes the comma or full stop with it. Confirm or change.
+- **Phase 3 choices to confirm** (Claude's defaults, the user's call after
+  trying): annotation list drawn over the pages instead of beside them;
+  note icon above the caret character (or top left of the visible page);
+  Esc on Visual `c`'s editor keeps the highlight; `ga` labels on the
+  annotation's top-left corner; box grid labels of two or three characters
+  (9 hint chars for 108 cells; `extra_chars` would make them shorter);
+  grid size and steps (§12 above). Box mode and list keys are fixed, not
+  in the keymap.
 
 **Risks**
 
@@ -1133,7 +1254,9 @@ building more.
   columns). Checked in Phase 2 with the two-column fixture and the user's
   papers.
 - **Text input in egui** (German umlauts, dead keys, IME on Windows) for the
-  comment editor. Checked in Phase 3 on both OSes.
+  comment editor. Phase 3: umlauts and ß typed directly work under Xvfb;
+  dead keys could not be simulated there (§8). To check on the user's
+  keyboard (Linux) and on Windows.
 - **Incremental save edge cases** (repaired files, encrypted files, Windows
   file locks while Zotero has the file open). Mitigated by backups and the
   rules in §2.9; round-trip tests in Phase 2.
@@ -1153,6 +1276,11 @@ building more.
   (by design, to not lose changes); `:q!` closes without saving.
 - Phase 2: the clipboard after `y` was not checked under Xvfb (no `xclip`);
   copy text is covered by unit tests.
+
+- Phase 3: a comment longer than the tooltip height is cut off in the
+  tooltip (the editor scrolls).
+- Phase 3: Square and Text annotations from other programs can be
+  recolored (color and `/Subj`) but not switched with `U` (message).
 
 - MuPDF warnings go to stderr; the `mupdf` crate does not expose
   `fz_set_warning_callback`, so `:debug` cannot list them. Possible via
@@ -1219,6 +1347,33 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-28 — Phase 3: notes & boxes
+- Done (branch `phase-3-notes`, not merged), one commit per step:
+  categories of foreign annotations; `[keys.annot]` recolor and `U`
+  toggle, in place (`Edit::Update`); comment editor (`e`, Insert mode);
+  Visual `c`; notes `i`; comment tooltips; `ga`; box mode `b` (grid,
+  adjust, mouse drag); box snap `s` (`Request::Images`, new fixture
+  `figure.pdf`); annotation list `A`. Redo of created annotations now
+  restores the same object.
+- Decisions: box grid covers the whole view, the box stays on the first
+  corner's page (user, asked at the start). Everything else in "Phase 3
+  choices to confirm" (§12) is Claude's default.
+- Tried and failed: image blocks in the page text (`PRESERVE_IMAGES` on
+  every text request): a book cover took 394 ms (was < 80 ms), so images
+  became their own request. Dead keys under Xvfb (setxkbmap ignored;
+  xmodmap + xdotool use a spare keycode winit does not know).
+- Mistakes: `7acdd56` was committed with `cargo fmt --check` failing (the
+  check's exit code was lost in a pipe; fixed in `1a9c482`), and
+  `7cbfa7a`, `c1d100f`, `e0a17ec` with one failing test (the check
+  script used `! cargo test | grep -q FAILED`, which `set -e` ignores;
+  the test needed updating for `ga`, fixed in `1fdde07`). Run
+  `cargo test` itself and let its exit status stop the commit.
+- State: builds; 131 tests pass; clippy and fmt clean (local). Not
+  pushed yet, so CI has not run on this branch.
+- Next: the user tries Phase 3 (§0); fixes; push, CI, merge.
+- Watch out: Insert, Box and list keys are fixed (not remappable). The
+  annotation list is an overlay. `AnnotSpec` has `stroke_pt` (boxes only).
 
 ### 2026-10-28 — Phase 2 (continued): option A, annotation selection
 - User chose to stay in Phase 2 until the test week is over (option A),
