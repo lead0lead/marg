@@ -79,6 +79,9 @@ fn main() -> eframe::Result {
             ctx.request_repaint();
         }
     });
+    if let Some(p) = &paths {
+        doc.send(marg_pdf::Request::BackupDir(p.backup_dir.clone()));
+    }
     if let Some(path) = &args.path {
         doc.send(marg_pdf::Request::Open(path.clone()));
     }

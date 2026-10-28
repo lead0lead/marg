@@ -17,7 +17,7 @@ use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, Scale};
+use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::complete;
 use crate::input;
@@ -48,8 +48,34 @@ struct OpenDoc {
     revs: Vec<u32>,
     /// Annotations drawn by the UI until the page's new render arrives.
     provisional: Vec<Provisional>,
-    /// Annotation changes not saved yet.
-    unsaved: bool,
+    /// Successful annotation edits, and how many of them are saved. The
+    /// document thread answers in order, so a save covers every edit
+    /// confirmed before it.
+    edits: u64,
+    saved_edits: u64,
+    /// A save request is on its way.
+    saving: bool,
+    /// When the next autosave is due.
+    save_due: Option<Instant>,
+    /// The file changed on disk while marg has unsaved changes; saving
+    /// waits for `:w!` or `:e!`.
+    conflict: bool,
+}
+
+impl OpenDoc {
+    fn unsaved(&self) -> bool {
+        self.edits > self.saved_edits
+    }
+}
+
+/// What to do once the pending save has succeeded.
+#[derive(Debug, Clone, PartialEq)]
+enum AfterSave {
+    Nothing,
+    /// `:w`: say "Saved".
+    Report,
+    Quit,
+    Open(PathBuf),
 }
 
 /// An annotation drawn by the UI while the document thread creates it and
@@ -140,6 +166,9 @@ pub struct MargApp {
     next_tag: u64,
     /// Annotation author.
     author: String,
+    after_save: AfterSave,
+    /// `:q!`: close without saving.
+    discard: bool,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -246,6 +275,8 @@ impl MargApp {
             last_click: None,
             last_category: 1,
             next_tag: 1,
+            after_save: AfterSave::Nothing,
+            discard: false,
             author,
             cmdline: LineEdit::default(),
             doc,
@@ -368,7 +399,11 @@ impl MargApp {
                     match result {
                         Ok(_xref) => {
                             open.revs[page] = open.revs[page].max(rev);
-                            open.unsaved = true;
+                            open.edits += 1;
+                            open.save_due = Some(
+                                Instant::now()
+                                    + Duration::from_secs_f32(self.config.annotation.autosave_secs),
+                            );
                             for p in open.provisional.iter_mut().filter(|p| p.tag == tag) {
                                 p.rev = Some(rev);
                             }
@@ -376,6 +411,56 @@ impl MargApp {
                         Err(e) => {
                             open.provisional.retain(|p| p.tag != tag);
                             self.error(format!("Annotation failed: {e}"));
+                        }
+                    }
+                }
+                Response::Saved { generation, result } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    open.saving = false;
+                    let after = std::mem::replace(&mut self.after_save, AfterSave::Nothing);
+                    match result {
+                        Ok(_) => {
+                            open.saved_edits = open.edits;
+                            open.conflict = false;
+                            if !open.unsaved() {
+                                open.save_due = None;
+                            }
+                            match after {
+                                AfterSave::Nothing => {}
+                                AfterSave::Report => self.show(Level::Info, "Saved".into()),
+                                AfterSave::Quit => {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close)
+                                }
+                                AfterSave::Open(path) => self.doc.send(Request::Open(path)),
+                            }
+                        }
+                        Err(e) => {
+                            let what = match after {
+                                AfterSave::Quit => "Not quitting: ",
+                                AfterSave::Open(_) => "Not opening the other file: ",
+                                _ => "",
+                            };
+                            let msg = match e {
+                                SaveError::ChangedOnDisk => {
+                                    open.conflict = true;
+                                    format!(
+                                        "{what}file changed on disk; :w! keeps marg's version, :e! reloads"
+                                    )
+                                }
+                                SaveError::Failed(e) => {
+                                    open.save_due = Some(
+                                        Instant::now()
+                                            + Duration::from_secs_f32(
+                                                self.config.annotation.autosave_secs,
+                                            ),
+                                    );
+                                    format!("{what}save failed: {e}; will retry")
+                                }
+                            };
+                            self.error(msg);
                         }
                     }
                 }
@@ -444,7 +529,11 @@ impl MargApp {
             text_requested: HashSet::new(),
             revs: vec![0; view.page_count()],
             provisional: Vec::new(),
-            unsaved: false,
+            edits: 0,
+            saved_edits: 0,
+            saving: false,
+            save_due: None,
+            conflict: false,
             view,
         }
     }
@@ -914,8 +1003,21 @@ impl MargApp {
                 self.cmdline.clear();
                 return;
             }
-            Command::Quit | Command::QuitForce => {
+            Command::Quit => {
+                if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+                    self.save(false, AfterSave::Quit);
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                return;
+            }
+            Command::QuitForce => {
+                self.discard = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+            Command::Save | Command::SaveForce => {
+                self.save(command == Command::SaveForce, AfterSave::Report);
                 return;
             }
             Command::Open(path) => {
@@ -1008,13 +1110,11 @@ impl MargApp {
             | Command::VisualSwap
             | Command::Copy
             | Command::Highlight(_)
-            | Command::Underline => {}
-            // Wired up in the next steps.
-            Command::Undo
-            | Command::Redo
+            | Command::Underline
             | Command::Save
-            | Command::SaveForce
-            | Command::Reload => {}
+            | Command::SaveForce => {}
+            // Wired up in the next steps.
+            Command::Undo | Command::Redo | Command::Reload => {}
         }
     }
 
@@ -1024,9 +1124,40 @@ impl MargApp {
             self.error(format!("No such file: {}", path.display()));
             return;
         }
-        // Phase 1 has nothing to save before switching files.
         self.start_page = None;
-        self.doc.send(Request::Open(path));
+        if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+            self.save(false, AfterSave::Open(path));
+        } else {
+            self.doc.send(Request::Open(path));
+        }
+    }
+
+    /// Ask the document thread to save, then do `after` if it worked.
+    fn save(&mut self, force: bool, after: AfterSave) {
+        let Some(open) = &mut self.open else { return };
+        if after == AfterSave::Report && !open.unsaved() && !force {
+            self.show(Level::Info, "Nothing to save".into());
+            return;
+        }
+        self.after_save = after;
+        open.saving = true;
+        self.doc.send(Request::Save { force });
+    }
+
+    /// Autosave once it is due, unless a save is running or the file
+    /// changed on disk.
+    fn autosave(&mut self, ctx: &egui::Context) {
+        let Some(open) = &self.open else { return };
+        let Some(due) = open.save_due else { return };
+        if open.saving || open.conflict || !open.unsaved() {
+            return;
+        }
+        let now = Instant::now();
+        if now >= due {
+            self.save(false, AfterSave::Nothing);
+        } else {
+            ctx.request_repaint_after(due - now);
+        }
     }
 
     fn status_left(&self) -> String {
@@ -1047,7 +1178,7 @@ impl MargApp {
             "{mode}  {}  {page_text}  {:.0}%  continuous{}",
             open.file_name,
             v.zoom() * 100.0,
-            if open.unsaved { "  ●" } else { "" }
+            if open.unsaved() { "  ●" } else { "" }
         )
     }
 
@@ -1086,12 +1217,44 @@ impl MargApp {
 impl eframe::App for MargApp {
     fn on_exit(&mut self) {
         self.save_state();
+        // Last resort: the window closed without going through `q` (which
+        // saves first). Save and wait for the result.
+        if self.discard || !self.open.as_ref().is_some_and(|o| o.unsaved()) {
+            return;
+        }
+        self.doc.send(Request::Save { force: false });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match self.doc.recv_timeout(left) {
+                Some(Response::Saved { result, .. }) => {
+                    match result {
+                        Ok(_) => log::info!("saved on exit"),
+                        Err(e) => log::error!("save on exit failed: {e:?}; changes lost"),
+                    }
+                    return;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+        log::error!("save on exit timed out; changes lost");
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
+        // Closing the window saves first, like `q`.
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.discard
+            && self.open.as_ref().is_some_and(|o| o.unsaved())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.after_save != AfterSave::Quit {
+                self.save(false, AfterSave::Quit);
+            }
+        }
+        self.autosave(&ctx);
         if self
             .message
             .as_ref()

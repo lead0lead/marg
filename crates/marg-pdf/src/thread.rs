@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use marg_core::annot::AnnotSpec;
 use marg_core::text::PageText;
 
-use crate::document::{Doc, DocInfo, PixelRect, Pixels};
+use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
 
 /// Render scale as integer thousandths of a pixel per point, so it can be
 /// used as a cache key.
@@ -70,8 +70,13 @@ pub enum Request {
     /// Extract the text of a page. Served before renders.
     Text(usize),
     /// Change annotations. Served before text and renders. `tag` comes
-    /// back in the response.
+    /// back in the response. The first edit of a document backs the file up
+    /// first (if a backup folder is set); if that fails, the edit fails.
     Edit { tag: u64, edit: Edit },
+    /// Save the changes (see `Doc::save`).
+    Save { force: bool },
+    /// Folder for backups of files before their first change.
+    BackupDir(PathBuf),
 }
 
 pub enum Response {
@@ -101,6 +106,11 @@ pub enum Response {
         rev: u32,
         /// The object number of the created or deleted annotation.
         result: Result<i32, String>,
+    },
+    Saved {
+        generation: u64,
+        /// `Ok(None)`: there was nothing to save.
+        result: Result<Option<SaveReport>, SaveError>,
     },
 }
 
@@ -178,8 +188,24 @@ fn pixel_rect(info: &DocInfo, key: RenderKey) -> Result<PixelRect, String> {
     })
 }
 
+/// Back the file up before its first change.
+fn backup(d: &mut Doc, dir: Option<&std::path::Path>) -> Result<(), String> {
+    let Some(dir) = dir else { return Ok(()) };
+    match d.ensure_backup(dir) {
+        Ok(Some(path)) => {
+            log::info!("backup: {}", path.display());
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(e) => Err(format!(
+            "cannot back up the file, so it was not changed: {e}"
+        )),
+    }
+}
+
 fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut doc: Option<(Doc, DocInfo)> = None;
+    let mut backup_dir: Option<PathBuf> = None;
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
     let mut text_queue: VecDeque<usize> = VecDeque::new();
@@ -252,14 +278,16 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         Edit::Create(spec) => spec.page,
                         Edit::Delete { page, .. } => *page,
                     };
-                    let result = match &doc {
+                    let result = match &mut doc {
                         None => Err("no document open".into()),
-                        Some((d, _)) => match edit {
-                            Edit::Create(spec) => d.create_annotation(&spec),
-                            Edit::Delete { page, xref } => {
-                                d.delete_annotation(page, xref).map(|()| xref)
-                            }
-                        },
+                        Some((d, _)) => {
+                            backup(d, backup_dir.as_deref()).and_then(|()| match edit {
+                                Edit::Create(spec) => d.create_annotation(&spec),
+                                Edit::Delete { page, xref } => {
+                                    d.delete_annotation(page, xref).map(|()| xref)
+                                }
+                            })
+                        }
                     };
                     let rev = revs.entry(page).or_default();
                     if result.is_ok() {
@@ -277,6 +305,22 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     }
                     wake();
                 }
+                Request::Save { force } => {
+                    let result = match &mut doc {
+                        None => Ok(None),
+                        Some((d, _)) => d.save(force),
+                    };
+                    match &result {
+                        Ok(Some(r)) => log::info!("saved (full: {})", r.full),
+                        Ok(None) => {}
+                        Err(e) => log::warn!("save failed: {e:?}"),
+                    }
+                    if tx.send(Response::Saved { generation, result }).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::BackupDir(dir) => backup_dir = Some(dir),
             }
         }
         if let Some(page) = text_queue.pop_front() {

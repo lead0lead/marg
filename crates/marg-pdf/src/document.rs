@@ -1,11 +1,13 @@
 //! An open PDF and the operations the document thread performs on it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::SystemTime;
 
 use marg_core::annot::{AnnotKind, AnnotSpec};
 use marg_core::text::{BBox, Char, PageText};
 use mupdf::color::AnnotationColor;
-use mupdf::pdf::{PdfDocument, PdfObject};
+use mupdf::pdf::{PdfDocument, PdfObject, PdfWriteOptions};
 use mupdf::{
     Colorspace, Device, Matrix, MetadataName, Pixmap, Point, Quad, TextBlockContent, TextPageFlags,
 };
@@ -50,6 +52,83 @@ pub struct Pixels {
 /// An open PDF. Not `Send`: lives on the thread that opened it.
 pub struct Doc {
     doc: PdfDocument,
+    /// The file marg saves to.
+    path: PathBuf,
+    /// The file the document was loaded from: `path`, except after a full
+    /// save whose final rename failed.
+    source: PathBuf,
+    /// The file as marg last saw it (opened or saved).
+    disk: Option<Stamp>,
+    /// File name of the backup copy in the backup folder.
+    backup_name: String,
+    backed_up: bool,
+}
+
+/// What identifies a version of a file on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl Stamp {
+    pub fn of(path: &Path) -> Option<Stamp> {
+        let m = std::fs::metadata(path).ok()?;
+        Some(Stamp {
+            modified: m.modified().ok(),
+            len: m.len(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveError {
+    /// The file changed on disk since marg opened or saved it.
+    ChangedOnDisk,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveReport {
+    /// The whole file was rewritten (not appended to).
+    pub full: bool,
+}
+
+/// FNV-1a, for a stable short name from a path.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn backup_name(path: &Path, id: Option<&[u8]>) -> String {
+    let file = path
+        .file_name()
+        .map_or("file.pdf".into(), |n| n.to_string_lossy().into_owned());
+    let key = match id {
+        Some(id) if !id.is_empty() => hex(id),
+        _ => format!("path{:016x}", fnv1a(path.to_string_lossy().as_bytes())),
+    };
+    format!("{key}-{file}")
+}
+
+/// A temporary file next to `path` for a full save; unique per call.
+fn temp_path(path: &Path) -> PathBuf {
+    static N: AtomicU32 = AtomicU32::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let file = path
+        .file_name()
+        .map_or("file.pdf".into(), |n| n.to_string_lossy().into_owned());
+    path.with_file_name(format!(".{file}.{}-{n}.marg-tmp", std::process::id()))
+}
+
+fn open_pdf(path: &Path) -> Result<PdfDocument, String> {
+    let s = path.to_str().ok_or("path is not valid UTF-8")?;
+    PdfDocument::open(s).map_err(err)
 }
 
 fn err(e: mupdf::Error) -> String {
@@ -158,7 +237,16 @@ impl Doc {
             id,
             title,
         };
-        Ok((Self { doc }, info))
+        let disk = Stamp::of(path);
+        let doc = Self {
+            doc,
+            path: path.to_path_buf(),
+            source: path.to_path_buf(),
+            disk,
+            backup_name: backup_name(path, info.id.as_deref()),
+            backed_up: false,
+        };
+        Ok((doc, info))
     }
 
     fn page_size(doc: &PdfDocument, index: usize) -> Result<PageSize, String> {
@@ -357,5 +445,105 @@ impl Doc {
 
     pub fn has_unsaved_changes(&self) -> bool {
         self.doc.has_unsaved_changes()
+    }
+
+    /// Copy the file into `dir` before its first modification, unless a
+    /// backup of it exists already (backups are never overwritten).
+    /// Returns the new backup's path.
+    pub fn ensure_backup(&mut self, dir: &Path) -> Result<Option<PathBuf>, String> {
+        if self.backed_up {
+            return Ok(None);
+        }
+        let target = dir.join(&self.backup_name);
+        if target.exists() {
+            self.backed_up = true;
+            return Ok(None);
+        }
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::copy(&self.path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+        self.backed_up = true;
+        Ok(Some(target))
+    }
+
+    /// Whether the file on disk differs from the version marg opened or
+    /// last saved.
+    pub fn changed_on_disk(&self) -> bool {
+        Stamp::of(&self.path) != self.disk
+    }
+
+    /// Save the annotation changes. Incremental (appended) when possible;
+    /// otherwise, or with `force`, the whole file is written to a temporary
+    /// file and renamed over the original. Without `force`, a file changed
+    /// on disk is not touched. `Ok(None)`: nothing to save.
+    pub fn save(&mut self, force: bool) -> Result<Option<SaveReport>, SaveError> {
+        let same_file = self.source == self.path;
+        if same_file && !self.doc.has_unsaved_changes() && !force {
+            return Ok(None);
+        }
+        let changed = self.changed_on_disk();
+        if changed && !force {
+            return Err(SaveError::ChangedOnDisk);
+        }
+        let incremental = !force && !changed && same_file && self.doc.can_be_saved_incrementally();
+        if incremental {
+            let mut opts = PdfWriteOptions::default();
+            opts.set_incremental(true);
+            let path = self
+                .path
+                .to_str()
+                .ok_or(SaveError::Failed("path is not valid UTF-8".into()))?;
+            self.doc
+                .save_with_options(path, opts)
+                .map_err(|e| SaveError::Failed(err(e)))?;
+        } else {
+            self.save_full().map_err(SaveError::Failed)?;
+        }
+        self.disk = Stamp::of(&self.path);
+        Ok(Some(SaveReport { full: !incremental }))
+    }
+
+    /// Write the whole document to a temporary file, rename it over the
+    /// original, and continue from the new file.
+    fn save_full(&mut self) -> Result<(), String> {
+        let tmp = temp_path(&self.path);
+        let tmp_str = tmp.to_str().ok_or("path is not valid UTF-8")?;
+        self.doc
+            .save_with_options(tmp_str, PdfWriteOptions::default())
+            .map_err(err)?;
+        // Windows cannot rename over a file that is open (MuPDF has it
+        // open), so on failure close the document and try again.
+        let renamed = std::fs::rename(&tmp, &self.path).or_else(|_| {
+            self.doc = PdfDocument::new();
+            std::fs::rename(&tmp, &self.path)
+        });
+        // Continue from whichever file has the changes.
+        let from = if renamed.is_ok() {
+            self.path.clone()
+        } else {
+            tmp.clone()
+        };
+        self.doc = open_pdf(&from)?;
+        self.source = from;
+        renamed.map_err(|e| {
+            format!(
+                "cannot replace {} ({e}); the changes are in {}",
+                self.path.display(),
+                tmp.display()
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backup_name_without_id_hashes_the_path() {
+        let a = backup_name(Path::new("/papers/a/x.pdf"), None);
+        let b = backup_name(Path::new("/papers/b/x.pdf"), None);
+        assert!(a.starts_with("path") && a.ends_with("-x.pdf"), "{a}");
+        assert_ne!(a, b);
+        assert_eq!(a, backup_name(Path::new("/papers/a/x.pdf"), Some(&[])));
     }
 }
