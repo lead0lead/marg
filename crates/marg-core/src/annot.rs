@@ -1,6 +1,8 @@
 //! Annotations as marg creates them, independent of the PDF engine.
 
-use crate::text::BBox;
+use std::collections::HashSet;
+
+use crate::text::{BBox, PageText};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnnotKind {
@@ -22,6 +24,8 @@ pub struct AnnotSpec {
     pub subject: String,
     /// Written to `/T`.
     pub author: String,
+    /// The comment (`/Contents`).
+    pub contents: Option<String>,
 }
 
 /// An annotation found in the PDF (by marg or another program).
@@ -37,7 +41,9 @@ pub struct AnnotInfo {
     /// One box per QuadPoint, for text markup annotations.
     pub quads: Vec<BBox>,
     pub color: Option<[u8; 3]>,
+    pub opacity: f32,
     pub subject: Option<String>,
+    pub author: Option<String>,
     pub contents: Option<String>,
 }
 
@@ -102,6 +108,60 @@ pub fn step_annot(annots: &[AnnotInfo], from: AnnotFrom, forward: bool) -> Optio
     }
 }
 
+/// Erase the `selected` characters of page text `t` from a highlight or
+/// underline. `None`: it covers none of them, so it stays as it is.
+/// Otherwise the groups of boxes that remain, in reading order; each group
+/// becomes one annotation, with one box per line part (empty: nothing
+/// remains). A character belongs to the annotation if its centre lies in
+/// one of its boxes.
+pub fn erase(a: &AnnotInfo, t: &PageText, selected: &HashSet<usize>) -> Option<Vec<Vec<BBox>>> {
+    let covered = |i: usize| {
+        let b = t.chars[i].bbox;
+        a.boxes()
+            .iter()
+            .any(|q| q.contains(b.center_x(), b.center_y()))
+    };
+    if !selected.iter().any(|&i| i < t.chars.len() && covered(i)) {
+        return None;
+    }
+    let mut groups = Vec::new();
+    // The group being built: (line, box) per line part.
+    let mut current: Vec<(usize, BBox)> = Vec::new();
+    // A selected character of the annotation since the last kept one.
+    let mut cut = false;
+    for (li, line) in t.lines.iter().enumerate() {
+        // Text outside the annotation since the last kept character.
+        let mut outside = false;
+        for i in line.chars.clone() {
+            let c = &t.chars[i];
+            if !covered(i) {
+                outside |= !c.c.is_whitespace();
+                continue;
+            }
+            if selected.contains(&i) {
+                cut = true;
+                continue;
+            }
+            if c.c.is_whitespace() {
+                continue;
+            }
+            if cut && !current.is_empty() {
+                groups.push(current.drain(..).map(|(_, b)| b).collect());
+            }
+            cut = false;
+            match current.last_mut() {
+                Some((l, b)) if *l == li && !outside => *b = b.union(c.bbox),
+                _ => current.push((li, c.bbox)),
+            }
+            outside = false;
+        }
+    }
+    if !current.is_empty() {
+        groups.push(current.into_iter().map(|(_, b)| b).collect());
+    }
+    Some(groups)
+}
+
 /// The topmost annotation at a point on a page (later ones are drawn on
 /// top).
 pub fn annot_at(annots: &[AnnotInfo], page: usize, x: f32, y: f32) -> Option<&AnnotInfo> {
@@ -124,6 +184,7 @@ pub fn parse_color(s: &str) -> Option<[u8; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::tests::page;
 
     fn info(page: usize, xref: i32, y: f32) -> AnnotInfo {
         AnnotInfo {
@@ -133,9 +194,102 @@ mod tests {
             rect: BBox::new(10.0, y, 100.0, y + 10.0),
             quads: vec![],
             color: None,
+            opacity: 1.0,
             subject: None,
+            author: None,
             contents: None,
         }
+    }
+
+    /// A highlight over the given lines of `t`, from character `from` to
+    /// `to` (inclusive), like marg creates them.
+    fn highlight(t: &PageText, from: usize, to: usize) -> AnnotInfo {
+        let mut a = info(0, 1, 0.0);
+        a.quads = t
+            .lines
+            .iter()
+            .filter_map(|l| {
+                let s = l.chars.start.max(from);
+                let e = l.chars.end.min(to + 1);
+                (s < e).then(|| {
+                    t.chars[s..e]
+                        .iter()
+                        .map(|c| c.bbox)
+                        .reduce(BBox::union)
+                        .unwrap()
+                })
+            })
+            .collect();
+        a
+    }
+
+    fn texts(t: &PageText, groups: &[Vec<BBox>]) -> Vec<Vec<String>> {
+        groups
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|b| {
+                        t.chars
+                            .iter()
+                            .filter(|c| b.contains(c.bbox.center_x(), c.bbox.center_y()))
+                            .map(|c| c.c)
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn sel(r: std::ops::Range<usize>) -> HashSet<usize> {
+        r.collect()
+    }
+
+    #[test]
+    fn erase_middle_splits_in_two() {
+        let t = page("one two three\nfour five");
+        // "two three four"
+        let a = highlight(&t, 4, 17);
+        // Erase "three".
+        let g = erase(&a, &t, &sel(8..13)).unwrap();
+        assert_eq!(texts(&t, &g), [vec!["two"], vec!["four"]]);
+    }
+
+    #[test]
+    fn erase_ends_and_whole() {
+        let t = page("one two three");
+        let a = highlight(&t, 0, 12);
+        let g = erase(&a, &t, &sel(0..4)).unwrap();
+        assert_eq!(texts(&t, &g), [vec!["two three"]]);
+        let g = erase(&a, &t, &sel(8..13)).unwrap();
+        assert_eq!(texts(&t, &g), [vec!["one two"]]);
+        assert_eq!(erase(&a, &t, &sel(0..13)), Some(vec![]));
+    }
+
+    #[test]
+    fn erase_outside_leaves_it_alone() {
+        let t = page("one two three\nfour");
+        let a = highlight(&t, 0, 2);
+        assert_eq!(erase(&a, &t, &sel(4..17)), None);
+    }
+
+    #[test]
+    fn erase_keeps_multi_line_rest_together() {
+        let t = page("aa bb\ncc dd\nee ff");
+        // All three lines; erase "aa" only.
+        let a = highlight(&t, 0, 16);
+        let g = erase(&a, &t, &sel(0..2)).unwrap();
+        assert_eq!(texts(&t, &g), [vec!["bb", "cc dd", "ee ff"]]);
+    }
+
+    #[test]
+    fn erase_respects_gaps_in_foreign_highlights() {
+        // Two quads on one line, with unhighlighted text between them.
+        let t = page("aaa bbb ccc ddd");
+        let mut a = highlight(&t, 0, 2);
+        a.quads.extend(highlight(&t, 8, 14).quads);
+        // Erase "ddd": "aaa" and "ccc" stay as separate boxes.
+        let g = erase(&a, &t, &sel(12..15)).unwrap();
+        assert_eq!(texts(&t, &g), [vec!["aaa", "ccc"]]);
     }
 
     #[test]

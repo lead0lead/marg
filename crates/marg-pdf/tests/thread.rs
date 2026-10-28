@@ -303,6 +303,7 @@ fn highlight_create_and_delete_render() {
         opacity: 1.0,
         subject: "Key point".into(),
         author: "test".into(),
+        contents: None,
     };
     assert_eq!(pixel(&t, 0, 150, 410), [255, 255, 255]);
     let (tag, page, rev, xref) = edit(&t, 7, Edit::Create(spec));

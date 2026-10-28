@@ -37,6 +37,7 @@ fn spec(kind: AnnotKind) -> AnnotSpec {
         opacity: 0.4,
         subject: "Question".into(),
         author: "tester".into(),
+        contents: Some("why?".into()),
     }
 }
 
@@ -170,6 +171,9 @@ fn list_delete_restore_round_trip() {
     assert_eq!((a[0].xref, a[0].kind.as_str()), (xref, "Highlight"));
     assert_eq!(a[0].subject.as_deref(), Some("Question"));
     assert_eq!(a[0].color, Some([0xA2, 0x8A, 0xE5]));
+    assert_eq!(a[0].author.as_deref(), Some("tester"));
+    assert_eq!(a[0].contents.as_deref(), Some("why?"));
+    assert!((a[0].opacity - 0.4).abs() < 1e-3);
     assert_eq!(a[0].quads.len(), 2);
     assert!((a[0].quads[0].x0 - 72.0).abs() < 0.5 && (a[0].quads[0].y0 - 90.0).abs() < 0.5);
 

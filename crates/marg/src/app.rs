@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
 use marg_core::annot::{
-    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, parse_color, step_annot,
+    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, erase, parse_color, step_annot,
 };
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
@@ -71,12 +71,13 @@ struct OpenDoc {
     annots: Vec<Option<Vec<AnnotInfo>>>,
 }
 
-/// An undoable annotation action.
-enum UndoOp {
-    /// A highlight or underline: one annotation per page it touches.
-    Created(Vec<Created>),
-    /// A deleted annotation; undo puts the same object back.
-    Deleted { page: usize, xref: i32 },
+/// An undoable annotation action: annotations it deleted and created
+/// (a highlight creates one per page, `x` deletes one, erasing does both).
+#[derive(Default)]
+struct UndoOp {
+    /// (page, object number). Undo puts the same objects back.
+    deleted: Vec<(usize, i32)>,
+    created: Vec<Created>,
 }
 
 /// An annotation created by an undoable action.
@@ -1052,6 +1053,7 @@ impl MargApp {
                 opacity: self.config.annotation.highlight_opacity,
                 subject: cat.name.clone(),
                 author: self.author.clone(),
+                contents: None,
             };
             let tag = self.next_tag;
             self.next_tag += 1;
@@ -1066,7 +1068,10 @@ impl MargApp {
             });
             group.push(Created { spec, tag });
         }
-        open.undo.push(UndoOp::Created(group));
+        open.undo.push(UndoOp {
+            deleted: Vec::new(),
+            created: group,
+        });
         self.last_category = category;
         self.leave_text_modes();
     }
@@ -1089,50 +1094,52 @@ impl MargApp {
             return;
         };
         let mut edits = Vec::new();
-        match (op, redo) {
+        if redo {
+            for &(page, xref) in &op.deleted {
+                edits.push(Edit::Delete { page, xref });
+            }
             // Create again (new object numbers).
-            (UndoOp::Created(group), true) => {
-                for c in group.iter_mut() {
-                    c.tag = self.next_tag;
-                    self.next_tag += 1;
-                    open.provisional.push(Provisional {
-                        tag: c.tag,
-                        rev: None,
-                        spec: c.spec.clone(),
-                    });
-                    edits.push((c.tag, Edit::Create(c.spec.clone())));
-                }
-            }
-            (UndoOp::Created(group), false) => {
-                let targets: Option<Vec<Edit>> = group
-                    .iter()
-                    .map(|c| {
-                        open.xrefs.get(&c.tag).map(|&xref| Edit::Delete {
-                            page: c.spec.page,
-                            xref,
-                        })
-                    })
-                    .collect();
-                let Some(targets) = targets else {
-                    // The creation has not been confirmed yet; try again later.
-                    open.undo.redo();
-                    return;
-                };
-                for e in targets {
-                    edits.push((self.next_tag, e));
-                    self.next_tag += 1;
-                }
-            }
-            (&mut UndoOp::Deleted { page, xref }, redo) => {
-                let e = if redo {
-                    Edit::Delete { page, xref }
-                } else {
-                    Edit::Restore { page, xref }
-                };
-                edits.push((self.next_tag, e));
+            for c in op.created.iter_mut() {
+                c.tag = self.next_tag;
                 self.next_tag += 1;
+                open.provisional.push(Provisional {
+                    tag: c.tag,
+                    rev: None,
+                    spec: c.spec.clone(),
+                });
+            }
+        } else {
+            let created: Option<Vec<Edit>> = op
+                .created
+                .iter()
+                .map(|c| {
+                    open.xrefs.get(&c.tag).map(|&xref| Edit::Delete {
+                        page: c.spec.page,
+                        xref,
+                    })
+                })
+                .collect();
+            let Some(created) = created else {
+                // The creation has not been confirmed yet; try again later.
+                open.undo.redo();
+                return;
+            };
+            edits.extend(created);
+            for &(page, xref) in &op.deleted {
+                edits.push(Edit::Restore { page, xref });
             }
         }
+        let mut tagged: Vec<(u64, Edit)> = Vec::new();
+        for e in edits {
+            tagged.push((self.next_tag, e));
+            self.next_tag += 1;
+        }
+        if redo {
+            for c in &op.created {
+                tagged.push((c.tag, Edit::Create(c.spec.clone())));
+            }
+        }
+        let edits = tagged;
         for (tag, edit) in edits {
             self.doc.send(Request::Edit { tag, edit });
         }
@@ -1227,6 +1234,87 @@ impl MargApp {
         self.select_annot(Some(&a));
     }
 
+    /// Visual `d`: remove highlights and underlines from the selected text.
+    /// The parts of them outside the selection become new annotations with
+    /// the same color, category and author (the comment stays with the first
+    /// part). One undo step.
+    fn erase_selection(&mut self) {
+        let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
+            return;
+        };
+        let mut by_page: BTreeMap<usize, HashSet<usize>> = BTreeMap::new();
+        for (page, _, r) in sel.line_parts(&open.texts) {
+            by_page.entry(page).or_default().extend(r);
+        }
+        if by_page.keys().any(|&p| open.annots[p].is_none()) {
+            self.show(Level::Info, "Still reading the annotations".into());
+            return;
+        }
+        let mut op = UndoOp::default();
+        let mut edits = Vec::new();
+        for (page, selected) in &by_page {
+            let (Some(list), Some(t)) = (&open.annots[*page], &open.texts[*page]) else {
+                continue;
+            };
+            for a in list {
+                let kind = match a.kind.as_str() {
+                    "Highlight" => AnnotKind::Highlight,
+                    "Underline" => AnnotKind::Underline,
+                    _ => continue,
+                };
+                let Some(groups) = erase(a, t, selected) else {
+                    continue;
+                };
+                op.deleted.push((*page, a.xref));
+                edits.push((
+                    self.next_tag,
+                    Edit::Delete {
+                        page: *page,
+                        xref: a.xref,
+                    },
+                ));
+                self.next_tag += 1;
+                for (i, rects) in groups.into_iter().enumerate() {
+                    let spec = AnnotSpec {
+                        page: *page,
+                        kind,
+                        rects,
+                        color: a.color.unwrap_or([0xFF, 0xD4, 0x00]),
+                        opacity: a.opacity,
+                        subject: a.subject.clone().unwrap_or_default(),
+                        author: a.author.clone().unwrap_or_else(|| self.author.clone()),
+                        contents: if i == 0 { a.contents.clone() } else { None },
+                    };
+                    let tag = self.next_tag;
+                    self.next_tag += 1;
+                    open.provisional.push(Provisional {
+                        tag,
+                        rev: None,
+                        spec: spec.clone(),
+                    });
+                    edits.push((tag, Edit::Create(spec.clone())));
+                    op.created.push(Created { spec, tag });
+                }
+            }
+        }
+        if op.deleted.is_empty() {
+            self.show(Level::Info, "Nothing highlighted in the selection".into());
+            return;
+        }
+        let n = op.deleted.len();
+        open.undo.push(op);
+        for (tag, edit) in edits {
+            self.doc.send(Request::Edit { tag, edit });
+        }
+        self.leave_text_modes();
+        let what = if n == 1 {
+            "1 annotation"
+        } else {
+            "annotations"
+        };
+        self.show(Level::Info, format!("Erased from {what} (u to undo)"));
+    }
+
     /// `x`: delete the selected annotation (undo puts it back).
     fn delete_annotation(&mut self) {
         let Some((page, xref)) = self.selected_annot.take() else {
@@ -1237,7 +1325,10 @@ impl MargApp {
             return;
         };
         let Some(open) = &mut self.open else { return };
-        open.undo.push(UndoOp::Deleted { page, xref });
+        open.undo.push(UndoOp {
+            deleted: vec![(page, xref)],
+            created: Vec::new(),
+        });
         let tag = self.next_tag;
         self.next_tag += 1;
         self.doc.send(Request::Edit {
@@ -1390,6 +1481,10 @@ impl MargApp {
                 self.delete_annotation();
                 return;
             }
+            Command::Erase => {
+                self.erase_selection();
+                return;
+            }
             Command::Close => {
                 if self.open.as_ref().is_some_and(|o| o.unsaved()) {
                     self.save(false, AfterSave::Close);
@@ -1507,6 +1602,7 @@ impl MargApp {
             | Command::AnnotNext
             | Command::AnnotPrev
             | Command::AnnotDelete
+            | Command::Erase
             | Command::Undo
             | Command::Redo => {}
         }

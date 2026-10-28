@@ -425,10 +425,15 @@ impl Doc {
             annot.set_opacity(spec.opacity).map_err(err)?;
         }
         annot.set_author(&spec.author).map_err(err)?;
-        annot
-            .object()
-            .dict_put("Subj", PdfObject::new_string(&spec.subject).map_err(err)?)
-            .map_err(err)?;
+        if let Some(c) = &spec.contents {
+            annot.set_contents(c).map_err(err)?;
+        }
+        if !spec.subject.is_empty() {
+            annot
+                .object()
+                .dict_put("Subj", PdfObject::new_string(&spec.subject).map_err(err)?)
+                .map_err(err)?;
+        }
         annot.update().map_err(err)?;
         page.update().map_err(err)?;
         annot.xref().map_err(err)
@@ -501,7 +506,14 @@ impl Doc {
                 rect: rel(a.rect().map_err(err)?),
                 quads,
                 color,
+                opacity: a.opacity().unwrap_or(1.0),
                 subject,
+                author: a
+                    .author()
+                    .ok()
+                    .flatten()
+                    .map(str::to_string)
+                    .filter(|s| !s.is_empty()),
                 contents: a
                     .contents()
                     .ok()

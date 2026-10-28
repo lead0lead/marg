@@ -83,6 +83,7 @@ pub const DEFAULT_VISUAL: &[(&str, &str)] = &[
     ("5", "annotate.highlight(5)"),
     ("U", "annotate.underline"),
     ("Enter", "annotate.pick"),
+    ("d", "annotate.erase"),
     ("y", "selection.copy"),
 ];
 

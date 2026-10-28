@@ -69,6 +69,9 @@ pub enum Command {
     AnnotPrev,
     /// Delete the selected annotation.
     AnnotDelete,
+    /// Remove highlights and underlines from the selected text (parts of
+    /// them outside the selection stay).
+    Erase,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -220,6 +223,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "annot.delete",
         Command::AnnotDelete,
         "delete the selected annotation",
+    ),
+    (
+        "annotate.erase",
+        Command::Erase,
+        "remove highlights from the selection",
     ),
 ];
 
