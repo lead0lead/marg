@@ -1051,6 +1051,13 @@ building more.
   after trying it.
 - **`y` stays in Visual mode** (Phase 2 choice, vim leaves Visual): keeps the
   selection for a highlight after copying. Confirm or change.
+- **Highlight keys vs. counts in Visual mode** (raised by the user
+  2026-10-28): with `1`–`5` bound, `5l` highlights instead of moving.
+  Options: (1) digits are counts, highlights on `g1`–`g5`; (2) digits are
+  counts, `Enter` opens a category prompt showing the names, then a digit;
+  (3) keep `1`–`5`. The user is trying option 1 through their own config
+  (`[keys.visual]`, no rebuild; covered by the test
+  `visual_digits_can_be_freed_for_counts`). Decide the default after trying.
 - **Words include punctuation** (vim's `W`, not `w`): a selection to a word
   end takes the comma or full stop with it. Confirm or change.
 
@@ -1181,6 +1188,10 @@ Format:
   saves, closes the file and shows the recent list (user asked which name;
   Claude suggested `:close` + `:bd` alias + `Ctrl-w`, user left it to
   Claude). The document thread got `Request::Close`.
+- User feedback while testing: reading, navigating and selecting work
+  well. Counts vs. `1`–`5` in Visual mode: user tries `g1`–`g5` via config
+  (§12). Deleting older annotations (`x`, Phase 3) was offered to come
+  earlier if needed.
 - Next: user uses it on real papers for about a week (decision milestone).
 - Watch out: UI test runs must set **both** `XDG_STATE_HOME` and
   `XDG_DATA_HOME` to scratch dirs (backups go to the data dir), and must

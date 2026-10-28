@@ -514,6 +514,42 @@ mod tests {
     }
 
     #[test]
+    fn visual_digits_can_be_freed_for_counts() {
+        // The user's config from 2026-10-28: highlights on g1–g5.
+        let mut visual = BTreeMap::new();
+        for n in 1..=5 {
+            visual.insert(n.to_string(), UNBIND.to_string());
+            visual.insert(format!("g{n}"), format!("annotate.highlight({n})"));
+        }
+        let keys = KeysConfig {
+            visual,
+            ..KeysConfig::default()
+        };
+        let (map, w) = Keymap::build(KeyMode::Visual, &keys);
+        assert!(w.is_empty(), "{w:?}");
+        let mut m = Matcher::default();
+        assert_eq!(
+            feed_str(&mut m, &map, "5l"),
+            [
+                Outcome::Pending,
+                run(Command::Motion(Motion::CharNext), Some(5))
+            ]
+        );
+        assert_eq!(
+            feed_str(&mut m, &map, "g3"),
+            [Outcome::Pending, run(Command::Highlight(3), None)]
+        );
+        // gg and ge still work next to g1–g5.
+        assert_eq!(
+            feed_str(&mut m, &map, "ge"),
+            [
+                Outcome::Pending,
+                run(Command::Motion(Motion::WordEndPrev), None)
+            ]
+        );
+    }
+
+    #[test]
     fn bound_digit_is_not_a_count() {
         let user = BTreeMap::from([("1".to_string(), "zoom.in".to_string())]);
         let (map, _) = Keymap::normal(&user);
