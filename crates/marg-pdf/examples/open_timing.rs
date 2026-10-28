@@ -26,6 +26,7 @@ fn main() {
     );
     t.send(Request::Render {
         keys: vec![RenderKey {
+            rev: 0,
             page: 0,
             scale: Scale::from_f32(1.5),
             tile: None,

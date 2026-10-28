@@ -2,9 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+use marg_core::annot::{AnnotKind, AnnotSpec};
 use marg_core::text::{BBox, Char, PageText};
+use mupdf::color::AnnotationColor;
 use mupdf::pdf::{PdfDocument, PdfObject};
-use mupdf::{Colorspace, Device, Matrix, MetadataName, Pixmap, TextBlockContent, TextPageFlags};
+use mupdf::{
+    Colorspace, Device, Matrix, MetadataName, Pixmap, Point, Quad, TextBlockContent, TextPageFlags,
+};
 
 /// Page size in PDF points.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -281,5 +285,77 @@ impl Doc {
             })
             .collect();
         Ok(PageText::from_blocks(blocks))
+    }
+
+    /// The offset of page `index`'s top-left corner in MuPDF page space.
+    fn page_origin(&self, index: usize) -> Result<(f32, f32), String> {
+        let b = self
+            .doc
+            .load_page(index as i32)
+            .and_then(|p| p.bounds())
+            .map_err(err)?;
+        Ok((b.x0, b.y0))
+    }
+
+    /// Create an annotation. Returns its object number.
+    pub fn create_annotation(&self, spec: &AnnotSpec) -> Result<i32, String> {
+        let (ox, oy) = self.page_origin(spec.page)?;
+        let quads: Vec<Quad> = spec
+            .rects
+            .iter()
+            .map(|r| {
+                let (x0, y0, x1, y1) = (r.x0 + ox, r.y0 + oy, r.x1 + ox, r.y1 + oy);
+                Quad::new(
+                    Point::new(x0, y0),
+                    Point::new(x1, y0),
+                    Point::new(x0, y1),
+                    Point::new(x1, y1),
+                )
+            })
+            .collect();
+        if quads.is_empty() {
+            return Err("nothing to annotate".into());
+        }
+        let mut page = self.doc.load_pdf_page(spec.page as i32).map_err(err)?;
+        let mut annot = match spec.kind {
+            AnnotKind::Highlight => page.add_highlight_annotation(quads),
+            AnnotKind::Underline => page.add_underline_annotation(quads),
+        }
+        .map_err(err)?;
+        let [r, g, b] = spec.color.map(|c| c as f32 / 255.0);
+        annot
+            .set_color(AnnotationColor::Rgb {
+                red: r,
+                green: g,
+                blue: b,
+            })
+            .map_err(err)?;
+        if spec.kind == AnnotKind::Highlight {
+            annot.set_opacity(spec.opacity).map_err(err)?;
+        }
+        annot.set_author(&spec.author).map_err(err)?;
+        annot
+            .object()
+            .dict_put("Subj", PdfObject::new_string(&spec.subject).map_err(err)?)
+            .map_err(err)?;
+        annot.update().map_err(err)?;
+        page.update().map_err(err)?;
+        annot.xref().map_err(err)
+    }
+
+    /// Delete the annotation with object number `xref` from page `index`.
+    pub fn delete_annotation(&self, index: usize, xref: i32) -> Result<(), String> {
+        let mut page = self.doc.load_pdf_page(index as i32).map_err(err)?;
+        let annot = page
+            .annotations()
+            .find(|a| a.xref().ok() == Some(xref))
+            .ok_or("annotation not found")?;
+        page.delete_annotation(annot).map_err(err)?;
+        page.update().map_err(err)?;
+        Ok(())
+    }
+
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.doc.has_unsaved_changes()
     }
 }

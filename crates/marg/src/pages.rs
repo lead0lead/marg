@@ -40,15 +40,29 @@ impl PageCache {
     pub fn insert(&mut self, ctx: &egui::Context, key: RenderKey, px: Pixels) {
         let size = [px.width as usize, px.height as usize];
         let image = egui::ColorImage::from_rgba_premultiplied(size, &px.rgba);
-        let name = format!("page{}@{}{:?}", key.page, key.scale.0, key.tile);
+        let name = format!("page{}r{}@{}{:?}", key.page, key.rev, key.scale.0, key.tile);
         let tex = ctx.load_texture(name, image, egui::TextureOptions::LINEAR);
         self.textures.insert(key, tex, px.rgba.len());
+        // A full page after an edit replaces everything from before it.
+        if key.tile.is_none() {
+            self.textures
+                .retain(|k| k.page != key.page || k.rev >= key.rev);
+        }
+    }
+
+    /// Whether a full-page render of `page` at revision `rev` or later is
+    /// cached.
+    pub fn has_rev(&self, page: usize, rev: u32) -> bool {
+        self.textures
+            .iter()
+            .any(|(k, _)| k.page == page && k.tile.is_none() && k.rev >= rev)
     }
 
     /// Plan the renders for this frame and mark the cached ones as used.
     /// Returns the keys not in the cache, most urgent first.
-    pub fn plan(&mut self, view: &View, cfg: &RenderConfig, ppp: f32) -> Plan {
+    pub fn plan(&mut self, view: &View, cfg: &RenderConfig, ppp: f32, revs: &[u32]) -> Plan {
         self.textures.next_frame();
+        let full = |page: usize, scale| full(page, revs[page], scale);
         let scale = Scale::from_f32(view.zoom() * ppp);
         let tiled = view.zoom() > cfg.tile_above_zoom;
         let visible = view.visible_pages();
@@ -58,7 +72,14 @@ impl PageCache {
             // them so a new page never shows blank.
             let low = Scale::from_f32(cfg.tile_above_zoom * ppp);
             for page in visible.clone() {
-                wanted.extend(visible_tiles(view, page, scale, cfg.tile_px, ppp));
+                wanted.extend(visible_tiles(
+                    view,
+                    page,
+                    revs[page],
+                    scale,
+                    cfg.tile_px,
+                    ppp,
+                ));
             }
             for page in visible.clone() {
                 wanted.push(full(page, low));
@@ -85,16 +106,20 @@ impl PageCache {
     }
 
     /// Draw the visible pages into `area` (the page view on screen).
-    /// Returns true if every visible page was drawn from a full-page
-    /// texture at the exact scale (not tiled, no fallback).
+    /// Returns whether every visible page was drawn from a full-page
+    /// texture at the exact scale (not tiled, no fallback), and the visible
+    /// pages drawn from a render older than their revision in `revs` (or
+    /// not at all).
     pub fn draw(
         &mut self,
         painter: &egui::Painter,
         area: Rect,
         view: &View,
         cfg: &RenderConfig,
-    ) -> bool {
+        revs: &[u32],
+    ) -> (bool, Vec<usize>) {
         let mut all_exact = true;
+        let mut stale = Vec::new();
         let ppp = painter.pixels_per_point();
         let scale = Scale::from_f32(view.zoom() * ppp);
         let tiled = view.zoom() > cfg.tile_above_zoom;
@@ -106,7 +131,8 @@ impl PageCache {
             let page_rect = Rect::from_min_size(origin, Vec2::new(r.w, r.h));
             painter.rect_filled(page_rect, 0.0, Color32::WHITE);
 
-            let exact = full(page, scale);
+            let rev = revs[page];
+            let exact = full(page, rev, scale);
             if !tiled && let Some(tex) = self.textures.get(&exact) {
                 let size = tex.size_vec2() / ppp;
                 painter.image(
@@ -117,13 +143,17 @@ impl PageCache {
                 );
             } else {
                 all_exact = false;
-                if let Some(key) = self.best_fallback(page, scale)
+                let fallback = self.best_fallback(page, rev, scale);
+                if fallback.is_none_or(|k| k.rev < rev) {
+                    stale.push(page);
+                }
+                if let Some(key) = fallback
                     && let Some(tex) = self.textures.get(&key)
                 {
                     painter.image(tex.id(), page_rect, UV, Color32::WHITE);
                 }
                 if tiled {
-                    self.draw_tiles(painter, origin, page, scale, cfg.tile_px, ppp);
+                    self.draw_tiles(painter, origin, exact, cfg.tile_px, ppp);
                 }
             }
             painter.rect_stroke(
@@ -133,22 +163,27 @@ impl PageCache {
                 egui::StrokeKind::Outside,
             );
         }
-        all_exact
+        (all_exact, stale)
     }
 
+    /// Draw the cached tiles of `want`'s page, revision and scale.
     fn draw_tiles(
         &mut self,
         painter: &egui::Painter,
         origin: Pos2,
-        page: usize,
-        scale: Scale,
+        want: RenderKey,
         tile_px: u32,
         ppp: f32,
     ) {
         let tiles: Vec<RenderKey> = self
             .textures
             .iter()
-            .filter(|(k, _)| k.page == page && k.scale == scale && k.tile.is_some())
+            .filter(|(k, _)| {
+                k.page == want.page
+                    && k.rev == want.rev
+                    && k.scale == want.scale
+                    && k.tile.is_some()
+            })
             .map(|(k, _)| *k)
             .collect();
         for key in tiles {
@@ -164,8 +199,9 @@ impl PageCache {
         }
     }
 
-    /// The cached full-page texture of `page` closest in scale to `target`.
-    fn best_fallback(&self, page: usize, target: Scale) -> Option<RenderKey> {
+    /// The cached full-page texture of `page` closest in scale to
+    /// `target`, preferring revision `rev`.
+    fn best_fallback(&self, page: usize, rev: u32, target: Scale) -> Option<RenderKey> {
         let t = target.get();
         self.textures
             .iter()
@@ -174,16 +210,17 @@ impl PageCache {
             .min_by(|a, b| {
                 let da = (a.scale.get() / t).ln().abs();
                 let db = (b.scale.get() / t).ln().abs();
-                da.total_cmp(&db)
+                (a.rev != rev).cmp(&(b.rev != rev)).then(da.total_cmp(&db))
             })
     }
 }
 
 const UV: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
 
-fn full(page: usize, scale: Scale) -> RenderKey {
+fn full(page: usize, rev: u32, scale: Scale) -> RenderKey {
     RenderKey {
         page,
+        rev,
         scale,
         tile: None,
     }
@@ -193,6 +230,7 @@ fn full(page: usize, scale: Scale) -> RenderKey {
 fn visible_tiles(
     view: &View,
     page: usize,
+    rev: u32,
     scale: Scale,
     size: u32,
     ppp: f32,
@@ -219,6 +257,7 @@ fn visible_tiles(
     row_range.flat_map(move |row| {
         col_range.clone().map(move |col| RenderKey {
             page,
+            rev,
             scale,
             tile: Some(Tile { col, row, size }),
         })

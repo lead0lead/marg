@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, text::LayoutJob};
+use marg_core::annot::{AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
 use marg_core::config::{HintMode, HintsConfig};
 use marg_core::hints::{HintInput, labels};
@@ -298,5 +299,27 @@ pub fn keep_visible(view: &mut View, caret: &Caret, texts: &[Option<PageText>]) 
     };
     if dx != 0.0 || dy != 0.0 {
         view.scroll_by(dx, dy);
+    }
+}
+
+/// Draw an annotation the document thread has not rendered yet.
+pub fn draw_provisional(painter: &egui::Painter, view: &View, area: Rect, spec: &AnnotSpec) {
+    if !view.visible_pages().contains(&spec.page) {
+        return;
+    }
+    let [r, g, b] = spec.color;
+    for &bbox in &spec.rects {
+        let rect = screen_rect(view, area, spec.page, bbox);
+        match spec.kind {
+            AnnotKind::Highlight => {
+                let a = (spec.opacity.clamp(0.0, 1.0) * 255.0) as u8;
+                painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+            }
+            AnnotKind::Underline => {
+                let t = (rect.height() * 0.07).max(1.0);
+                let line = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - t), rect.max);
+                painter.rect_filled(line, 0.0, Color32::from_rgb(r, g, b));
+            }
+        }
     }
 }

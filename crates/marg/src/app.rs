@@ -1,11 +1,12 @@
 //! The marg window: page view, status bar and command line.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
+use marg_core::annot::{AnnotKind, AnnotSpec, parse_color};
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::Config;
@@ -14,9 +15,9 @@ use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
-use marg_core::text::PageText;
+use marg_core::text::{BBox, PageText};
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response, Scale};
+use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, Scale};
 
 use crate::complete;
 use crate::input;
@@ -43,6 +44,21 @@ struct OpenDoc {
     texts: Vec<Option<PageText>>,
     /// Pages whose text has been requested.
     text_requested: HashSet<usize>,
+    /// Annotation edits per page, as confirmed by the document thread.
+    revs: Vec<u32>,
+    /// Annotations drawn by the UI until the page's new render arrives.
+    provisional: Vec<Provisional>,
+    /// Annotation changes not saved yet.
+    unsaved: bool,
+}
+
+/// An annotation drawn by the UI while the document thread creates it and
+/// re-renders its page.
+struct Provisional {
+    tag: u64,
+    /// The page revision with the annotation, once confirmed.
+    rev: Option<u32>,
+    spec: AnnotSpec,
 }
 
 impl OpenDoc {
@@ -118,6 +134,12 @@ pub struct MargApp {
     drag_anchor: Option<TextPos>,
     /// Last primary press: time, position, click count (1–3).
     last_click: Option<(Instant, egui::Pos2, u8)>,
+    /// Category used by the last highlight; underlines use it.
+    last_category: u8,
+    /// Tag of the next annotation edit.
+    next_tag: u64,
+    /// Annotation author.
+    author: String,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -203,6 +225,7 @@ impl MargApp {
                 Some(RecentList::new(&state, s.config.ui.recent_files_max)),
             ),
         };
+        let author = annotation_author(&s.config.annotation.author);
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
             config: s.config,
@@ -221,6 +244,9 @@ impl MargApp {
             selection_before_hints: None,
             drag_anchor: None,
             last_click: None,
+            last_category: 1,
+            next_tag: 1,
+            author,
             cmdline: LineEdit::default(),
             doc,
             open: None,
@@ -328,6 +354,31 @@ impl MargApp {
                         Err(e) => log::error!("render {key:?} failed: {e}"),
                     }
                 }
+                Response::Edited {
+                    generation,
+                    tag,
+                    page,
+                    rev,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(_xref) => {
+                            open.revs[page] = open.revs[page].max(rev);
+                            open.unsaved = true;
+                            for p in open.provisional.iter_mut().filter(|p| p.tag == tag) {
+                                p.rev = Some(rev);
+                            }
+                        }
+                        Err(e) => {
+                            open.provisional.retain(|p| p.tag != tag);
+                            self.error(format!("Annotation failed: {e}"));
+                        }
+                    }
+                }
                 Response::Text {
                     generation,
                     page,
@@ -391,6 +442,9 @@ impl MargApp {
             file_name,
             texts: vec![None; view.page_count()],
             text_requested: HashSet::new(),
+            revs: vec![0; view.page_count()],
+            provisional: Vec::new(),
+            unsaved: false,
             view,
         }
     }
@@ -745,6 +799,51 @@ impl MargApp {
         self.mode = Mode::Visual;
     }
 
+    /// Highlight or underline the selection in `category` (1-based), one
+    /// annotation per page, and leave Visual mode.
+    fn annotate(&mut self, kind: AnnotKind, category: u8) {
+        let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
+            return;
+        };
+        let Some(cat) = self.config.categories.get(usize::from(category) - 1) else {
+            self.error(format!("No category {category}"));
+            return;
+        };
+        let Some(color) = parse_color(&cat.color) else {
+            let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
+            self.error(msg);
+            return;
+        };
+        let mut by_page: BTreeMap<usize, Vec<BBox>> = BTreeMap::new();
+        for (page, b) in sel.rects(&open.texts) {
+            by_page.entry(page).or_default().push(b);
+        }
+        for (page, rects) in by_page {
+            let spec = AnnotSpec {
+                page,
+                kind,
+                rects,
+                color,
+                opacity: self.config.annotation.highlight_opacity,
+                subject: cat.name.clone(),
+                author: self.author.clone(),
+            };
+            let tag = self.next_tag;
+            self.next_tag += 1;
+            open.provisional.push(Provisional {
+                tag,
+                rev: None,
+                spec: spec.clone(),
+            });
+            self.doc.send(Request::Edit {
+                tag,
+                edit: Edit::Create(spec),
+            });
+        }
+        self.last_category = category;
+        self.leave_text_modes();
+    }
+
     fn copy_selection(&mut self, ctx: &egui::Context) {
         let (Some(open), Some(sel)) = (&self.open, &self.selection) else {
             return;
@@ -860,6 +959,14 @@ impl MargApp {
                 self.copy_selection(ctx);
                 return;
             }
+            Command::Highlight(n) => {
+                self.annotate(AnnotKind::Highlight, n);
+                return;
+            }
+            Command::Underline => {
+                self.annotate(AnnotKind::Underline, self.last_category);
+                return;
+            }
             _ => {}
         }
         let Some(open) = &mut self.open else { return };
@@ -899,11 +1006,11 @@ impl MargApp {
             | Command::VisualChar
             | Command::VisualLine
             | Command::VisualSwap
-            | Command::Copy => {}
+            | Command::Copy
+            | Command::Highlight(_)
+            | Command::Underline => {}
             // Wired up in the next steps.
-            Command::Highlight(_)
-            | Command::Underline
-            | Command::Undo
+            Command::Undo
             | Command::Redo
             | Command::Save
             | Command::SaveForce
@@ -937,9 +1044,10 @@ impl MargApp {
             _ => format!("{}/{count}", page + 1),
         };
         format!(
-            "{mode}  {}  {page_text}  {:.0}%  continuous",
+            "{mode}  {}  {page_text}  {:.0}%  continuous{}",
             open.file_name,
-            v.zoom() * 100.0
+            v.zoom() * 100.0,
+            if open.unsaved { "  ●" } else { "" }
         )
     }
 
@@ -1025,7 +1133,9 @@ impl eframe::App for MargApp {
                 }
                 let Some(open) = &mut self.open else { return };
                 open.view.set_viewport(area.width(), area.height());
-                let plan = self.cache.plan(&open.view, &self.config.render, ppp);
+                let plan = self
+                    .cache
+                    .plan(&open.view, &self.config.render, ppp, &open.revs);
                 if plan.keys != self.last_request {
                     self.doc.send(Request::Render {
                         keys: plan.keys.clone(),
@@ -1035,9 +1145,17 @@ impl eframe::App for MargApp {
                 }
                 open.request_visible_text(&self.doc);
                 let painter = ui.painter_at(area);
-                let exact = self
-                    .cache
-                    .draw(&painter, area, &open.view, &self.config.render);
+                let (exact, stale) =
+                    self.cache
+                        .draw(&painter, area, &open.view, &self.config.render, &open.revs);
+                let cache = &self.cache;
+                open.provisional
+                    .retain(|p| p.rev.is_none_or(|r| !cache.has_rev(p.spec.page, r)));
+                for p in &open.provisional {
+                    if p.rev.is_none() || stale.contains(&p.spec.page) {
+                        select::draw_provisional(&painter, &open.view, area, &p.spec);
+                    }
+                }
                 if let Some(sel) = &self.selection {
                     select::draw_selection(&painter, &open.view, area, sel, &open.texts);
                 }
@@ -1120,4 +1238,15 @@ impl MargApp {
                     });
             });
     }
+}
+
+/// The annotation author: the configured one, else the OS user name.
+fn annotation_author(configured: &str) -> String {
+    if !configured.trim().is_empty() {
+        return configured.trim().to_string();
+    }
+    ["USER", "USERNAME", "LOGNAME"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "marg".into())
 }

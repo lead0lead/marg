@@ -8,4 +8,4 @@ pub mod document;
 pub mod thread;
 
 pub use document::{DocInfo, PageSize, Pixels};
-pub use thread::{DocThread, RenderKey, Request, Response, Scale, Tile};
+pub use thread::{DocThread, Edit, RenderKey, Request, Response, Scale, Tile};

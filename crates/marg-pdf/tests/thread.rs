@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use marg_pdf::{DocInfo, DocThread, Pixels, RenderKey, Request, Response, Scale, Tile};
+use marg_pdf::{DocInfo, DocThread, Edit, Pixels, RenderKey, Request, Response, Scale, Tile};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -65,6 +65,7 @@ fn open_missing_file_is_an_error() {
     assert!(info.is_err());
     // Rendering without a document is an error, not a crash.
     let key = RenderKey {
+        rev: 0,
         page: 0,
         scale: Scale::from_f32(1.0),
         tile: None,
@@ -77,6 +78,7 @@ fn renders_whole_page_opaque() {
     let t = DocThread::spawn(|| ());
     open(&t, fixture("text.pdf")).1.unwrap();
     let key = RenderKey {
+        rev: 0,
         page: 0,
         scale: Scale::from_f32(1.5),
         tile: None,
@@ -96,6 +98,7 @@ fn renders_edge_tile_clipped_to_page() {
     open(&t, fixture("text.pdf")).1.unwrap();
     // 612x792 at scale 1 with 512 px tiles: tile (1, 1) is 100x280.
     let key = RenderKey {
+        rev: 0,
         page: 0,
         scale: Scale::from_f32(1.0),
         tile: Some(Tile {
@@ -107,6 +110,7 @@ fn renders_edge_tile_clipped_to_page() {
     let px = render(&t, key).2.unwrap();
     assert_eq!((px.width, px.height), (100, 280));
     let outside = RenderKey {
+        rev: 0,
         tile: Some(Tile {
             col: 2,
             row: 0,
@@ -132,6 +136,7 @@ fn failed_open_keeps_current_document() {
     assert!(result.is_err());
     assert_eq!(generation, 1);
     let key = RenderKey {
+        rev: 0,
         page: 1,
         scale: Scale::from_f32(0.5),
         tile: None,
@@ -170,6 +175,7 @@ fn offset_page_renders_from_its_top_left() {
     let t = DocThread::spawn(|| ());
     open(&t, fixture("boxes.pdf")).1.unwrap();
     let key = RenderKey {
+        rev: 0,
         page: 2,
         scale: Scale::from_f32(1.0),
         tile: None,
@@ -194,6 +200,7 @@ fn keys_in_transit_are_not_rendered_twice() {
     });
     open(&t, fixture("text.pdf")).1.unwrap();
     let key = |page| RenderKey {
+        rev: 0,
         page,
         scale: Scale::from_f32(0.5),
         tile: None,
@@ -228,6 +235,7 @@ fn text_requests_are_served_before_renders() {
     let (generation, _) = open(&t, fixture("columns.pdf"));
     let keys = (0..2)
         .map(|page| RenderKey {
+            rev: 0,
             page,
             scale: Scale::from_f32(1.0),
             tile: None,
@@ -250,4 +258,63 @@ fn text_requests_are_served_before_renders() {
     }
     // At most the render already started comes first.
     assert!(first_text.is_some_and(|i| i <= 1), "{first_text:?}");
+}
+
+fn edit(t: &DocThread, tag: u64, e: Edit) -> (u64, usize, u32, Result<i32, String>) {
+    t.send(Request::Edit { tag, edit: e });
+    match t.recv_timeout(WAIT).expect("edit response") {
+        Response::Edited {
+            tag: got,
+            page,
+            rev,
+            result,
+            ..
+        } => (got, page, rev, result),
+        _ => panic!("expected Edited"),
+    }
+}
+
+/// RGB of the pixel at (x, y) points on page 0 rendered at scale 1.
+fn pixel(t: &DocThread, rev: u32, x: u32, y: u32) -> [u8; 3] {
+    let key = RenderKey {
+        page: 0,
+        rev,
+        scale: Scale::from_f32(1.0),
+        tile: None,
+    };
+    let (_, _, px) = render(t, key);
+    let px = px.unwrap();
+    let i = ((y * px.width + x) * 4) as usize;
+    [px.rgba[i], px.rgba[i + 1], px.rgba[i + 2]]
+}
+
+#[test]
+fn highlight_create_and_delete_render() {
+    use marg_core::annot::{AnnotKind, AnnotSpec};
+    use marg_core::text::BBox;
+    let t = DocThread::spawn(|| ());
+    open(&t, fixture("columns.pdf")).1.unwrap();
+    // An empty area of the page, so the highlight colour shows unmixed.
+    let spec = AnnotSpec {
+        page: 0,
+        kind: AnnotKind::Highlight,
+        rects: vec![BBox::new(100.0, 400.0, 200.0, 420.0)],
+        color: [0xFF, 0xD4, 0x00],
+        opacity: 1.0,
+        subject: "Key point".into(),
+        author: "test".into(),
+    };
+    assert_eq!(pixel(&t, 0, 150, 410), [255, 255, 255]);
+    let (tag, page, rev, xref) = edit(&t, 7, Edit::Create(spec));
+    assert_eq!((tag, page, rev), (7, 0, 1));
+    let xref = xref.unwrap();
+    let [r, g, b] = pixel(&t, 1, 150, 410);
+    assert!(r > 240 && (200..230).contains(&g) && b < 30, "{r} {g} {b}");
+    let (_, _, rev, deleted) = edit(&t, 8, Edit::Delete { page: 0, xref });
+    assert_eq!((rev, deleted), (2, Ok(xref)));
+    assert_eq!(pixel(&t, 2, 150, 410), [255, 255, 255]);
+    // Deleting again fails and leaves the revision alone.
+    let (_, _, rev, again) = edit(&t, 9, Edit::Delete { page: 0, xref });
+    assert!(again.is_err());
+    assert_eq!(rev, 2);
 }

@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use marg_core::annot::AnnotSpec;
 use marg_core::text::PageText;
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels};
@@ -38,8 +39,23 @@ pub struct Tile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderKey {
     pub page: usize,
+    /// The page's revision as the UI knows it: the number of annotation
+    /// edits on it. Renders always show the current state; the revision
+    /// only keeps renders from before an edit apart in caches.
+    pub rev: u32,
     pub scale: Scale,
     pub tile: Option<Tile>,
+}
+
+/// A change to the document's annotations.
+#[derive(Debug, Clone)]
+pub enum Edit {
+    Create(AnnotSpec),
+    /// Delete the annotation with this object number from a page.
+    Delete {
+        page: usize,
+        xref: i32,
+    },
 }
 
 pub enum Request {
@@ -53,6 +69,9 @@ pub enum Request {
     Render { keys: Vec<RenderKey>, received: u64 },
     /// Extract the text of a page. Served before renders.
     Text(usize),
+    /// Change annotations. Served before text and renders. `tag` comes
+    /// back in the response.
+    Edit { tag: u64, edit: Edit },
 }
 
 pub enum Response {
@@ -73,6 +92,15 @@ pub enum Response {
         generation: u64,
         page: usize,
         result: Result<PageText, String>,
+    },
+    Edited {
+        generation: u64,
+        tag: u64,
+        page: usize,
+        /// The page's revision after the edit.
+        rev: u32,
+        /// The object number of the created or deleted annotation.
+        result: Result<i32, String>,
     },
 }
 
@@ -155,6 +183,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
     let mut text_queue: VecDeque<usize> = VecDeque::new();
+    // Annotation edits per page since the document was opened.
+    let mut revs: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     // Rendered responses sent so far, and the keys of those the UI may not
     // have received yet, with their sequence numbers.
     let mut sent = 0u64;
@@ -183,6 +213,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         Ok((d, info)) => {
                             queue.clear();
                             text_queue.clear();
+                            revs.clear();
                             generation += 1;
                             doc = Some((d, info.clone()));
                             Ok(info)
@@ -215,6 +246,36 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     if !text_queue.contains(&page) {
                         text_queue.push_back(page);
                     }
+                }
+                Request::Edit { tag, edit } => {
+                    let page = match &edit {
+                        Edit::Create(spec) => spec.page,
+                        Edit::Delete { page, .. } => *page,
+                    };
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => match edit {
+                            Edit::Create(spec) => d.create_annotation(&spec),
+                            Edit::Delete { page, xref } => {
+                                d.delete_annotation(page, xref).map(|()| xref)
+                            }
+                        },
+                    };
+                    let rev = revs.entry(page).or_default();
+                    if result.is_ok() {
+                        *rev += 1;
+                    }
+                    let resp = Response::Edited {
+                        generation,
+                        tag,
+                        page,
+                        rev: *rev,
+                        result,
+                    };
+                    if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
                 }
             }
         }

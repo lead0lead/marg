@@ -16,14 +16,80 @@ pub enum Layout {
     Spread,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub view: ViewConfig,
     pub render: RenderConfig,
     pub ui: UiConfig,
     pub hints: HintsConfig,
+    pub annotation: AnnotationConfig,
+    /// Highlight categories; keys `1`–`5` pick the first five.
+    #[serde(rename = "category")]
+    pub categories: Vec<Category>,
     pub keys: KeysConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            view: ViewConfig::default(),
+            render: RenderConfig::default(),
+            ui: UiConfig::default(),
+            hints: HintsConfig::default(),
+            annotation: AnnotationConfig::default(),
+            categories: default_categories(),
+            keys: KeysConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Category {
+    pub name: String,
+    /// `#RRGGBB`.
+    pub color: String,
+}
+
+fn default_categories() -> Vec<Category> {
+    [
+        ("Key point", "#FFD400"),
+        ("Question", "#A28AE5"),
+        ("Definition", "#2EA8E5"),
+        ("Disagree", "#FF6666"),
+        ("Evidence", "#5FB236"),
+    ]
+    .into_iter()
+    .map(|(name, color)| Category {
+        name: name.into(),
+        color: color.into(),
+    })
+    .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AnnotationConfig {
+    /// Written as the annotation author; empty = the OS user name.
+    pub author: String,
+    pub highlight_opacity: f32,
+    pub box_stroke_pt: f32,
+    /// Save this long after the last annotation change.
+    pub autosave_secs: f32,
+    /// Undo steps kept per session.
+    pub undo_steps: usize,
+}
+
+impl Default for AnnotationConfig {
+    fn default() -> Self {
+        Self {
+            author: String::new(),
+            highlight_opacity: 0.4,
+            box_stroke_pt: 1.5,
+            autosave_secs: 2.0,
+            undo_steps: 100,
+        }
+    }
 }
 
 /// How text hints label targets.
@@ -186,6 +252,17 @@ mod tests {
     fn layout_names_parse() {
         let c = Config::from_toml("[view]\ndefault_layout_portrait = \"spread\"\n").unwrap();
         assert_eq!(c.view.default_layout_portrait, Layout::Spread);
+    }
+
+    #[test]
+    fn categories_default_and_replace() {
+        let c = Config::default();
+        assert_eq!(c.categories.len(), 5);
+        assert_eq!(c.categories[0].name, "Key point");
+        let c =
+            Config::from_toml("[[category]]\nname = \"Important\"\ncolor = \"#FF0000\"\n").unwrap();
+        assert_eq!(c.categories.len(), 1);
+        assert_eq!(c.categories[0].name, "Important");
     }
 
     #[test]
