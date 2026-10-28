@@ -86,6 +86,7 @@ pub const DEFAULT_VISUAL: &[(&str, &str)] = &[
     ("d", "annotate.erase"),
     ("D", "annotate.erase_whole"),
     ("y", "selection.copy"),
+    ("c", "annotate.comment"),
 ];
 
 /// Default bindings while an annotation is selected, on top of the Normal

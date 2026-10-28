@@ -80,6 +80,9 @@ pub enum Command {
     AnnotToggleType,
     /// Edit the comment of the selected annotation.
     AnnotEdit,
+    /// Highlight the selection in the last-used category and open the
+    /// comment editor on it.
+    Comment,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -268,6 +271,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "recolor: category 5",
     ),
     ("annot.edit", Command::AnnotEdit, "edit comment"),
+    ("annotate.comment", Command::Comment, "highlight + comment"),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,

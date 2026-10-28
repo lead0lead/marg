@@ -8,12 +8,15 @@ use marg_core::text::BBox;
 pub enum Target {
     /// A listed annotation, by object number.
     Annot { page: usize, xref: i32 },
+    /// An annotation just created by the edit with this tag (its object
+    /// number may not be known yet).
+    Created { page: usize, tag: u64 },
 }
 
 impl Target {
     pub fn page(&self) -> usize {
         match *self {
-            Target::Annot { page, .. } => page,
+            Target::Annot { page, .. } | Target::Created { page, .. } => page,
         }
     }
 }

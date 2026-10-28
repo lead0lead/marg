@@ -71,6 +71,9 @@ struct OpenDoc {
     xrefs: HashMap<u64, i32>,
     /// The annotations of each page, once listed by the document thread.
     annots: Vec<Option<Vec<AnnotInfo>>>,
+    /// Comments for created annotations whose creation is not confirmed
+    /// yet, by edit tag.
+    pending_comments: HashMap<u64, String>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -472,6 +475,13 @@ impl MargApp {
                     match result {
                         Ok(xref) => {
                             open.xrefs.insert(tag, xref);
+                            if let Some(text) = open.pending_comments.remove(&tag) {
+                                self.doc.send(Request::Edit {
+                                    tag: self.next_tag,
+                                    edit: comment_edit(page, xref, text),
+                                });
+                                self.next_tag += 1;
+                            }
                             self.doc.send(Request::Annots {
                                 pages: vec![page],
                                 urgent: true,
@@ -655,6 +665,7 @@ impl MargApp {
             undo: UndoStack::new(self.config.annotation.undo_steps),
             xrefs: HashMap::new(),
             annots: vec![None; view.page_count()],
+            pending_comments: HashMap::new(),
             view,
         }
     }
@@ -1056,18 +1067,19 @@ impl MargApp {
 
     /// Highlight or underline the selection in `category` (1-based), one
     /// annotation per page, and leave Visual mode.
-    fn annotate(&mut self, kind: AnnotKind, category: u8) {
+    /// Returns the edit tag and spec of the first annotation.
+    fn annotate(&mut self, kind: AnnotKind, category: u8) -> Option<(u64, AnnotSpec)> {
         let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
-            return;
+            return None;
         };
         let Some(cat) = self.config.categories.get(usize::from(category) - 1) else {
             self.error(format!("No category {category}"));
-            return;
+            return None;
         };
         let Some(color) = parse_color(&cat.color) else {
             let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
             self.error(msg);
-            return;
+            return None;
         };
         let mut by_page: BTreeMap<usize, Vec<BBox>> = BTreeMap::new();
         for (page, b) in sel.rects(&open.texts) {
@@ -1098,12 +1110,35 @@ impl MargApp {
             });
             group.push(Created { spec, tag });
         }
+        let first = group.first().map(|c| (c.tag, c.spec.clone()));
         open.undo.push(UndoOp {
             created: group,
             ..UndoOp::default()
         });
         self.last_category = category;
         self.leave_text_modes();
+        first
+    }
+
+    /// Visual `c`: highlight in the last-used category, then edit the
+    /// comment of its first part. The comment belongs to the same undo
+    /// step; cancelling keeps the highlight.
+    fn comment_selection(&mut self) {
+        let Some((tag, spec)) = self.annotate(AnnotKind::Highlight, self.last_category) else {
+            return;
+        };
+        let anchor = spec
+            .rects
+            .iter()
+            .copied()
+            .reduce(BBox::union)
+            .unwrap_or_default();
+        let target = comment::Target::Created {
+            page: spec.page,
+            tag,
+        };
+        self.editor = Some(CommentEditor::new(target, anchor, String::new()));
+        self.mode = Mode::Insert;
     }
 
     /// Undo the last annotation action, or redo the last undone one.
@@ -1544,6 +1579,24 @@ impl MargApp {
                 };
                 self.change_listed(&a, change, "Comment saved".into());
             }
+            comment::Target::Created { page, tag } => {
+                // Part of the creation's undo step: redo puts the same
+                // object back, comment included.
+                let Some(open) = &mut self.open else { return };
+                match open.xrefs.get(&tag) {
+                    Some(&xref) => {
+                        self.doc.send(Request::Edit {
+                            tag: self.next_tag,
+                            edit: comment_edit(page, xref, text),
+                        });
+                        self.next_tag += 1;
+                    }
+                    None => {
+                        open.pending_comments.insert(tag, text);
+                    }
+                }
+                self.show(Level::Info, "Comment saved".into());
+            }
         }
     }
 
@@ -1763,6 +1816,10 @@ impl MargApp {
                 self.annotate(AnnotKind::Highlight, n);
                 return;
             }
+            Command::Comment => {
+                self.comment_selection();
+                return;
+            }
             Command::PickCategory => {
                 if self.selection.is_some() {
                     self.mode = Mode::Category;
@@ -1826,6 +1883,7 @@ impl MargApp {
             | Command::AnnotRecolor(_)
             | Command::AnnotToggleType
             | Command::AnnotEdit
+            | Command::Comment
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2193,6 +2251,18 @@ impl MargApp {
                         }
                     });
             });
+    }
+}
+
+/// The edit that sets an annotation's comment.
+fn comment_edit(page: usize, xref: i32, text: String) -> Edit {
+    Edit::Update {
+        page,
+        xref,
+        change: AnnotChange {
+            contents: Some(text),
+            ..AnnotChange::default()
+        },
     }
 }
 
