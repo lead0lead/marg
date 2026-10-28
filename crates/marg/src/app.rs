@@ -315,6 +315,7 @@ impl MargApp {
             log::warn!("{w}");
         }
         let mut errors = s.errors;
+        errors.extend(crate::theme::install_fonts(&cc.egui_ctx, &s.config.fonts));
         let state = match s.state_path.as_deref().map(statefile::load) {
             Some(Ok(state)) => state,
             Some(Err(e)) => {
@@ -333,7 +334,7 @@ impl MargApp {
         let author = annotation_author(&s.config.annotation.author);
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
-            theme: Theme::new(&s.config.colors),
+            theme: Theme::new(&s.config.colors, &s.config.fonts),
             config: s.config,
             version: s.version,
             keymap,
@@ -2632,7 +2633,12 @@ impl eframe::App for MargApp {
         }
 
         // Input first, so the status bar and pages show its effect this frame.
-        let status_h = self.config.ui.status_bar_px;
+        // Tall enough for the font.
+        let status_h = self
+            .config
+            .ui
+            .status_bar_px
+            .max(self.config.fonts.size.clamp(4.0, 64.0) + 8.0);
         let screen = ctx.content_rect();
         let area = egui::Rect::from_min_max(
             screen.min,

@@ -1864,6 +1864,7 @@ dependencies = [
  "marg-core",
  "marg-pdf",
  "simplelog",
+ "skrifa",
 ]
 
 [[package]]

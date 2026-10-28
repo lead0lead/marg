@@ -58,6 +58,28 @@ impl Serialize for Rgba {
     }
 }
 
+/// `[fonts]`: the font of everything marg writes (all monospace).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FontsConfig {
+    /// A `.ttf`/`.otf`/`.ttc` file; empty: egui's built-in font.
+    pub file: String,
+    /// Status bar, lists, editor, tooltips.
+    pub size: f32,
+    /// Hint and grid labels.
+    pub hint_size: f32,
+}
+
+impl Default for FontsConfig {
+    fn default() -> Self {
+        Self {
+            file: String::new(),
+            size: 12.0,
+            hint_size: 12.0,
+        }
+    }
+}
+
 /// `[colors]`: every color marg draws.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]

@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, text::LayoutJob};
+use eframe::egui::{self, Color32, Pos2, Rect, text::LayoutJob};
 use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
 use marg_core::config::{HintMode, HintsConfig};
@@ -202,7 +202,7 @@ impl Hinting {
         area: Rect,
         texts: &[Option<PageText>],
     ) {
-        let font = FontId::monospace(12.0);
+        let font = th.hint_font.clone();
         for (i, label) in self.input.labels().iter().enumerate() {
             if !self.input.matches(i) {
                 continue;

@@ -69,7 +69,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | Phase 3 merged into `main` on 2026-10-28 after the user's check (local, not pushed). Phase 3b (theming) in progress on branch `phase-3b-theme`. |
 | **Current phase** | 3b — theming |
-| **Next step** | Phase 3b step 3 of 6: `[fonts]`. Done: 1 `[colors]`, 2 theme files. |
+| **Next step** | Phase 3b step 4 of 6: status bar parts. Done: 1 `[colors]`, 2 theme files, 3 `[fonts]`. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -1068,6 +1068,7 @@ render.
 | Logging | `log` + `simplelog` (file + stderr) | Simple, file output |
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
+| Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
 Licence note: MuPDF is AGPL-3.0. That is fine for a private personal tool;

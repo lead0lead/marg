@@ -12,3 +12,4 @@ eframe.workspace = true
 log.workspace = true
 directories.workspace = true
 simplelog.workspace = true
+skrifa.workspace = true

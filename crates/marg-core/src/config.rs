@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::theme::ColorsConfig;
+use crate::theme::{ColorsConfig, FontsConfig};
 
 /// Page layout of a document view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -34,6 +34,7 @@ pub struct Config {
     pub categories: Vec<Category>,
     pub keys: KeysConfig,
     pub colors: ColorsConfig,
+    pub fonts: FontsConfig,
 }
 
 impl Default for Config {
@@ -48,6 +49,7 @@ impl Default for Config {
             categories: default_categories(),
             keys: KeysConfig::default(),
             colors: ColorsConfig::default(),
+            fonts: FontsConfig::default(),
         }
     }
 }
@@ -310,6 +312,8 @@ impl Config {
 struct ThemeFile {
     #[serde(default, rename = "colors")]
     _colors: ColorsConfig,
+    #[serde(default, rename = "fonts")]
+    _fonts: FontsConfig,
 }
 
 #[cfg(test)]
@@ -370,7 +374,8 @@ mod tests {
 
     #[test]
     fn theme_fills_in_what_the_config_leaves_out() {
-        let theme = "[colors]\nbackground = \"#111111\"\nhint_bg = \"#222222\"\n";
+        let theme =
+            "[colors]\nbackground = \"#111111\"\nhint_bg = \"#222222\"\n[fonts]\nsize = 14.0\n";
         let text =
             "theme = \"dark.toml\"\n[colors]\nhint_bg = \"#333333\"\n[view]\nzoom_step = 1.2\n";
         let c = Config::with_theme(text, theme).unwrap();
@@ -379,6 +384,8 @@ mod tests {
         assert_eq!(c.colors.hint_bg.to_string(), "#333333", "the config wins");
         assert_eq!(c.colors.caret, ColorsConfig::default().caret);
         assert_eq!(c.view.zoom_step, 1.2);
+        assert_eq!(c.fonts.size, 14.0);
+        assert_eq!(c.fonts.hint_size, 12.0);
         // Errors say which file and line.
         let bad = "[colors]\n\ncaret = \"red\"\n";
         let (in_theme, e) = Config::with_theme(text, bad).unwrap_err();

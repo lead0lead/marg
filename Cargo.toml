@@ -18,6 +18,8 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 directories = "6"
 simplelog = { version = "0.12", default-features = false }
+# Same version and a subset of the features egui uses: only checks font files.
+skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3

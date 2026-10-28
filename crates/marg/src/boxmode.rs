@@ -1,7 +1,7 @@
 //! Box mode: pick two grid cells for the corners (or drag with the
 //! mouse), then adjust the box and confirm it.
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect};
+use eframe::egui::{self, Color32, Pos2, Rect};
 use marg_core::boxsel::{BoxSel, grid_cell, snap_target};
 use marg_core::hints::{HintInput, labels};
 use marg_core::text::BBox;
@@ -189,7 +189,7 @@ impl BoxMode {
                 stroke,
             );
         }
-        let font = FontId::monospace(12.0);
+        let font = th.hint_font.clone();
         let typed = self.input.typed().len();
         for (i, label) in self.input.labels().iter().enumerate() {
             if !self.input.matches(i) {
