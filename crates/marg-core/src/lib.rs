@@ -6,6 +6,7 @@ pub mod fuzzy;
 pub mod keymap;
 pub mod keys;
 pub mod lineedit;
+pub mod list;
 pub mod lru;
 pub mod state;
 pub mod stats;

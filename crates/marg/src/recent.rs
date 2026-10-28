@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Event};
 use marg_core::fuzzy;
-use marg_core::keys::{KeyCode, Named};
-use marg_core::lineedit::LineEdit;
+use marg_core::list::{ListAction, ListNav};
 use marg_core::state::State;
 
 use crate::input;
@@ -22,10 +21,11 @@ struct Item {
 
 pub struct RecentList {
     items: Vec<Item>,
-    filter: LineEdit,
+    nav: ListNav,
     /// Indices into `items` matching the filter, best first.
     shown: Vec<usize>,
-    selected: usize,
+    /// Rows moved by `Ctrl-d`/`Ctrl-u`: half the rows that fit on screen.
+    half_page: usize,
 }
 
 pub enum Action {
@@ -46,9 +46,9 @@ impl RecentList {
             .collect();
         let mut list = Self {
             items,
-            filter: LineEdit::default(),
+            nav: ListNav::default(),
             shown: Vec::new(),
-            selected: 0,
+            half_page: 1,
         };
         list.refilter();
         list
@@ -56,55 +56,54 @@ impl RecentList {
 
     fn refilter(&mut self) {
         let paths: Vec<&str> = self.items.iter().map(|i| i.path.as_str()).collect();
-        self.shown = fuzzy::filter_paths(self.filter.text(), &paths);
-        self.selected = 0;
+        self.shown = fuzzy::filter_paths(self.nav.filter(), &paths);
+        self.nav.set_len(self.shown.len());
     }
 
-    fn step(&mut self, d: isize) {
-        if !self.shown.is_empty() {
-            let n = self.shown.len() as isize;
-            self.selected = (self.selected as isize + d).rem_euclid(n) as usize;
-        }
-    }
-
-    /// Typing filters; Ctrl-n/Ctrl-p or the arrow keys move; Enter opens;
-    /// Esc clears the filter, or quits when it is empty.
+    /// Moving and filtering as in `marg_core::list`; Esc with no filter
+    /// quits.
     pub fn event(&mut self, e: &Event) -> Action {
-        if let Event::Text(t) = e {
-            self.filter.insert(t);
-            self.refilter();
-            return Action::None;
-        }
-        let Some(k) = input::key_press(e) else {
-            return Action::None;
+        let action = match e {
+            Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            _ => match input::key_press(e) {
+                Some(k) => self.nav.key(k, self.half_page),
+                None => return Action::None,
+            },
         };
-        match (k.code, k.ctrl) {
-            (KeyCode::Named(Named::Esc), _) if self.filter.is_empty() => return Action::Quit,
-            (KeyCode::Named(Named::Esc), _) => {
-                self.filter.clear();
-                self.refilter();
-            }
-            (KeyCode::Named(Named::Enter), _) => {
-                if let Some(&i) = self.shown.get(self.selected) {
+        match action {
+            ListAction::None => {}
+            ListAction::FilterChanged => self.refilter(),
+            ListAction::Open => {
+                if let Some(&i) = self.nav.selected().and_then(|r| self.shown.get(r)) {
                     return Action::Open(PathBuf::from(&self.items[i].path));
                 }
             }
-            (KeyCode::Named(Named::Backspace), _) => {
-                self.filter.backspace();
-                self.refilter();
-            }
-            (KeyCode::Named(Named::Down), _) | (KeyCode::Char('n'), true) => self.step(1),
-            (KeyCode::Named(Named::Up), _) | (KeyCode::Char('p'), true) => self.step(-1),
-            _ => {}
+            ListAction::Close => return Action::Quit,
         }
         Action::None
     }
 
-    pub fn draw(&self, ui: &mut egui::Ui) {
+    pub fn draw(&mut self, ui: &mut egui::Ui) {
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         egui::Frame::new().inner_margin(16).show(ui, |ui| {
-            ui.label(text(&format!("> {}▏", self.filter.text()), FG));
+            let filter = self.nav.filter();
+            if self.nav.filtering() {
+                let at = filter
+                    .char_indices()
+                    .nth(self.nav.cursor())
+                    .map_or(filter.len(), |(i, _)| i);
+                let (before, after) = filter.split_at(at);
+                ui.label(text(&format!("/{before}▏{after}"), FG));
+            } else if !filter.is_empty() {
+                ui.label(text(&format!("/{filter}"), DIM));
+            } else {
+                ui.label(text("j/k move   / filter   Enter open   Esc quit", DIM));
+            }
             ui.add_space(8.0);
+            let row_h = ui.text_style_height(&egui::TextStyle::Monospace)
+                + 4.0
+                + ui.spacing().item_spacing.y;
+            self.half_page = ((ui.available_height() / row_h) as usize / 2).max(1);
             if self.items.is_empty() {
                 ui.label(text("No recent files. Run marg <file.pdf>.", DIM));
                 return;
@@ -120,7 +119,7 @@ impl RecentList {
                         .parent()
                         .map(|d| d.display().to_string())
                         .unwrap_or_default();
-                    let selected = row == self.selected;
+                    let selected = Some(row) == self.nav.selected();
                     let frame = egui::Frame::new()
                         .fill(if selected {
                             SELECTED_BG

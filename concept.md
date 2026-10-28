@@ -67,7 +67,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 (viewer) built on branch `phase-1-viewer`, waiting for the user's check (read a paper and a book, check speed in `:debug`). Not merged. |
+| **Status** | Phase 1 (viewer) built on branch `phase-1-viewer`, plus the list keys the user decided on 2026-10-28 (`j`/`k` move, `/` filters). Waiting for the user's check (read a paper and a book, check speed in `:debug`). Not merged. |
 | **Current phase** | 1 — viewer, built; user check pending |
 | **Next step** | User tries the Phase 1 build. Then merge `phase-1-viewer` into `main`, and start Phase 2 (select & highlight) after the go-ahead. Open questions from Phase 1 are in §12. |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
@@ -75,7 +75,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 1 check: timing re-measured, Xvfb wheel cause found) |
+| **Last updated** | 2026-10-28 (Phase 1 follow-up: list keys, timing re-measured, Xvfb wheel cause found) |
 
 ---
 
@@ -216,8 +216,9 @@ zooms keep the viewport centre, Ctrl+wheel keeps the point under the mouse.
   hints (`gl`, labels on visible links). External URLs open in the default
   browser only after a confirmation in the status bar (`y` to confirm).
 - **Outline**: `o` opens the PDF's table of contents as an overlay list,
-  indented by level. Typing filters it (fuzzy). `j/k` or `Ctrl-n/p` move,
-  Enter jumps, Esc closes. If the PDF has no outline, show a status message.
+  indented by level. It works like every list (§3, "Lists"): `j/k` move, `/`
+  filters (fuzzy), Enter jumps, Esc closes. If the PDF has no outline, show a
+  status message.
 
 ### 2.5 Search
 
@@ -494,6 +495,23 @@ it. `:` commands: `q`, `q!`, `e <path>` (Tab completes directories and PDFs),
 `version`, `debug`, `<n>` (go to page n), or any command name. Up/Down
 browse the session's command history. Windows AltGr (Ctrl+Alt) characters
 are taken from the key event, since egui drops text while Ctrl is held.
+
+**Lists** (recent files; outline and annotation list later), decided by
+the user 2026-10-28 (to re-evaluate after real use): a list opens for
+moving. `j`/`k`, arrows, `Ctrl-n`/`Ctrl-p` move (stopping at the ends),
+`gg`/`G` (and `Home`/`End`) go to the first/last entry, `Ctrl-d`/`Ctrl-u`
+(and `PageDown`/`PageUp`) move half the visible rows, Enter opens, Esc
+clears the filter or closes the list. `/` starts filtering: typing narrows
+the list live with the best match selected, `Ctrl-n`/`Ctrl-p` and arrows
+move, Enter opens the selection directly (`/kahn⏎`), Esc stops typing but
+keeps the filter (move through the results with `j`/`k`), Backspace on an
+empty filter stops filtering, `/` again continues the filter. Rejected: `:`
+for filtering (`:` stays for commands) and opening lists in filter mode
+(telescope-style; conflicts with single-key actions in the annotation list
+and costs an extra Esc). **As implemented:** `marg-core/src/list.rs`
+(`ListNav`), used by `marg/src/recent.rs`; keys are fixed (not in the
+keymap yet). The prompt line shows `/filter▏` while filtering, the filter
+dimmed after Esc, or a key hint when empty.
 
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
@@ -926,11 +944,8 @@ building more.
   vcxproj files (patching MuPDF: ask the user first), or ship with the
   runtime requirement / app-local runtime DLLs.
 
-- **Moving in filterable lists** (recent files now, outline in Phase 4):
-  §2.4 says "typing filters, `j/k` or `Ctrl-n/p` move", which conflicts.
-  Built: typing (including `j`/`k`) filters; `Ctrl-n`/`Ctrl-p` and the arrow
-  keys move; Esc clears the filter, or quits when it is empty and no file is
-  open. Confirm or change.
+- **List keys** (§3, "Lists"): built as decided on 2026-10-28; the user
+  will re-evaluate after using it. List keys are not remappable yet.
 
 **Risks**
 
@@ -997,6 +1012,8 @@ building more.
 - Tabs or split view (paper + supplement side by side).
 - Freehand / pen annotations.
 - Presentation mode (fullscreen, no status bar) for slide decks.
+- Hint labels on list rows (recent files, outline): one key per visible row
+  opens it, like `f` in the page.
 
 ---
 
@@ -1016,6 +1033,25 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-28 — Phase 1 follow-up: list keys, timing, wheel
+- Done (branch `phase-1-viewer`): lists open for moving (`j`/`k`, `gg`/`G`,
+  `Ctrl-d`/`Ctrl-u`), `/` filters, Enter opens, Esc keeps then clears the
+  filter, then quits (`marg-core/src/list.rs`, 8 tests; recent list uses
+  it). Re-measured heavy-cover startup; found the Xvfb double-wheel cause.
+- Decisions: user chose `j`/`k` to move and `/` to filter in lists (my
+  proposal: Enter while filtering opens, Esc keeps the filter); will
+  re-evaluate after use. `:` for filtering and telescope-style filter-first
+  rejected (reasons in §3 "Lists").
+- Findings: the 314 ms heavy-cover startup is real (re-measured 282–325 ms;
+  no record of it being a miscalculation). Xvfb double wheel = winit X11
+  reports buttons 4–7 on press and release for devices without scroll
+  axes (XTEST); real mice and Wayland unaffected (§12).
+- State: builds; 75 tests pass; clippy and fmt clean. List checked on Xvfb
+  with a demo state dir (8 fake recent entries).
+- Next: user checks Phase 1; merge; then Phase 2 after the go-ahead.
+- Watch out: in a non-interactive `sh`, a background job's stdin is
+  `/dev/null`, so feed `xvfb-drive.sh` its steps directly, not from `&`.
 
 ### 2026-10-27 — Phase 1: viewer
 - Done (branch `phase-1-viewer`, not merged): config defaults, paths,

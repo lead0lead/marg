@@ -641,7 +641,7 @@ impl eframe::App for MargApp {
                 let area = ui.max_rect();
                 let ppp = ui.ctx().pixels_per_point();
                 if self.mode == Mode::Recent
-                    && let Some(list) = &self.recent
+                    && let Some(list) = &mut self.recent
                 {
                     list.draw(ui);
                     return;
