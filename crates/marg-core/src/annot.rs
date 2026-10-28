@@ -28,6 +28,19 @@ pub struct AnnotSpec {
     pub contents: Option<String>,
 }
 
+/// A change to an existing annotation; `None` fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnnotChange {
+    pub color: Option<[u8; 3]>,
+    pub opacity: Option<f32>,
+    /// Category name for `/Subj`; empty removes it.
+    pub subject: Option<String>,
+    /// The comment; empty removes it.
+    pub contents: Option<String>,
+    /// Switch between highlight and underline.
+    pub kind: Option<AnnotKind>,
+}
+
 /// An annotation found in the PDF (by marg or another program).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnnotInfo {

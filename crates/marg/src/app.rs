@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
 use marg_core::annot::{
-    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, category_of, erase, parse_color,
-    step_annot,
+    AnnotChange, AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, category_of, erase,
+    parse_color, step_annot,
 };
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
@@ -72,19 +72,30 @@ struct OpenDoc {
     annots: Vec<Option<Vec<AnnotInfo>>>,
 }
 
-/// An undoable annotation action: annotations it deleted and created
-/// (a highlight creates one per page, `x` deletes one, erasing does both).
+/// An undoable annotation action: annotations it deleted, created and
+/// changed (a highlight creates one per page, `x` deletes one, erasing
+/// does both, recoloring changes one).
 #[derive(Default)]
 struct UndoOp {
     /// (page, object number). Undo puts the same objects back.
     deleted: Vec<(usize, i32)>,
     created: Vec<Created>,
+    changed: Vec<Changed>,
 }
 
-/// An annotation created by an undoable action.
+/// An annotation changed in place by an undoable action.
+struct Changed {
+    page: usize,
+    xref: i32,
+    before: AnnotChange,
+    after: AnnotChange,
+}
+
+/// An annotation created by an undoable action. Undo deletes it and redo
+/// puts the same object back, so its object number never changes.
 struct Created {
     spec: AnnotSpec,
-    /// Tag of the edit that created it (most recently, after a redo).
+    /// Tag of the edit that created it.
     tag: u64,
 }
 
@@ -173,6 +184,8 @@ pub struct MargApp {
     keymap: Keymap,
     caret_map: Keymap,
     visual_map: Keymap,
+    /// Normal mode while an annotation is selected.
+    annot_map: Keymap,
     matcher: Matcher,
     clock: Instant,
     mode: Mode,
@@ -270,6 +283,8 @@ impl MargApp {
         warnings.extend(w);
         let (visual_map, w) = Keymap::build(KeyMode::Visual, &s.config.keys);
         warnings.extend(w);
+        let (annot_map, w) = Keymap::build(KeyMode::Annot, &s.config.keys);
+        warnings.extend(w);
         for w in &warnings {
             log::warn!("{w}");
         }
@@ -297,6 +312,7 @@ impl MargApp {
             keymap,
             caret_map,
             visual_map,
+            annot_map,
             matcher: Matcher::default(),
             clock: Instant::now(),
             mode,
@@ -755,6 +771,7 @@ impl MargApp {
         let map = match self.mode {
             Mode::Caret => &self.caret_map,
             Mode::Visual => &self.visual_map,
+            Mode::Normal if self.selected_annot.is_some() => &self.annot_map,
             _ => &self.keymap,
         };
         match self.matcher.feed(map, key, now, timeout) {
@@ -1070,8 +1087,8 @@ impl MargApp {
             group.push(Created { spec, tag });
         }
         open.undo.push(UndoOp {
-            deleted: Vec::new(),
             created: group,
+            ..UndoOp::default()
         });
         self.last_category = category;
         self.leave_text_modes();
@@ -1099,15 +1116,21 @@ impl MargApp {
             for &(page, xref) in &op.deleted {
                 edits.push(Edit::Delete { page, xref });
             }
-            // Create again (new object numbers).
-            for c in op.created.iter_mut() {
-                c.tag = self.next_tag;
-                self.next_tag += 1;
-                open.provisional.push(Provisional {
-                    tag: c.tag,
-                    rev: None,
-                    spec: c.spec.clone(),
+            for c in &op.changed {
+                edits.push(Edit::Update {
+                    page: c.page,
+                    xref: c.xref,
+                    change: c.after.clone(),
                 });
+            }
+            // Undo needed the object numbers, so they are known here.
+            for c in &op.created {
+                if let Some(&xref) = open.xrefs.get(&c.tag) {
+                    edits.push(Edit::Restore {
+                        page: c.spec.page,
+                        xref,
+                    });
+                }
             }
         } else {
             let created: Option<Vec<Edit>> = op
@@ -1126,22 +1149,20 @@ impl MargApp {
                 return;
             };
             edits.extend(created);
+            for c in op.changed.iter().rev() {
+                edits.push(Edit::Update {
+                    page: c.page,
+                    xref: c.xref,
+                    change: c.before.clone(),
+                });
+            }
             for &(page, xref) in &op.deleted {
                 edits.push(Edit::Restore { page, xref });
             }
         }
-        let mut tagged: Vec<(u64, Edit)> = Vec::new();
-        for e in edits {
-            tagged.push((self.next_tag, e));
+        for edit in edits {
+            let tag = self.next_tag;
             self.next_tag += 1;
-        }
-        if redo {
-            for c in &op.created {
-                tagged.push((c.tag, Edit::Create(c.spec.clone())));
-            }
-        }
-        let edits = tagged;
-        for (tag, edit) in edits {
             self.doc.send(Request::Edit { tag, edit });
         }
         self.selected_annot = None;
@@ -1274,10 +1295,8 @@ impl MargApp {
                 continue;
             };
             for a in list {
-                let kind = match a.kind.as_str() {
-                    "Highlight" => AnnotKind::Highlight,
-                    "Underline" => AnnotKind::Underline,
-                    _ => continue,
+                let Some(kind) = annot_kind(&a.kind) else {
+                    continue;
                 };
                 let Some(groups) = erase(a, t, selected) else {
                     continue;
@@ -1342,7 +1361,7 @@ impl MargApp {
         let Some(open) = &mut self.open else { return };
         open.undo.push(UndoOp {
             deleted: vec![(page, xref)],
-            created: Vec::new(),
+            ..UndoOp::default()
         });
         let tag = self.next_tag;
         self.next_tag += 1;
@@ -1351,6 +1370,106 @@ impl MargApp {
             edit: Edit::Delete { page, xref },
         });
         self.show(Level::Info, "Deleted (u to undo)".into());
+    }
+
+    /// The selected annotation, if it is listed.
+    fn selected_info(&self) -> Option<&AnnotInfo> {
+        let (page, xref) = self.selected_annot?;
+        self.open.as_ref()?.annots[page]
+            .as_ref()?
+            .iter()
+            .find(|a| a.xref == xref)
+    }
+
+    /// Change the selected annotation in place (one undo step); `change`
+    /// gives the new values, and the old ones are taken from the listing.
+    fn change_annotation(&mut self, change: AnnotChange, msg: String) {
+        let Some(a) = self.selected_info().cloned() else {
+            self.show(
+                Level::Info,
+                "No annotation selected (]a, [a or click)".into(),
+            );
+            return;
+        };
+        let before = AnnotChange {
+            color: change.color.and(a.color),
+            opacity: change.opacity.map(|_| a.opacity),
+            subject: change
+                .subject
+                .as_ref()
+                .map(|_| a.subject.clone().unwrap_or_default()),
+            contents: change
+                .contents
+                .as_ref()
+                .map(|_| a.contents.clone().unwrap_or_default()),
+            kind: change.kind.and(annot_kind(&a.kind)),
+        };
+        let Some(open) = &mut self.open else { return };
+        let edit = Edit::Update {
+            page: a.page,
+            xref: a.xref,
+            change: change.clone(),
+        };
+        open.undo.push(UndoOp {
+            changed: vec![Changed {
+                page: a.page,
+                xref: a.xref,
+                before,
+                after: change,
+            }],
+            ..UndoOp::default()
+        });
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        self.doc.send(Request::Edit { tag, edit });
+        self.show(Level::Info, msg);
+    }
+
+    /// `1`–`5` on a selected annotation: give it that category.
+    fn recolor_annotation(&mut self, category: u8) {
+        let Some(cat) = self.config.categories.get(usize::from(category) - 1) else {
+            self.error(format!("No category {category}"));
+            return;
+        };
+        let Some(color) = parse_color(&cat.color) else {
+            let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
+            self.error(msg);
+            return;
+        };
+        let change = AnnotChange {
+            color: Some(color),
+            subject: Some(cat.name.clone()),
+            ..AnnotChange::default()
+        };
+        let msg = format!("Category: {}", cat.name);
+        self.change_annotation(change, msg);
+    }
+
+    /// `U` on a selected annotation: switch between highlight and underline.
+    fn toggle_annotation_type(&mut self) {
+        let Some(a) = self.selected_info() else {
+            self.show(Level::Info, "No annotation selected".into());
+            return;
+        };
+        let (kind, opacity, msg) = match annot_kind(&a.kind) {
+            Some(AnnotKind::Highlight) => (AnnotKind::Underline, 1.0, "Underline"),
+            Some(AnnotKind::Underline) => (
+                AnnotKind::Highlight,
+                self.config.annotation.highlight_opacity,
+                "Highlight",
+            ),
+            None => {
+                let msg = format!("Only highlights and underlines can switch ({})", a.kind);
+                self.show(Level::Info, msg);
+                return;
+            }
+        };
+        let change = AnnotChange {
+            kind: Some(kind),
+            opacity: Some(opacity),
+            ..AnnotChange::default()
+        };
+        self.change_annotation(change, msg.into());
     }
 
     /// The annotation under a screen position, if any.
@@ -1496,6 +1615,14 @@ impl MargApp {
                 self.delete_annotation();
                 return;
             }
+            Command::AnnotRecolor(c) => {
+                self.recolor_annotation(c);
+                return;
+            }
+            Command::AnnotToggleType => {
+                self.toggle_annotation_type();
+                return;
+            }
             Command::Erase | Command::EraseWhole => {
                 self.erase_selection(command == Command::EraseWhole);
                 return;
@@ -1617,6 +1744,8 @@ impl MargApp {
             | Command::AnnotNext
             | Command::AnnotPrev
             | Command::AnnotDelete
+            | Command::AnnotRecolor(_)
+            | Command::AnnotToggleType
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -1972,6 +2101,15 @@ impl MargApp {
 }
 
 /// The annotation author: the configured one, else the OS user name.
+/// The kind of a listed annotation, if marg can create it.
+fn annot_kind(subtype: &str) -> Option<AnnotKind> {
+    match subtype {
+        "Highlight" => Some(AnnotKind::Highlight),
+        "Underline" => Some(AnnotKind::Underline),
+        _ => None,
+    }
+}
+
 fn annotation_author(configured: &str) -> String {
     if !configured.trim().is_empty() {
         return configured.trim().to_string();

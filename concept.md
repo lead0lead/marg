@@ -67,9 +67,9 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 3 (notes & boxes) in progress on branch `phase-3-notes`. Done: 1 categories of foreign annotations. |
+| **Status** | Phase 3 (notes & boxes) in progress on branch `phase-3-notes`. Done: 1 categories of foreign annotations, 2 `[keys.annot]` (recolor, `U` toggle, in place via `Edit::Update`). |
 | **Current phase** | 3 — notes & boxes |
-| **Next step** | Phase 3 step 2 of 11: `[keys.annot]` (selected annotation: `1`–`5` recolor, `U` toggle, `x`). Plan: 1 categories, 2 annot keys, 3 comment editor + `e`, 4 Visual `c`, 5 `i` note, 6 tooltips, 7 `ga`, 8 box mode (grid over the viewport, box clamped to the first corner's page; user's choice 2026-10-28), 9 box snap `s`, 10 list `A`, 11 docs + handover. |
+| **Next step** | Phase 3 step 3 of 11: comment editor + `e`. Plan: 1 categories, 2 annot keys, 3 comment editor + `e`, 4 Visual `c`, 5 `i` note, 6 tooltips, 7 `ga`, 8 box mode (grid over the viewport, box clamped to the first corner's page; user's choice 2026-10-28), 9 box snap `s`, 10 list `A`, 11 docs + handover. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |

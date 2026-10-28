@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use marg_core::annot::{AnnotInfo, AnnotSpec};
+use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
 use marg_core::text::PageText;
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
@@ -60,6 +60,12 @@ pub enum Edit {
     Restore {
         page: usize,
         xref: i32,
+    },
+    /// Change an annotation in place.
+    Update {
+        page: usize,
+        xref: i32,
+        change: AnnotChange,
     },
 }
 
@@ -306,7 +312,9 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                 Request::Edit { tag, edit } => {
                     let page = match &edit {
                         Edit::Create(spec) => spec.page,
-                        Edit::Delete { page, .. } | Edit::Restore { page, .. } => *page,
+                        Edit::Delete { page, .. }
+                        | Edit::Restore { page, .. }
+                        | Edit::Update { page, .. } => *page,
                     };
                     let result = match &mut doc {
                         None => Err("no document open".into()),
@@ -318,6 +326,9 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                                 }
                                 Edit::Restore { page, xref } => {
                                     d.restore_annotation(page, xref).map(|()| xref)
+                                }
+                                Edit::Update { page, xref, change } => {
+                                    d.update_annotation(page, xref, &change).map(|()| xref)
                                 }
                             })
                         }

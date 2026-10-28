@@ -74,6 +74,10 @@ pub enum Command {
     Erase,
     /// Delete every highlight and underline the selection touches, whole.
     EraseWhole,
+    /// Give the selected annotation category 1–5.
+    AnnotRecolor(u8),
+    /// Switch the selected annotation between highlight and underline.
+    AnnotToggleType,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -235,6 +239,36 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "annotate.erase_whole",
         Command::EraseWhole,
         "delete highlights the selection touches",
+    ),
+    (
+        "annot.recolor(1)",
+        Command::AnnotRecolor(1),
+        "recolor: category 1",
+    ),
+    (
+        "annot.recolor(2)",
+        Command::AnnotRecolor(2),
+        "recolor: category 2",
+    ),
+    (
+        "annot.recolor(3)",
+        Command::AnnotRecolor(3),
+        "recolor: category 3",
+    ),
+    (
+        "annot.recolor(4)",
+        Command::AnnotRecolor(4),
+        "recolor: category 4",
+    ),
+    (
+        "annot.recolor(5)",
+        Command::AnnotRecolor(5),
+        "recolor: category 5",
+    ),
+    (
+        "annot.toggle_type",
+        Command::AnnotToggleType,
+        "switch highlight / underline",
     ),
 ];
 

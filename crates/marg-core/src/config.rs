@@ -133,6 +133,8 @@ pub struct KeysConfig {
     pub caret: BTreeMap<String, String>,
     /// Visual mode, on top of `caret`.
     pub visual: BTreeMap<String, String>,
+    /// Normal mode while an annotation is selected, on top of `normal`.
+    pub annot: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

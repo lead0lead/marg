@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
-use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
+use marg_core::annot::{AnnotChange, AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::text::{BBox, Char, PageText};
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::{PdfAnnotationType, PdfDocument, PdfObject, PdfWriteOptions};
@@ -553,6 +553,60 @@ impl Doc {
         if let Some(p) = popup {
             arr.array_push(p).map_err(err)?;
         }
+        Ok(())
+    }
+
+    /// Change the annotation with object number `xref` on page `index` in
+    /// place, so everything else it has (dates, `/NM`, popup) stays.
+    pub fn update_annotation(
+        &self,
+        index: usize,
+        xref: i32,
+        change: &AnnotChange,
+    ) -> Result<(), String> {
+        let mut page = self.doc.load_pdf_page(index as i32).map_err(err)?;
+        let mut annot = page
+            .annotations()
+            .find(|a| a.xref().ok() == Some(xref))
+            .ok_or("annotation not found")?;
+        if let Some(kind) = change.kind {
+            let name = match kind {
+                AnnotKind::Highlight => "Highlight",
+                AnnotKind::Underline => "Underline",
+            };
+            let mut obj = annot.object();
+            obj.dict_put("Subtype", PdfObject::new_name(name).map_err(err)?)
+                .map_err(err)?;
+            // The old appearance is for the old type; the setters below
+            // mark the annotation for a new one.
+            obj.dict_delete("AP").map_err(err)?;
+        }
+        if let Some([r, g, b]) = change.color.map(|c| c.map(|c| c as f32 / 255.0)) {
+            annot
+                .set_color(AnnotationColor::Rgb {
+                    red: r,
+                    green: g,
+                    blue: b,
+                })
+                .map_err(err)?;
+        }
+        if let Some(o) = change.opacity {
+            annot.set_opacity(o).map_err(err)?;
+        }
+        if let Some(c) = &change.contents {
+            annot.set_contents(c).map_err(err)?;
+        }
+        if let Some(subj) = &change.subject {
+            let mut obj = annot.object();
+            if subj.is_empty() {
+                obj.dict_delete("Subj").map_err(err)?;
+            } else {
+                obj.dict_put("Subj", PdfObject::new_string(subj).map_err(err)?)
+                    .map_err(err)?;
+            }
+        }
+        annot.update().map_err(err)?;
+        page.update().map_err(err)?;
         Ok(())
     }
 
