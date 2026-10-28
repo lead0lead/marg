@@ -75,6 +75,8 @@ struct OpenDoc {
     /// What to do with created annotations once their creation is
     /// confirmed, by edit tag.
     pending: HashMap<u64, AfterCreate>,
+    /// Where images are on each page, once asked for (box snapping).
+    images: Vec<Option<Vec<BBox>>>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -519,6 +521,27 @@ impl MargApp {
                         }
                     }
                 }
+                Response::Images {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(images) => {
+                            open.images[page] = Some(images);
+                            if self.boxing.as_ref().is_some_and(|b| {
+                                b.snap_waiting && b.sel.is_some_and(|s| s.page == page)
+                            }) {
+                                self.snap_box();
+                            }
+                        }
+                        Err(e) => self.error(format!("Cannot find the images: {e}")),
+                    }
+                }
                 Response::DiskChanged { generation } => {
                     let Some(open) = &mut self.open else { continue };
                     if generation != open.generation {
@@ -683,6 +706,7 @@ impl MargApp {
             xrefs: HashMap::new(),
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
+            images: vec![None; view.page_count()],
             view,
         }
     }
@@ -886,6 +910,11 @@ impl MargApp {
                         'L' => b.nudge(false, step, 0.0, view),
                         'K' => b.nudge(false, 0.0, -step, view),
                         'J' => b.nudge(false, 0.0, step, view),
+                        's' => {
+                            b.snap_waiting = true;
+                            self.snap_box();
+                            return;
+                        }
                         _ => {
                             let n = self.config.categories.len().min(9);
                             if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
@@ -943,6 +972,24 @@ impl MargApp {
                 b.drag_to(view, p.x, p.y);
             }
             _ => {}
+        }
+    }
+
+    /// `s` in Box mode: snap the box to the image it overlaps most, once
+    /// the page's images are known (asks for them otherwise).
+    fn snap_box(&mut self) {
+        let (Some(open), Some(b)) = (&self.open, &mut self.boxing) else {
+            return;
+        };
+        let Some(page) = b.sel.map(|s| s.page) else {
+            return;
+        };
+        let Some(images) = &open.images[page] else {
+            self.doc.send(Request::Images(page));
+            return;
+        };
+        if !b.snap(images, &open.view) {
+            self.show(Level::Info, "No image under the box".into());
         }
     }
 
@@ -1004,7 +1051,9 @@ impl MargApp {
             .categories
             .get(usize::from(b.category) - 1)
             .map_or("", |c| c.name.as_str());
-        format!("BOX  {name}  hjkl/HJKL corners (Ctrl: fine)  1-5 category  ⏎ save  Esc cancel")
+        format!(
+            "BOX  {name}  hjkl/HJKL corners (Ctrl: fine)  s snap  1-5 category  ⏎ save  Esc cancel"
+        )
     }
 
     /// `ga`: hints on the visible annotations, in reading order.

@@ -378,6 +378,27 @@ impl Doc {
         Ok(PageText::from_blocks(blocks))
     }
 
+    /// Where images are drawn on page `index`, in points. Separate from
+    /// `text`: keeping images in the text page can take much longer (a
+    /// book cover: 394 ms instead of under 80 ms).
+    pub fn images(&self, index: usize) -> Result<Vec<BBox>, String> {
+        let page = self.doc.load_page(index as i32).map_err(err)?;
+        let b = page.bounds().map_err(err)?;
+        let st = page
+            .to_text_page(TextPageFlags::PRESERVE_IMAGES)
+            .map_err(err)?
+            .structured();
+        Ok(st
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.content, TextBlockContent::Image { .. }))
+            .map(|block| {
+                let r = block.bounds;
+                BBox::new(r.x0 - b.x0, r.y0 - b.y0, r.x1 - b.x0, r.y1 - b.y0)
+            })
+            .collect())
+    }
+
     /// The offset of page `index`'s top-left corner in MuPDF page space.
     fn page_origin(&self, index: usize) -> Result<(f32, f32), String> {
         let b = self

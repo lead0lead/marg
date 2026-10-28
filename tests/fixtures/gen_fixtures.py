@@ -160,7 +160,42 @@ def columns_pdf():
     write_pdf(HERE / "columns.pdf", objs, 1, 8, "6d617267636f6c756d6e736669787431")
 
 
+def figure_pdf():
+    """One page with text and an image (a 4x4 color pattern drawn at 100,400 .. 300,550 in
+    PDF space, i.e. top-left (100, 242) .. (300, 392) from the page's top-left corner)."""
+    pixels = bytes(
+        c
+        for y in range(4)
+        for x in range(4)
+        for c in ((0xE0, 0x40, 0x40) if (x + y) % 2 else (0x40, 0x60, 0xE0))
+    )
+    image = (
+        b"<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceRGB"
+        b" /BitsPerComponent 8 /Length " + str(len(pixels)).encode() + b" >>\nstream\n"
+        + pixels + b"\nendstream"
+    )
+    page = b"\n".join(
+        [
+            text_stream(["marg fixture: a figure", "", "Figure 1 is below."], x=72, y=720),
+            b"q 200 0 0 150 100 400 cm /Im1 Do Q",
+            text_stream(["Figure 1: a pattern."], x=100, y=380, size=10),
+        ]
+    )
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+        b" /Resources << /Font << /F1 4 0 R >> /XObject << /Im1 5 0 R >> >> /Contents 6 0 R >>",
+        4: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        5: image,
+        6: stream(page),
+        7: b"<< /Producer (marg gen_fixtures.py) /Title (marg figure fixture) >>",
+    }
+    write_pdf(HERE / "figure.pdf", objs, 1, 7, "6d61726766696775726566697874310a")
+
+
 if __name__ == "__main__":
     text_pdf()
     boxes_pdf()
     columns_pdf()
+    figure_pdf()

@@ -2,8 +2,9 @@
 //! mouse), then adjust the box and confirm it.
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect};
-use marg_core::boxsel::{BoxSel, grid_cell};
+use marg_core::boxsel::{BoxSel, grid_cell, snap_target};
 use marg_core::hints::{HintInput, labels};
+use marg_core::text::BBox;
 use marg_core::view::View;
 
 use crate::select::screen_rect;
@@ -35,6 +36,8 @@ pub struct BoxMode {
     pub category: u8,
     /// Where a mouse drag started: (page, point).
     drag: Option<(usize, (f32, f32))>,
+    /// `s` was pressed; the page's images are on their way.
+    pub snap_waiting: bool,
 }
 
 impl BoxMode {
@@ -47,6 +50,7 @@ impl BoxMode {
             sel: None,
             category,
             drag: None,
+            snap_waiting: false,
         }
     }
 
@@ -130,6 +134,17 @@ impl BoxMode {
         if let Some(s) = &mut self.sel {
             s.move_corner(end, dx, dy, view.page_size(s.page));
         }
+    }
+
+    /// Snap the box to the image it overlaps most. False if there is none.
+    pub fn snap(&mut self, images: &[BBox], view: &View) -> bool {
+        self.snap_waiting = false;
+        let Some(s) = &mut self.sel else { return false };
+        let Some(target) = snap_target(s.rect, images) else {
+            return false;
+        };
+        s.set(target, view.page_size(s.page));
+        true
     }
 
     /// Draw the grid (while picking cells) or the box.

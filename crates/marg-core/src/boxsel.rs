@@ -20,6 +20,21 @@ pub fn grid_cell(w: f32, h: f32, cols: usize, rows: usize, i: usize) -> (f32, f3
     )
 }
 
+/// The image a box overlaps most, if it overlaps any.
+pub fn snap_target(rect: BBox, images: &[BBox]) -> Option<BBox> {
+    let overlap = |b: &BBox| {
+        let w = rect.x1.min(b.x1) - rect.x0.max(b.x0);
+        let h = rect.y1.min(b.y1) - rect.y0.max(b.y0);
+        if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
+    };
+    images
+        .iter()
+        .map(|b| (overlap(b), *b))
+        .filter(|(a, _)| *a > 0.0)
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
+}
+
 /// A box being made, on one page.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxSel {
@@ -74,6 +89,21 @@ mod tests {
     use super::*;
 
     const PAGE: (f32, f32) = (600.0, 800.0);
+
+    #[test]
+    fn snaps_to_the_image_overlapped_most() {
+        let images = [
+            BBox::new(0.0, 0.0, 100.0, 100.0),
+            BBox::new(90.0, 0.0, 300.0, 100.0),
+        ];
+        // 10×50 over the first, 40×50 over the second.
+        let b = BBox::new(80.0, 20.0, 130.0, 70.0);
+        assert_eq!(snap_target(b, &images), Some(images[1]));
+        assert_eq!(
+            snap_target(BBox::new(0.0, 200.0, 50.0, 250.0), &images),
+            None
+        );
+    }
 
     #[test]
     fn grid_cells_row_by_row() {

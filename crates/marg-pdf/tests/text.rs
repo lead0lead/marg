@@ -59,3 +59,16 @@ fn offset_page_boxes_start_at_zero() {
     assert!((b.x0 - 5.0).abs() < 1.0, "{b:?}");
     assert!(b.y1 > 10.0 && b.y1 < 20.0, "{b:?}");
 }
+
+#[test]
+fn image_blocks_are_listed() {
+    let (doc, _) = Doc::open(&fixture("figure.pdf")).unwrap();
+    let images = doc.images(0).unwrap();
+    assert_eq!(images.len(), 1, "{images:?}");
+    let b = images[0];
+    let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+    assert!(
+        near(b.x0, 100.0) && near(b.y0, 242.0) && near(b.x1, 300.0) && near(b.y1, 392.0),
+        "{b:?}"
+    );
+}
