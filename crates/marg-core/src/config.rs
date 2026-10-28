@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{ColorsConfig, FontsConfig};
+use crate::theme::{ColorsConfig, FontsConfig, StatusbarConfig};
 
 /// Page layout of a document view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -35,6 +35,7 @@ pub struct Config {
     pub keys: KeysConfig,
     pub colors: ColorsConfig,
     pub fonts: FontsConfig,
+    pub statusbar: StatusbarConfig,
 }
 
 impl Default for Config {
@@ -50,6 +51,7 @@ impl Default for Config {
             keys: KeysConfig::default(),
             colors: ColorsConfig::default(),
             fonts: FontsConfig::default(),
+            statusbar: StatusbarConfig::default(),
         }
     }
 }

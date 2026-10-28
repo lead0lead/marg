@@ -80,6 +80,97 @@ impl Default for FontsConfig {
     }
 }
 
+/// One piece of the status bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusPart {
+    /// NORMAL, VISUAL, …
+    Mode,
+    File,
+    /// Page label and number, e.g. `xiv (14/300)` or `12/34`.
+    Page,
+    Zoom,
+    Layout,
+    /// ● while there are unsaved changes.
+    Unsaved,
+    /// The typed part of a hint label, or a pending key sequence.
+    Keys,
+}
+
+impl StatusPart {
+    pub const ALL: [(&str, StatusPart); 7] = [
+        ("mode", StatusPart::Mode),
+        ("file", StatusPart::File),
+        ("page", StatusPart::Page),
+        ("zoom", StatusPart::Zoom),
+        ("layout", StatusPart::Layout),
+        ("unsaved", StatusPart::Unsaved),
+        ("keys", StatusPart::Keys),
+    ];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .find(|(n, _)| *n == name.trim())
+            .map(|&(_, p)| p)
+    }
+}
+
+/// `[statusbar]`: which parts go left and right, in order.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct StatusbarConfig {
+    pub left: Vec<String>,
+    pub right: Vec<String>,
+    /// Between two parts.
+    pub separator: String,
+}
+
+impl Default for StatusbarConfig {
+    fn default() -> Self {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
+        Self {
+            left: names(&["mode", "file", "page", "zoom", "layout", "unsaved"]),
+            right: names(&["keys"]),
+            separator: "  ".into(),
+        }
+    }
+}
+
+impl StatusbarConfig {
+    /// The left and right parts, and a warning for each unknown name.
+    pub fn parts(&self) -> (Vec<StatusPart>, Vec<StatusPart>, Vec<String>) {
+        let mut warnings = Vec::new();
+        let mut parse = |names: &[String]| {
+            names
+                .iter()
+                .filter_map(|n| {
+                    let p = StatusPart::from_name(n);
+                    if p.is_none() {
+                        let known: Vec<&str> = StatusPart::ALL.iter().map(|(n, _)| *n).collect();
+                        warnings.push(format!(
+                            "statusbar: unknown part \"{n}\" (known: {})",
+                            known.join(", ")
+                        ));
+                    }
+                    p
+                })
+                .collect::<Vec<_>>()
+        };
+        let (left, right) = (parse(&self.left), parse(&self.right));
+        (left, right, warnings)
+    }
+}
+
+/// Join the texts of `parts` (empty ones are left out) with `sep`.
+pub fn status_line(parts: &[StatusPart], sep: &str, text: impl Fn(StatusPart) -> String) -> String {
+    parts
+        .iter()
+        .map(|&p| text(p))
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
 /// `[colors]`: every color marg draws.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
@@ -150,6 +241,36 @@ impl Default for ColorsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_parts_parse_and_join() {
+        let cfg = StatusbarConfig {
+            left: vec![
+                "mode".into(),
+                "bogus".into(),
+                "unsaved".into(),
+                "page".into(),
+            ],
+            right: vec![],
+            separator: " | ".into(),
+        };
+        let (left, right, warnings) = cfg.parts();
+        assert_eq!(
+            left,
+            [StatusPart::Mode, StatusPart::Unsaved, StatusPart::Page]
+        );
+        assert!(right.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("\"bogus\""), "{warnings:?}");
+        let text = |p| match p {
+            StatusPart::Mode => "NORMAL".to_string(),
+            StatusPart::Page => "3/9".to_string(),
+            _ => String::new(),
+        };
+        assert_eq!(status_line(&left, &cfg.separator, text), "NORMAL | 3/9");
+        let (left, right, w) = StatusbarConfig::default().parts();
+        assert_eq!((left.len(), right, w.len()), (6, vec![StatusPart::Keys], 0));
+    }
 
     #[test]
     fn colors_parse_with_and_without_alpha() {

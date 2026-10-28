@@ -33,6 +33,7 @@ use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::statefile;
 use crate::theme::Theme;
+use marg_core::theme::{StatusPart, status_line};
 
 /// A successfully opened document.
 struct OpenDoc {
@@ -200,6 +201,8 @@ pub struct MargApp {
     config: Config,
     /// `config.colors` as egui colors.
     theme: Theme,
+    /// `[statusbar]` parts, left and right.
+    status_parts: (Vec<StatusPart>, Vec<StatusPart>),
     version: String,
     keymap: Keymap,
     caret_map: Keymap,
@@ -315,6 +318,8 @@ impl MargApp {
             log::warn!("{w}");
         }
         let mut errors = s.errors;
+        let (left, right, w) = s.config.statusbar.parts();
+        errors.extend(w);
         errors.extend(crate::theme::install_fonts(&cc.egui_ctx, &s.config.fonts));
         let state = match s.state_path.as_deref().map(statefile::load) {
             Some(Ok(state)) => state,
@@ -335,6 +340,7 @@ impl MargApp {
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
             theme: Theme::new(&s.config.colors, &s.config.fonts),
+            status_parts: (left, right),
             config: s.config,
             version: s.version,
             keymap,
@@ -2509,26 +2515,50 @@ impl MargApp {
         }
     }
 
-    fn status_left(&self) -> String {
-        let mode = self.mode.label();
-        let Some(open) = self.open.as_ref().filter(|_| self.mode != Mode::Recent) else {
-            return mode.into();
-        };
-        let v = &open.view;
-        let page = v.current_page();
-        let count = v.page_count();
-        let page_text = match &open.info.labels {
-            Some(labels) if labels[page] != (page + 1).to_string() => {
-                format!("{} ({}/{count})", labels[page], page + 1)
+    /// The text of one status bar part (empty: left out).
+    fn status_part(&self, part: StatusPart) -> String {
+        let open = self.open.as_ref().filter(|_| self.mode != Mode::Recent);
+        match (part, open) {
+            (StatusPart::Mode, _) => self.mode.label().into(),
+            (StatusPart::Keys, _) => {
+                if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                    h.typed().into()
+                } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
+                    b.typed().into()
+                } else if self.matcher.is_pending() {
+                    self.matcher.pending_text()
+                } else {
+                    String::new()
+                }
             }
-            _ => format!("{}/{count}", page + 1),
-        };
-        format!(
-            "{mode}  {}  {page_text}  {:.0}%  continuous{}",
-            open.file_name,
-            v.zoom() * 100.0,
-            if open.unsaved() { "  ●" } else { "" }
-        )
+            (_, None) => String::new(),
+            (StatusPart::File, Some(open)) => open.file_name.clone(),
+            (StatusPart::Page, Some(open)) => {
+                let v = &open.view;
+                let page = v.current_page();
+                let count = v.page_count();
+                match &open.info.labels {
+                    Some(labels) if labels[page] != (page + 1).to_string() => {
+                        format!("{} ({}/{count})", labels[page], page + 1)
+                    }
+                    _ => format!("{}/{count}", page + 1),
+                }
+            }
+            (StatusPart::Zoom, Some(open)) => format!("{:.0}%", open.view.zoom() * 100.0),
+            (StatusPart::Layout, Some(_)) => "continuous".into(),
+            (StatusPart::Unsaved, Some(open)) => {
+                if open.unsaved() {
+                    "●".into()
+                } else {
+                    String::new()
+                }
+            }
+        }
+    }
+
+    fn status_left(&self) -> String {
+        let sep = &self.config.statusbar.separator;
+        status_line(&self.status_parts.0, sep, |p| self.status_part(p))
     }
 
     fn status_bar(&self, ui: &mut egui::Ui) {
@@ -2566,12 +2596,10 @@ impl MargApp {
                         Level::Error => th.statusbar_error,
                     };
                     ui.add(egui::Label::new(text(&m.text, color)).truncate());
-                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
-                    ui.label(text(h.typed(), th.statusbar_fg));
-                } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
-                    ui.label(text(b.typed(), th.statusbar_fg));
-                } else if self.matcher.is_pending() {
-                    ui.label(text(&self.matcher.pending_text(), th.statusbar_fg));
+                } else {
+                    let sep = &self.config.statusbar.separator;
+                    let right = status_line(&self.status_parts.1, sep, |p| self.status_part(p));
+                    ui.label(text(&right, th.statusbar_fg));
                 }
             });
         });
