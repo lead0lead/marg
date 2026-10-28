@@ -138,6 +138,8 @@ enum Mode {
     Hint,
     Caret,
     Visual,
+    /// Visual mode, asking which category to highlight with.
+    Category,
 }
 
 impl Mode {
@@ -147,7 +149,7 @@ impl Mode {
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
-            Mode::Visual => "VISUAL",
+            Mode::Visual | Mode::Category => "VISUAL",
         }
     }
 }
@@ -615,6 +617,7 @@ impl MargApp {
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
+                _ if self.mode == Mode::Category => self.category_event(e),
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -1038,6 +1041,41 @@ impl MargApp {
         self.show(Level::Info, if redo { "Redone" } else { "Undone" }.into());
     }
 
+    /// The category prompt: a digit highlights with that category, Enter
+    /// with the last one, Esc goes back to the selection.
+    fn category_event(&mut self, e: &Event) {
+        let Some(k) = input::key_press(e) else { return };
+        match k.code {
+            KeyCode::Char(c) if !k.ctrl && !k.alt => {
+                let n = self.config.categories.len().min(9);
+                if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
+                    self.annotate(AnnotKind::Highlight, d as u8);
+                }
+            }
+            KeyCode::Named(Named::Enter) => {
+                self.annotate(AnnotKind::Highlight, self.last_category);
+            }
+            KeyCode::Named(Named::Esc) => self.mode = Mode::Visual,
+            _ => {}
+        }
+    }
+
+    /// The status line of the category prompt.
+    fn category_prompt(&self) -> String {
+        let mut out = String::from("highlight:");
+        for (i, c) in self.config.categories.iter().take(9).enumerate() {
+            out.push_str(&format!("  {} {}", i + 1, c.name));
+        }
+        if let Some(last) = self
+            .config
+            .categories
+            .get(usize::from(self.last_category) - 1)
+        {
+            out.push_str(&format!("   ⏎ {}", last.name));
+        }
+        out
+    }
+
     fn copy_selection(&mut self, ctx: &egui::Context) {
         let (Some(open), Some(sel)) = (&self.open, &self.selection) else {
             return;
@@ -1186,6 +1224,12 @@ impl MargApp {
                 self.annotate(AnnotKind::Highlight, n);
                 return;
             }
+            Command::PickCategory => {
+                if self.selection.is_some() {
+                    self.mode = Mode::Category;
+                }
+                return;
+            }
             Command::Underline => {
                 self.annotate(AnnotKind::Underline, self.last_category);
                 return;
@@ -1232,6 +1276,7 @@ impl MargApp {
             | Command::Copy
             | Command::Highlight(_)
             | Command::Underline
+            | Command::PickCategory
             | Command::Save
             | Command::SaveForce
             | Command::Reload
@@ -1365,7 +1410,12 @@ impl MargApp {
                 let (before, after) = line.split_at(at);
                 ui.label(text(&format!(":{before}▏{after}"), STATUS_FG));
             } else {
-                ui.label(text(&self.status_left(), STATUS_FG));
+                let left = if self.mode == Mode::Category {
+                    self.category_prompt()
+                } else {
+                    self.status_left()
+                };
+                ui.label(text(&left, STATUS_FG));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(m) = &self.message {

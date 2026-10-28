@@ -79,6 +79,7 @@ pub const DEFAULT_VISUAL: &[(&str, &str)] = &[
     ("4", "annotate.highlight(4)"),
     ("5", "annotate.highlight(5)"),
     ("U", "annotate.underline"),
+    ("Enter", "annotate.pick"),
     ("y", "selection.copy"),
 ];
 
@@ -486,6 +487,10 @@ mod tests {
         assert_eq!(
             feed_str(&mut m, &visual, "3"),
             [run(Command::Highlight(3), None)]
+        );
+        assert_eq!(
+            m.feed(&visual, KeyPress::named(Named::Enter), 0, 1000),
+            run(Command::PickCategory, None)
         );
         assert_eq!(
             feed_str(&mut m, &visual, "0"),

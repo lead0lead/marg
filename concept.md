@@ -548,6 +548,7 @@ remappable (§8).
 | | `o` | swap selection end |
 | | `1`–`5` | highlight with category |
 | | `U` | underline |
+| | `Enter`, then `1`–`5` or `Enter` | highlight via category prompt (last category on `Enter`) |
 | | `c` | highlight + comment |
 | | `y` | copy text |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
@@ -598,6 +599,8 @@ New Normal keys: `f`, `F`, `u`, `Ctrl-r`. New commands: `hint.caret`,
 word_end_prev|line_start|line_end|line_down|line_up|sentence_prev|
 sentence_next|block_prev|block_next`, `visual.char`, `visual.line`,
 `visual.swap`, `annotate.highlight(1)`…`(5)`, `annotate.underline`,
+`annotate.pick` (Visual `Enter`: the status bar lists the categories, a
+digit highlights, `Enter` uses the last category, Esc goes back),
 `selection.copy`, `undo`, `redo`, `file.save` (`:w`), `file.save_force`
 (`:w!`), `file.reload` (`:e!`), `file.close` (`:close`, `:bd`, `Ctrl-w`). Esc (leave Caret/Visual) is fixed, not a
 binding. Since `1`–`5` are bound in Visual mode, counts there can only use
@@ -1055,9 +1058,11 @@ building more.
   2026-10-28): with `1`–`5` bound, `5l` highlights instead of moving.
   Options: (1) digits are counts, highlights on `g1`–`g5`; (2) digits are
   counts, `Enter` opens a category prompt showing the names, then a digit;
-  (3) keep `1`–`5`. The user is trying option 1 through their own config
-  (`[keys.visual]`, no rebuild; covered by the test
-  `visual_digits_can_be_freed_for_counts`). Decide the default after trying.
+  (3) keep `1`–`5`. Built so all can be combined: option 2 is the command
+  `annotate.pick`, bound to `Enter` in Visual by default; options 1 and 3
+  are bindings. The user's config frees the digits and binds `g1`–`g5`, so
+  they try 1 and 2 side by side (test `visual_digits_can_be_freed_for_counts`).
+  Decide the defaults after trying.
 - **Words include punctuation** (vim's `W`, not `w`): a selection to a word
   end takes the comma or full stop with it. Confirm or change.
 
@@ -1190,7 +1195,8 @@ Format:
   Claude). The document thread got `Request::Close`.
 - User feedback while testing: reading, navigating and selecting work
   well. Counts vs. `1`–`5` in Visual mode: user tries `g1`–`g5` via config
-  (§12). Deleting older annotations (`x`, Phase 3) was offered to come
+  and asked for option 2 as well; built as `annotate.pick` on `Enter`, so
+  both are available at once (§12). Deleting older annotations (`x`, Phase 3) was offered to come
   earlier if needed.
 - Next: user uses it on real papers for about a week (decision milestone).
 - Watch out: UI test runs must set **both** `XDG_STATE_HOME` and

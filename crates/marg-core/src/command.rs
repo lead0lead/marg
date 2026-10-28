@@ -49,6 +49,8 @@ pub enum Command {
     Highlight(u8),
     /// Underline the selection in the last-used category.
     Underline,
+    /// Ask for the category, then highlight the selection.
+    PickCategory,
     /// Copy the selected text.
     Copy,
     Undo,
@@ -182,6 +184,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "highlight, category 5",
     ),
     ("annotate.underline", Command::Underline, "underline"),
+    (
+        "annotate.pick",
+        Command::PickCategory,
+        "highlight: choose category",
+    ),
     ("selection.copy", Command::Copy, "copy text"),
     ("undo", Command::Undo, "undo"),
     ("redo", Command::Redo, "redo"),
