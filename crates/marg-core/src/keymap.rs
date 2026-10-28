@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::command::Command;
+use crate::config::KeysConfig;
 use crate::keys::{KeyPress, Named, format_sequence, parse_sequence};
 
 /// Value that removes a default binding in the config.
@@ -38,7 +39,58 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("a", "zoom.fit_page"),
     (":", "cmdline"),
     ("q", "quit"),
+    ("f", "hint.caret"),
+    ("F", "hint.select"),
+    ("u", "undo"),
+    ("Ctrl-r", "redo"),
 ];
+
+/// Default Caret-mode bindings, on top of the Normal ones.
+pub const DEFAULT_CARET: &[(&str, &str)] = &[
+    ("h", "caret.char_prev"),
+    ("l", "caret.char_next"),
+    ("Left", "caret.char_prev"),
+    ("Right", "caret.char_next"),
+    ("j", "caret.line_down"),
+    ("k", "caret.line_up"),
+    ("Down", "caret.line_down"),
+    ("Up", "caret.line_up"),
+    ("w", "caret.word_next"),
+    ("b", "caret.word_prev"),
+    ("e", "caret.word_end"),
+    ("ge", "caret.word_end_prev"),
+    ("0", "caret.line_start"),
+    ("$", "caret.line_end"),
+    ("(", "caret.sentence_prev"),
+    (")", "caret.sentence_next"),
+    ("{", "caret.block_prev"),
+    ("}", "caret.block_next"),
+    ("v", "visual.char"),
+    ("V", "visual.line"),
+];
+
+/// Default Visual-mode bindings, on top of the Caret ones.
+pub const DEFAULT_VISUAL: &[(&str, &str)] = &[
+    ("o", "visual.swap"),
+    ("1", "annotate.highlight(1)"),
+    ("2", "annotate.highlight(2)"),
+    ("3", "annotate.highlight(3)"),
+    ("4", "annotate.highlight(4)"),
+    ("5", "annotate.highlight(5)"),
+    ("U", "annotate.underline"),
+    ("y", "selection.copy"),
+];
+
+/// A table of default bindings: (key sequence, command name).
+type Defaults = &'static [(&'static str, &'static str)];
+
+/// Which keymap: each mode adds its bindings on top of the previous one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyMode {
+    Normal,
+    Caret,
+    Visual,
+}
 
 #[derive(Debug, Clone)]
 struct Binding {
@@ -55,13 +107,44 @@ impl Keymap {
     /// The default Normal-mode keymap with the user's `[keys.normal]` table
     /// applied on top. Returns warnings for invalid entries and conflicts.
     pub fn normal(user: &BTreeMap<String, String>) -> (Self, Vec<String>) {
+        let keys = KeysConfig {
+            normal: user.clone(),
+            ..KeysConfig::default()
+        };
+        Self::build(KeyMode::Normal, &keys)
+    }
+
+    /// The keymap of a mode: Normal defaults and `[keys.normal]`, then for
+    /// Caret and Visual the Caret layer, then for Visual the Visual layer.
+    /// A later layer replaces bindings it overlaps. Warnings are reported
+    /// for the mode's own layer only (the others are reported by their
+    /// own keymaps).
+    pub fn build(mode: KeyMode, keys: &KeysConfig) -> (Self, Vec<String>) {
+        let layers: [(Defaults, &BTreeMap<String, String>); 3] = [
+            (DEFAULT_NORMAL, &keys.normal),
+            (DEFAULT_CARET, &keys.caret),
+            (DEFAULT_VISUAL, &keys.visual),
+        ];
+        let depth = match mode {
+            KeyMode::Normal => 1,
+            KeyMode::Caret => 2,
+            KeyMode::Visual => 3,
+        };
         let mut map = Self::default();
         let mut warnings = Vec::new();
-        for (keys, cmd) in DEFAULT_NORMAL {
-            map.bind(keys, cmd, false, &mut warnings);
-        }
-        for (keys, cmd) in user {
-            map.bind(keys, cmd, true, &mut warnings);
+        let mut ignored = Vec::new();
+        for (i, (defaults, user)) in layers[..depth].iter().enumerate() {
+            let w = if i + 1 == depth {
+                &mut warnings
+            } else {
+                &mut ignored
+            };
+            for (k, c) in defaults.iter() {
+                map.bind(k, c, false, w);
+            }
+            for (k, c) in user.iter() {
+                map.bind(k, c, true, w);
+            }
         }
         (map, warnings)
     }
@@ -221,6 +304,7 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::caret::Motion;
 
     fn defaults() -> Keymap {
         let (map, warnings) = Keymap::normal(&BTreeMap::new());
@@ -362,6 +446,70 @@ mod tests {
         ]);
         let (_, warnings) = Keymap::normal(&user);
         assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn mode_layers() {
+        let keys = KeysConfig::default();
+        let (caret, w) = Keymap::build(KeyMode::Caret, &keys);
+        assert!(w.is_empty(), "{w:?}");
+        let (visual, w) = Keymap::build(KeyMode::Visual, &keys);
+        assert!(w.is_empty(), "{w:?}");
+        let mut m = Matcher::default();
+        // Caret j replaces Normal j; Normal keys without a Caret binding stay.
+        assert_eq!(
+            feed_str(&mut m, &caret, "jJ"),
+            [
+                run(Command::Motion(Motion::LineDown), None),
+                run(Command::PageNext, None)
+            ]
+        );
+        // ge and gg live side by side.
+        assert_eq!(
+            feed_str(&mut m, &caret, "gegg"),
+            [
+                Outcome::Pending,
+                run(Command::Motion(Motion::WordEndPrev), None),
+                Outcome::Pending,
+                run(Command::PageFirst, None)
+            ]
+        );
+        // Counts work in Caret mode; in Visual, bound digits are commands.
+        assert_eq!(
+            feed_str(&mut m, &caret, "3w"),
+            [
+                Outcome::Pending,
+                run(Command::Motion(Motion::WordNext), Some(3))
+            ]
+        );
+        assert_eq!(
+            feed_str(&mut m, &visual, "3"),
+            [run(Command::Highlight(3), None)]
+        );
+        assert_eq!(
+            feed_str(&mut m, &visual, "0"),
+            [run(Command::Motion(Motion::LineStart), None)]
+        );
+    }
+
+    #[test]
+    fn mode_tables_remap() {
+        let keys = KeysConfig {
+            visual: BTreeMap::from([("h".to_string(), "annotate.highlight(1)".to_string())]),
+            ..KeysConfig::default()
+        };
+        let (visual, w) = Keymap::build(KeyMode::Visual, &keys);
+        assert!(w.is_empty(), "{w:?}");
+        let (caret, _) = Keymap::build(KeyMode::Caret, &keys);
+        let mut m = Matcher::default();
+        assert_eq!(
+            feed_str(&mut m, &visual, "h"),
+            [run(Command::Highlight(1), None)]
+        );
+        assert_eq!(
+            feed_str(&mut m, &caret, "h"),
+            [run(Command::Motion(Motion::CharPrev), None)]
+        );
     }
 
     #[test]

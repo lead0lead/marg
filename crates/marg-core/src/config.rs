@@ -31,6 +31,10 @@ pub struct Config {
 #[serde(default)]
 pub struct KeysConfig {
     pub normal: BTreeMap<String, String>,
+    /// Caret mode, on top of `normal`.
+    pub caret: BTreeMap<String, String>,
+    /// Visual mode, on top of `caret`.
+    pub visual: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

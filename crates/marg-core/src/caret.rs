@@ -51,6 +51,8 @@ impl TextSource for Vec<Option<PageText>> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
+    CharNext,
+    CharPrev,
     WordNext,
     WordPrev,
     WordEnd,
@@ -245,6 +247,8 @@ pub fn apply(
         return (p, want_x);
     };
     let moved = match motion {
+        Motion::CharNext => next(src, p),
+        Motion::CharPrev => prev(src, p),
         Motion::WordNext => find_next(src, p, |q| is_word_start(src, q)),
         Motion::WordPrev => find_prev(src, p, |q| is_word_start(src, q)),
         Motion::WordEnd => find_next(src, p, |q| is_word_end(src, q)),
@@ -470,6 +474,23 @@ mod tests {
         assert_eq!(
             mv(&d, TextPos::new(1, 0), Motion::WordEndPrev),
             at(&d, 0, "e", 2)
+        );
+    }
+
+    #[test]
+    fn char_motions() {
+        let d = doc(&["ab", "c"]);
+        assert_eq!(
+            mv(&d, TextPos::new(0, 1), Motion::CharNext),
+            TextPos::new(1, 0)
+        );
+        assert_eq!(
+            mv(&d, TextPos::new(1, 0), Motion::CharPrev),
+            TextPos::new(0, 1)
+        );
+        assert_eq!(
+            mv(&d, TextPos::new(0, 0), Motion::CharPrev),
+            TextPos::new(0, 0)
         );
     }
 

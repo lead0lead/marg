@@ -563,6 +563,21 @@ impl MargApp {
             | Command::Open(_)
             | Command::Version
             | Command::DebugToggle => {}
+            // Wired up in the next steps.
+            Command::HintCaret
+            | Command::HintSelect
+            | Command::Motion(_)
+            | Command::VisualChar
+            | Command::VisualLine
+            | Command::VisualSwap
+            | Command::Highlight(_)
+            | Command::Underline
+            | Command::Copy
+            | Command::Undo
+            | Command::Redo
+            | Command::Save
+            | Command::SaveForce
+            | Command::Reload => {}
         }
     }
 
