@@ -1715,6 +1715,34 @@ impl MargApp {
         self.show(Level::Info, "Empty note removed".into());
     }
 
+    /// The comment of the annotation under the mouse, else of the selected
+    /// one, next to it. Not while editing or picking hints.
+    fn comment_tooltip(&self, ctx: &egui::Context, area: egui::Rect, screen_h: f32) {
+        if !matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) {
+            return;
+        }
+        let Some(open) = &self.open else { return };
+        let hovered = ctx
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| area.contains(*p))
+            .and_then(|p| self.annot_at_screen(p))
+            .filter(|a| a.contents.is_some());
+        let Some(a) = hovered.or_else(|| self.selected_info().cloned()) else {
+            return;
+        };
+        let Some(text) = &a.contents else { return };
+        let anchor = select::screen_rect(&open.view, area, a.page, a.rect);
+        let ui_cfg = &self.config.ui;
+        comment::tooltip(
+            ctx,
+            text,
+            anchor,
+            area,
+            ui_cfg.comment_width_px,
+            ui_cfg.comment_max_height * screen_h,
+        );
+    }
+
     /// The annotation under a screen position, if any.
     fn annot_at_screen(&self, pos: egui::Pos2) -> Option<AnnotInfo> {
         let open = self.open.as_ref()?;
@@ -2298,6 +2326,7 @@ impl eframe::App for MargApp {
                     t.log("first page shown");
                 }
             });
+        self.comment_tooltip(&ctx, area, screen.height());
         if let (Some(ed), Some(open)) = (&mut self.editor, &self.open) {
             let anchor = select::screen_rect(&open.view, area, ed.target.page(), ed.anchor);
             let ui_cfg = &self.config.ui;
