@@ -1371,7 +1371,17 @@ Format:
   `cargo test` itself and let its exit status stop the commit.
 - State: builds; 131 tests pass; clippy and fmt clean (local). Not
   pushed yet, so CI has not run on this branch.
-- Next: the user tries Phase 3 (§0); fixes; push, CI, merge.
+- User check: the user tried the Phase 3 build and said "I am very happy
+  with the current state of the project after testing. It feels very
+  powerful." Phase 3 merged into `main` locally (not pushed). The "Phase
+  3 choices to confirm" in §12 stay open; none was raised.
+- Customisation: the user wants marg "customizable and ricable" like
+  qutebrowser. Claude proposed A (look: colors, fonts, status bar, theme
+  files, dark pages), B (A + every key remappable, `:set`/`:bind`, live
+  reload, aliases/chaining) and C (B + userscripts/`:spawn`); the user
+  chose **A**, after asking about bloat (answer: no new dependencies,
+  binary practically unchanged, a few hundred lines). Recorded as Phase 3b
+  (§11, §6 "Theming").
 - Watch out: Insert, Box and list keys are fixed (not remappable). The
   annotation list is an overlay. `AnnotSpec` has `stroke_pt` (boxes only).
 
