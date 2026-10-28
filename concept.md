@@ -75,7 +75,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-27 (end of Phase 1 build) |
+| **Last updated** | 2026-10-28 (Phase 1 check: timing re-measured, Xvfb wheel cause found) |
 
 ---
 
@@ -957,8 +957,11 @@ building more.
   `fz_set_warning_callback`, so `:debug` cannot list them. Possible via
   `mupdf-sys` FFI in `marg-pdf` (unsafe); not done.
 - Heavy first pages (full-page cover images) delay the first render past the
-  150 ms target (314 ms measured). A quick low-resolution first render could
-  help; not done.
+  150 ms target. Re-measured 2026-10-28 (release, Wayland): Springer book
+  282–325 ms to first page (cover render ~215 ms at the app's 1.76 scale),
+  two magazine-style PDFs 268–291 ms; light pages 132–137 ms. Window ready at
+  ~67 ms, document at ~80 ms; the rest is the cover render. A quick
+  low-resolution first render could help; not done.
 - The state file is written on open, file switch and exit only; if marg is
   killed, the reading position since opening is lost.
 - Tiles re-run the whole page's content per tile (MuPDF clips the drawing
@@ -967,9 +970,13 @@ building more.
 - Windows AltGr handling and Linux Alt bindings are untested on real
   keyboards (no Alt bindings exist by default).
 - Unknown config keys are ignored silently (reported from Phase 5).
-- Under Xvfb each simulated wheel click arrives twice (XTest artifact,
-  likely). User to confirm one zoom step per Ctrl+wheel notch on real
-  hardware; `MARG_LOG=debug` logs each wheel event.
+- Under Xvfb each simulated wheel click arrives twice. Cause (confirmed
+  2026-10-28): winit 0.30 X11 turns buttons 4–7 into a wheel event on both
+  press and release, ignoring the state. Real mice have XI2 scroll
+  valuators, so the X server flags those button events as emulated and winit
+  drops them; the XTEST pointer has none, so both get through. Test-only:
+  does not affect real mice on X11, and Wayland does not use this code.
+  `MARG_LOG=debug` logs each wheel event.
 - First CI run on Windows is slow (MuPDF compiled from source, no cache);
   later runs use `rust-cache`.
 - Windows **debug** builds warn `LNK4098: defaultlib 'msvcrt' conflicts`:

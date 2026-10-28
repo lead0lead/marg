@@ -10,7 +10,8 @@
 #
 # Arguments: <outdir> [marg args...]. Steps on stdin, one per line:
 #   keys <xdotool key names...>   type <text>   shot <name>
-#   wheel <button 4|5> [ctrl]     (Xvfb delivers each click twice)
+#   wheel <button 4|5> [ctrl]     (arrives twice: winit X11 counts press and
+#                                  release when the device has no scroll axes)
 # Rendering is software (llvmpipe): judge looks here, never speed.
 out=$1; shift
 mkdir -p "$out"
