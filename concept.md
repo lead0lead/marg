@@ -411,6 +411,20 @@ puts the same object back, so nothing is lost, also for annotations from
 other programs. Links, form fields and popups are not listed. Still in
 Phase 3: `ga`, `e`, recolor, `U` toggle, tooltips.
 
+**Erasing (Phase 2, added 2026-10-28 at the user's request, "option B"):**
+Visual `d` (`annotate.erase`) removes highlights and underlines from the
+selected text only (`marg-core` `annot::erase`). A character belongs to an
+annotation if its centre is inside one of its boxes. Each affected
+annotation is deleted; the parts outside the selection become new
+annotations of the same type, color, opacity, `/Subj` and author, one per
+remaining stretch in reading order (so erasing the middle of a highlight
+leaves two; Zotero imports them as two). The comment stays with the first
+part; other fields of foreign annotations (dates, `/NM`, popups) are not
+copied to the parts. One undo step: undo deletes the parts and puts the
+original objects back. Squiggly and strike-out annotations are left alone.
+Option A (remove whole highlights touching the selection) was the
+alternative.
+
 **Comment editor**
 
 - An inline popup anchored next to the annotation, 360 px wide *(start)*,
@@ -583,6 +597,7 @@ remappable (§8).
 | | `Enter`, then `1`–`5` or `Enter` | highlight via category prompt (last category on `Enter`) |
 | | `c` | highlight + comment |
 | | `y` | copy text |
+| | `d` | erase highlights/underlines from the selected text |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
 | Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
 
@@ -1217,7 +1232,12 @@ Format:
   Chain checks and commit with `&&`. One Xvfb run hung at graphics setup
   (blank screenshot); the rerun worked. A UI test first used the user's
   real config (digits unbound) and made no highlights.
-- State: builds; 112 tests pass; clippy and fmt clean.
+- Later: the user wanted to clear highlights (the click/`]a` + `x` way was
+  not obvious) and chose Visual `d` as an eraser for the selected part
+  only ("option B" over removing whole highlights). Built; undo is now one
+  type for any mix of deleted and created annotations. `AnnotInfo` got
+  opacity and author, `AnnotSpec` the comment.
+- State: builds; 117 tests pass; clippy and fmt clean.
 - Next: the user's test week; then the milestone decision.
 
 ### 2026-10-28 — Phase 2: select & highlight

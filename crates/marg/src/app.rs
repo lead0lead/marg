@@ -1307,12 +1307,8 @@ impl MargApp {
             self.doc.send(Request::Edit { tag, edit });
         }
         self.leave_text_modes();
-        let what = if n == 1 {
-            "1 annotation"
-        } else {
-            "annotations"
-        };
-        self.show(Level::Info, format!("Erased from {what} (u to undo)"));
+        let what = if n == 1 { "annotation" } else { "annotations" };
+        self.show(Level::Info, format!("Erased from {n} {what} (u to undo)"));
     }
 
     /// `x`: delete the selected annotation (undo puts it back).
