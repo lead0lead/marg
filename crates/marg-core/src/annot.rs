@@ -171,6 +171,33 @@ pub fn annot_at(annots: &[AnnotInfo], page: usize, x: f32, y: f32) -> Option<&An
         .find(|a| a.page == page && a.contains(x, y))
 }
 
+/// The category of an annotation, as an index into `categories` (name and
+/// color each): the one named by its `/Subj` (ignoring case), else the one
+/// with the nearest color. `None`: Uncategorised (no match and no color).
+pub fn category_of(a: &AnnotInfo, categories: &[(&str, Option<[u8; 3]>)]) -> Option<usize> {
+    if let Some(subj) = &a.subject {
+        let subj = subj.trim();
+        if let Some(i) = categories
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(subj))
+        {
+            return Some(i);
+        }
+    }
+    let color = a.color?;
+    let dist = |c: [u8; 3]| {
+        (0..3)
+            .map(|k| (i32::from(c[k]) - i32::from(color[k])).pow(2))
+            .sum::<i32>()
+    };
+    categories
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, c))| c.map(|c| (dist(c), i)))
+        .min()
+        .map(|(_, i)| i)
+}
+
 /// Parse `#RRGGBB` (the `#` is optional).
 pub fn parse_color(s: &str) -> Option<[u8; 3]> {
     let hex = s.trim().strip_prefix('#').unwrap_or(s.trim());
@@ -334,5 +361,26 @@ mod tests {
         assert_eq!(parse_color("#FFD40"), None);
         assert_eq!(parse_color("#GGGGGG"), None);
         assert_eq!(parse_color("#ÄÄÄ"), None);
+    }
+
+    #[test]
+    fn category_from_subject_then_nearest_color() {
+        let cats = [
+            ("Key point", Some([0xFF, 0xD4, 0x00])),
+            ("Question", Some([0xA2, 0x8A, 0xE5])),
+            ("Broken", None),
+        ];
+        let mut a = info(0, 1, 0.0);
+        assert_eq!(category_of(&a, &cats), None);
+        a.color = Some([0x90, 0x80, 0xF0]);
+        assert_eq!(category_of(&a, &cats), Some(1));
+        a.color = Some([0xFF, 0xFF, 0x00]);
+        assert_eq!(category_of(&a, &cats), Some(0));
+        a.subject = Some(" question".into());
+        assert_eq!(category_of(&a, &cats), Some(1));
+        a.subject = Some("broken".into());
+        assert_eq!(category_of(&a, &cats), Some(2));
+        a.subject = Some("Unknown".into());
+        assert_eq!(category_of(&a, &cats), Some(0));
     }
 }

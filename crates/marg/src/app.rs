@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
 use marg_core::annot::{
-    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, erase, parse_color, step_annot,
+    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, category_of, erase, parse_color,
+    step_annot,
 };
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
@@ -1155,14 +1156,28 @@ impl MargApp {
             .unwrap_or_default()
     }
 
+    /// The category of an annotation (§2.8), 1-based; `None`: Uncategorised.
+    fn category(&self, a: &AnnotInfo) -> Option<u8> {
+        let cats: Vec<_> = self
+            .config
+            .categories
+            .iter()
+            .map(|c| (c.name.as_str(), parse_color(&c.color)))
+            .collect();
+        category_of(a, &cats).and_then(|i| u8::try_from(i + 1).ok())
+    }
+
+    fn category_name(&self, a: &AnnotInfo) -> &str {
+        self.category(a)
+            .and_then(|c| self.config.categories.get(usize::from(c) - 1))
+            .map_or("Uncategorised", |c| c.name.as_str())
+    }
+
     /// Select an annotation (or none), and say what it is.
     fn select_annot(&mut self, a: Option<&AnnotInfo>) {
         self.selected_annot = a.map(|a| (a.page, a.xref));
         let Some(a) = a else { return };
-        let mut text = format!("{} p. {}", a.kind, a.page + 1);
-        if let Some(s) = &a.subject {
-            text.push_str(&format!("  {s}"));
-        }
+        let mut text = format!("{} p. {}  {}", a.kind, a.page + 1, self.category_name(a));
         if let Some(c) = &a.contents {
             let c: String = c.chars().take(80).collect();
             text.push_str(&format!("  “{}”", c.replace('\n', " ")));
