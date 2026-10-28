@@ -67,9 +67,9 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 2 (select & highlight) built on branch `phase-2-select`, not merged. This is the **decision milestone**: the user reads real papers with it for about a week. Phase 1 merged into `main` on 2026-10-28. |
-| **Current phase** | 2 — select & highlight, built; user check pending (decision milestone) |
-| **Next step** | User uses the Phase 2 build on real papers (on copies at first) and decides whether keyboard selection is fast enough, and on the open questions in §12. Then merge `phase-2-select`; Phase 3 only after the user's go-ahead. |
+| **Status** | Phase 2 (select & highlight) built on branch `phase-2-select`, not merged; the user is in the test week (decision milestone) and chose to stay in Phase 2 until it ends. Added since the first Phase 2 build: `:close`, category prompt on `Enter`, block caret, annotation selection (`]a`, `[a`, click) and `x` delete, scroll while dragging. |
+| **Current phase** | 2 — select & highlight, user test week (decision milestone) |
+| **Next step** | User keeps reading with it and decides at the end of the week: is keyboard selection fast enough; Visual highlight keys (§12); the other §12 questions. Then merge `phase-2-select`; Phase 3 only after the user's go-ahead. |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -324,7 +324,9 @@ Copy text: lines joined with a space; a line ending in a letter + `-`
 followed by a lowercase letter is joined without the hyphen (so
 "well-known" split at the hyphen becomes "wellknown"). Mouse: a single
 click clears the selection; double/triple click within 400 ms
-(`ui.multi_click_ms`). Dragging does not scroll the view yet.
+(`ui.multi_click_ms`). Dragging into the 16 px edge zone at the top or
+bottom (or past it) scrolls, faster the further in (`ui.drag_scroll_rate`
+px/s per px, `ui.drag_scroll_edge_px`), and extends the selection.
 
 ### 2.8 Annotations
 
@@ -392,6 +394,22 @@ only on highlights. Undo/redo works per action (all pages of it), for
 highlights and underlines; the stack is cleared when a file is opened or
 reloaded. Categories that are not `#RRGGBB` give an error message. Reading
 categories from foreign annotations comes in Phase 3.
+
+**As implemented (Phase 2, pulled forward from Phase 3 at the user's
+request):** `]a` / `[a` (with counts) select the next or previous
+annotation in reading order (page, top, left), from the selected one or
+from the top of the view, and scroll it into view; a click selects the
+topmost annotation under the pointer (its quads, or its rectangle). The
+selection is a dashed outline in the annotation's color with a dark dashed
+line under it (so light colors show on white), and the status bar shows
+type, page, `/Subj` and the start of `/Contents`. `x` deletes it; Esc or a
+click elsewhere deselects. The document thread lists every page's
+annotations when idle after opening (edited pages right away);
+`]a` before that says "Still reading the annotations". Deleting only
+unlinks the annotation (and its popup) from the page's `/Annots`; `u`
+puts the same object back, so nothing is lost, also for annotations from
+other programs. Links, form fields and popups are not listed. Still in
+Phase 3: `ga`, `e`, recolor, `U` toggle, tooltips.
 
 **Comment editor**
 
@@ -613,6 +631,7 @@ New Normal keys: `f`, `F`, `u`, `Ctrl-r`. New commands: `hint.caret`,
 word_end_prev|line_start|line_end|line_down|line_up|sentence_prev|
 sentence_next|block_prev|block_next`, `visual.char`, `visual.line`,
 `visual.swap`, `annotate.highlight(1)`…`(5)`, `annotate.underline`,
+`annot.next` (`]a`), `annot.prev` (`[a`), `annot.delete` (`x`),
 `annotate.pick` (Visual `Enter`: the status bar lists the categories, a
 digit highlights, `Enter` uses the last category, Esc goes back),
 `selection.copy`, `undo`, `redo`, `file.save` (`:w`), `file.save_force`
@@ -794,7 +813,7 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 `undo_steps = 100`), `[[category]]` (`name`, `color`; a config with any
 `[[category]]` replaces all five defaults), `[keys.caret]`,
 `[keys.visual]`, and in `[ui]` `multi_click_ms = 400`, `file_check_secs =
-1.0`. Backups go to `<data_local_dir>/marg/backups` (Linux
+1.0`, `drag_scroll_rate = 12.0`, `drag_scroll_edge_px = 16.0`. Backups go to `<data_local_dir>/marg/backups` (Linux
 `~/.local/share/marg/backups`, respects `XDG_DATA_HOME`).
 
 ### State file
@@ -1036,7 +1055,7 @@ Each phase ends with something the user can try, and a short check by them.
 | **0. Setup + spike** | `.gitignore`, `CLAUDE.md`, Cargo workspace, CI on Linux + Windows. **Spike**: with the `mupdf` crate, open a PDF, render page 1 into an eframe window, add one Highlight annotation by code, save incrementally, reopen. Confirm the API covers: rendering with annotations, structured text with char boxes, creating Highlight/Underline/Text/Square, setting color/opacity/QuadPoints/Contents/Subj, deleting, incremental save, document ID, outline, links, page labels. | The window shows page 1 and `:version`-equivalent text; the highlight appears in Okular or a browser; CI is green on both OSes; a short written report of API gaps. **If gaps exist, stop and discuss the stack with the user.** |
 | **1. Viewer** | Continuous layout, rendering thread, cache and pre-render, scrolling, page navigation, counts, zoom and fit modes, command registry, TOML keymap with remapping, status bar, command line (`:q`, `:e`), state file (reopen at last position), recent files, debug overlay, startup timing. | The user reads a paper and a book with it and checks the speed targets in the debug overlay. |
 | **2. Select & highlight** — **decision milestone** | Structured text model, two-stage hints (`f`, `F`), Caret and Visual modes with all motions, mouse selection, `y` copy, highlights `1`–`5` and underline `U`, provisional overlays, incremental save, autosave, backups, external-change detection, undo/redo. | **The user reads real papers for about a week and decides whether keyboard selection is fast enough and whether to continue.** |
-| **3. Notes & boxes** | Comment popup (`c`, `e`), notes (`i`), box mode with grid hints, adjust and snap, annotation selection (`]a`, `[a`, `ga`, click), edit/delete/recolor/toggle, tooltips, annotation list panel, reading categories from foreign annotations. | The user annotates a full paper (highlights, comments, boxes) and checks them in another viewer and via Zotero's "Import annotations". |
+| **3. Notes & boxes** | Comment popup (`c`, `e`), notes (`i`), box mode with grid hints, adjust and snap, annotation selection with `ga` (`]a`, `[a`, click and `x` delete were built in Phase 2), edit/recolor/toggle, tooltips, annotation list panel, reading categories from foreign annotations. | The user annotates a full paper (highlights, comments, boxes) and checks them in another viewer and via Zotero's "Import annotations". |
 | **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay, `:help` page. | The user reads a slide deck and a book chapter with it. |
 | **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, README with the cheat sheet (§2.12), tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
 
@@ -1105,9 +1124,9 @@ building more.
 
 **Known issues**
 
-- Phase 2: dragging a mouse selection to the window edge does not scroll.
 - Phase 2: lines whose text is invisible (e.g. white header text on a
-  colored band) still get line hints.
+  colored band) still get line hints. Not filtered on purpose: the text
+  layer of OCR'd scans is invisible too, and those lines need hints.
 - Phase 2: if another program rewrites the open file in place while marg has
   unsaved changes, MuPDF may read objects it has not loaded yet from the
   changed file; `:w!` in that state could write a broken file (the backup
@@ -1183,6 +1202,24 @@ Format:
 - Watch out: anything a new session would otherwise get wrong.
 ```
 
+### 2026-10-28 — Phase 2 (continued): option A, annotation selection
+- User chose to stay in Phase 2 until the test week is over (option A),
+  and asked to add a help page and a cheat sheet (README) to the concept
+  (§2.12; Phases 4 and 5), and reported that the caret looked like an
+  insert cursor one character behind the selection.
+- Done (branch `phase-2-select`): block caret (§6); `]a` / `[a` / click
+  to select annotations, `x` to delete, `u` restores the same object
+  (pulled forward from Phase 3); scrolling while dragging a selection to
+  the window edge. New request `Annots` (idle scan of all pages, urgent
+  for edited pages) and edit `Restore`.
+- Tried and failed: commit `1e24770` was made although clippy failed (the
+  command chained the commit with `;` after clippy); fixed in `11998a6`.
+  Chain checks and commit with `&&`. One Xvfb run hung at graphics setup
+  (blank screenshot); the rerun worked. A UI test first used the user's
+  real config (digits unbound) and made no highlights.
+- State: builds; 112 tests pass; clippy and fmt clean.
+- Next: the user's test week; then the milestone decision.
+
 ### 2026-10-28 — Phase 2: select & highlight
 - Done (branch `phase-2-select`, not merged): Phase 1 merged into `main`
   after CI passed (user said "go ahead on phase 2"). Ten steps, one
@@ -1217,9 +1254,9 @@ Format:
   both are available at once (§12). Deleting older annotations (`x`, Phase 3) was offered to come
   earlier if needed.
 - Next: user uses it on real papers for about a week (decision milestone).
-- Watch out: UI test runs must set **both** `XDG_STATE_HOME` and
-  `XDG_DATA_HOME` to scratch dirs (backups go to the data dir), and must
-  only save copies. xdotool sends multi-letter hint labels as separate keys
+- Watch out: UI test runs must set `XDG_CONFIG_HOME`, `XDG_STATE_HOME`
+  and `XDG_DATA_HOME` to scratch dirs (the user's real config changes keys;
+  backups go to the data dir), and must only save copies. xdotool sends multi-letter hint labels as separate keys
   (`a s`, not `as`).
 
 ### 2026-10-28 — Phase 1 follow-up: list keys, timing, wheel
