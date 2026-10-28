@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 1 merged into `main` (2026-10-28). Phase 2 (select & highlight) in progress on branch `phase-2-select`: steps 1–4 (text model; motions and selection; per-mode keymaps; hints, Caret and Visual modes, `y`; mouse selection; highlights and underline; saving; external changes; undo/redo) done. |
-| **Current phase** | 2 — select & highlight, in progress |
-| **Next step** | Phase 2 step 10: measure on real papers, update concept.md (as-implemented sections, session log), hand the build to the user. Plan: 1 text model, 2 motions + selection, 3 per-mode keymaps, 4 hints + caret/visual in the app + `y`, 5 mouse selection, 6 highlights/underline + provisional overlay, 7 saving (backup, incremental, autosave, `q`), 8 external changes, 9 undo/redo, 10 docs. |
+| **Status** | Phase 2 (select & highlight) built on branch `phase-2-select`, not merged. This is the **decision milestone**: the user reads real papers with it for about a week. Phase 1 merged into `main` on 2026-10-28. |
+| **Current phase** | 2 — select & highlight, built; user check pending (decision milestone) |
+| **Next step** | User uses the Phase 2 build on real papers (on copies at first) and decides whether keyboard selection is fast enough, and on the open questions in §12. Then merge `phase-2-select`; Phase 3 only after the user's go-ahead. |
 | **Decision milestone** | End of Phase 2: viewer + hint/caret selection + highlights that save into the PDF. The user reads real papers with it for about a week and decides whether selection is fast enough. Do not build Phase 3+ without the user's go-ahead. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
-| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer; no file → recent files list) |
+| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection, highlights and underlines saved into the PDF; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 2 step 9) |
+| **Last updated** | 2026-10-28 (end of Phase 2 build) |
 
 ---
 
@@ -170,8 +170,18 @@ live in a frame-aware LRU (`marg-core/src/lru.rs`, 256 MB): anything drawn in
 the current frame is never evicted. Above 200% zoom, visible tiles plus a
 one-tile margin are rendered over a low-resolution full page (at 200%).
 While a render is missing, the cached full page with the closest scale is
-drawn stretched. A failed `:e` keeps the current document. Text extraction
-and annotation re-renders come in Phase 2.
+drawn stretched. A failed `:e` keeps the current document.
+
+**As implemented (Phase 2):** the UI requests the text of visible pages
+(and of the pages next to the caret) with `Request::Text`; text requests
+are served before renders. Extraction uses no MuPDF flags (no
+`DEHYPHENATE`, which would merge lines); boxes are page-relative points.
+Measured on 53 real PDFs (release): page text in 0.7 ms median, 3.8 ms p90,
+35 ms max. Annotation edits (`Request::Edit`) are served first; each
+successful edit raises the page's revision, which is part of the render
+key, so the page re-renders; older renders of the page stay as a fallback
+until the new full page arrives and are then dropped. Until then the UI
+draws the new annotation itself (`select::draw_provisional`).
 
 ### 2.3 Layouts
 
@@ -255,6 +265,18 @@ Hint labels are drawn over targets; typing a label picks that target.
 - Pages without a text layer (scans): `f` / `F` show "no text on this page —
   use a box (b)" instead of empty hints.
 
+**As implemented (Phase 2):** labels come from `marg-core/src/hints.rs`
+(breadth-first, prefix-free, shortest first; earlier targets get shorter
+labels). Line labels sit left of the line; word labels sit on the word's
+start (they cover its first letters). Stage 2 uses `chars` + `extra_chars`
+(`[hints]`); a line with one word is picked at once. A word is a
+whitespace-separated run (punctuation included). Characters that match no
+label are ignored; Backspace removes one; Esc cancels and restores the
+previous selection. While the second word of `F` is picked, the first is
+shown selected. The typed prefix appears at the right of the status bar.
+If the visible text is still loading, the message is "Text is still
+loading". `gl` and `ga` come in Phases 4 and 3.
+
 ### 2.7 Caret and visual selection
 
 - **Caret mode** shows a 2 px caret bar at a character position. Motions
@@ -281,6 +303,23 @@ Hint labels are drawn over targets; typing a label picks that target.
 - Multi-column papers rely on MuPDF's block order. If the order is wrong on a
   page, motions follow the wrong order; that is a known risk (§12), checked at
   the decision milestone.
+
+**As implemented (Phase 2):** `marg-core/src/caret.rs`. The caret sits on
+a character and is drawn at its left edge. Words are whitespace-separated
+(vim's `W`, so `w`/`e` include punctuation). Added: `h`/`l` (and
+Left/Right) move by one character, to adjust a selection end. Sentence
+starts: the first word of a block, or a word after `.`/`?`/`!` (up to two
+closing quotes or brackets in between). `{` goes to the start of the
+current block, or the previous one when already there; `}` to the next
+block's start. Motions cross pages; a page whose text is not loaded yet
+stops them (it is requested, the next key works). Visual: `v`/`V` in
+Visual switch the kind, or end the selection (back to Caret) when it is
+already that kind. `y` copies and stays in Visual ("Copied N characters").
+Copy text: lines joined with a space; a line ending in a letter + `-`
+followed by a lowercase letter is joined without the hyphen (so
+"well-known" split at the hyphen becomes "wellknown"). Mouse: a single
+click clears the selection; double/triple click within 400 ms
+(`ui.multi_click_ms`). Dragging does not scroll the view yet.
 
 ### 2.8 Annotations
 
@@ -339,6 +378,16 @@ With the mouse, in box mode, drag a rectangle instead of steps 1–3.
   (create, delete, edit comment, recolor, change type), 100 steps *(start)*,
   for the current session only.
 
+**As implemented (Phase 2):** highlights (`1`–`5`) and underlines (`U`,
+last-used category, default 1) from a selection, then back to Normal. One
+annotation per page the selection touches, one QuadPoint per selected
+line part (leading and trailing spaces left out). `/Subj` = category name,
+`/T` = `annotation.author` or the OS user name (`USER`/`USERNAME`), opacity
+only on highlights. Undo/redo works per action (all pages of it), for
+highlights and underlines; the stack is cleared when a file is opened or
+reloaded. Categories that are not `#RRGGBB` give an error message. Reading
+categories from foreign annotations comes in Phase 3.
+
 **Comment editor**
 
 - An inline popup anchored next to the annotation, 360 px wide *(start)*,
@@ -371,6 +420,26 @@ With the mouse, in box mode, drag a rectangle instead of steps 1–3.
   the status bar. `:w!` forces marg's version, `:e!` reloads from disk and
   discards marg's changes.
 - `q` / `:q` save pending changes, then quit. `:q!` quits without saving.
+
+**As implemented (Phase 2):** `marg-pdf/src/document.rs` (`Doc::save`,
+`ensure_backup`, `poll_disk`), driven by the app. The backup is made when
+the first edit of a session arrives (before the file is ever written); if
+it cannot be made, the edit fails ("cannot back up the file, so it was not
+changed"). Backup name: hex of `/ID[0]`, else `path` + an FNV-1a hash of
+the path, then `-<filename>`. A save appends (incremental) when MuPDF
+allows it and the file is unchanged on disk; otherwise (or with `:w!`) the
+whole file goes to `.<name>.<pid>-<n>.marg-tmp` next to it and is renamed
+over it (on failure, e.g. Windows, the document is closed and the rename
+retried), and marg continues from the new file. A file changed on disk is
+never saved over without `:w!`; while that conflict lasts, autosave waits.
+Autosave runs `annotation.autosave_secs` after the last confirmed edit;
+after a failed save it retries after the same delay. `q`, closing the
+window and `:e` save first and do not go on if the save fails (the message
+says so; `:q!` closes anyway). `on_exit` saves once more as a last resort.
+The file check runs on the document thread every `ui.file_check_secs`
+(1 s) when the app asks (`Request::CheckDisk`); a clean document reloads
+("Reloaded from disk") and keeps its position; an unsaved one shows "File
+changed on disk; :w! keeps marg's version, :e! reloads".
 
 ### 2.10 Annotation list
 
@@ -512,6 +581,22 @@ and costs an extra Esc). **As implemented:** `marg-core/src/list.rs`
 (`ListNav`), used by `marg/src/recent.rs`; keys are fixed (not in the
 keymap yet). The prompt line shows `/filter▏` while filtering, the filter
 dimmed after Esc, or a key hint when empty.
+
+**As implemented (Phase 2):** Caret and Visual mode have their own
+tables, `[keys.caret]` and `[keys.visual]` (`marg-core/src/keymap.rs`,
+`DEFAULT_CARET`, `DEFAULT_VISUAL`). The Caret keymap is the Normal one with
+the Caret bindings on top; Visual adds its bindings on top of Caret. So
+Normal keys like `J`, `Ctrl-d`, `+` still work in Caret and Visual mode.
+New Normal keys: `f`, `F`, `u`, `Ctrl-r`. New commands: `hint.caret`,
+`hint.select`, `caret.char_next|char_prev|word_next|word_prev|word_end|
+word_end_prev|line_start|line_end|line_down|line_up|sentence_prev|
+sentence_next|block_prev|block_next`, `visual.char`, `visual.line`,
+`visual.swap`, `annotate.highlight(1)`…`(5)`, `annotate.underline`,
+`selection.copy`, `undo`, `redo`, `file.save` (`:w`), `file.save_force`
+(`:w!`), `file.reload` (`:e!`). Esc (leave Caret/Visual) is fixed, not a
+binding. Since `1`–`5` are bound in Visual mode, counts there can only use
+other digits. The status bar shows `HINT`, `CARET`, `VISUAL` and ● for
+unsaved changes; `:` returns to the mode it came from.
 
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
@@ -675,6 +760,15 @@ color = "#FFD400"
 limits) and `[keys.normal]`; defaults in `marg-core/src/config.rs`. A broken
 config falls back to all defaults and shows the error. Reloading, `:set`,
 `:config` and unknown-key reporting come in Phase 5.
+
+**As implemented (Phase 2):** added `[hints]` (`chars`, `mode =
+"two-stage" | "words"`, `extra_chars = "qwertyuiop"`), `[annotation]`
+(`author`, `highlight_opacity`, `box_stroke_pt`, `autosave_secs`,
+`undo_steps = 100`), `[[category]]` (`name`, `color`; a config with any
+`[[category]]` replaces all five defaults), `[keys.caret]`,
+`[keys.visual]`, and in `[ui]` `multi_click_ms = 400`, `file_check_secs =
+1.0`. Backups go to `<data_local_dir>/marg/backups` (Linux
+`~/.local/share/marg/backups`, respects `XDG_DATA_HOME`).
 
 ### State file
 
@@ -946,6 +1040,13 @@ building more.
 
 - **List keys** (§3, "Lists"): built as decided on 2026-10-28; the user
   will re-evaluate after using it. List keys are not remappable yet.
+- **Word hint placement** (Phase 2): word labels cover the first letters of
+  their word. Alternatives: above the word, or left of it. The user's call
+  after trying it.
+- **`y` stays in Visual mode** (Phase 2 choice, vim leaves Visual): keeps the
+  selection for a highlight after copying. Confirm or change.
+- **Words include punctuation** (vim's `W`, not `w`): a selection to a word
+  end takes the comma or full stop with it. Confirm or change.
 
 **Risks**
 
@@ -967,6 +1068,18 @@ building more.
   extra render workers only if needed.
 
 **Known issues**
+
+- Phase 2: dragging a mouse selection to the window edge does not scroll.
+- Phase 2: lines whose text is invisible (e.g. white header text on a
+  colored band) still get line hints.
+- Phase 2: if another program rewrites the open file in place while marg has
+  unsaved changes, MuPDF may read objects it has not loaded yet from the
+  changed file; `:w!` in that state could write a broken file (the backup
+  stays). `:e!` is the safe choice; replacing a file by rename is safe.
+- Phase 2: closing the window when the save fails keeps the window open
+  (by design, to not lose changes); `:q!` closes without saving.
+- Phase 2: the clipboard after `y` was not checked under Xvfb (no `xclip`);
+  copy text is covered by unit tests.
 
 - MuPDF warnings go to stderr; the `mupdf` crate does not expose
   `fz_set_warning_callback`, so `:debug` cannot list them. Possible via
@@ -1033,6 +1146,36 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-28 — Phase 2: select & highlight
+- Done (branch `phase-2-select`, not merged): Phase 1 merged into `main`
+  after CI passed (user said "go ahead on phase 2"). Ten steps, one
+  commit each: text model + extraction (`Request::Text`), caret motions and
+  selections (`caret.rs`), Caret/Visual keymaps and commands, hints (`f`,
+  `F`, two-stage and `words`), Caret and Visual modes, `y`, mouse selection,
+  highlights `1`–`5` and underline `U` with provisional overlay and page
+  revisions in render keys, saving (backup, incremental/full, autosave,
+  `:w`, `:w!`, `q` and window close save first, `:q!`), external-change
+  detection and `:e!`, undo/redo. New fixture `tests/fixtures/columns.pdf`
+  (two columns, hyphenated break, sentences). `open_timing` also times text
+  extraction.
+- Decisions: none from the user beyond the go-ahead. Claude's choices
+  (open questions in §12): `h`/`l` as character motions; whitespace words;
+  `y` stays in Visual; backup at the first edit, and an edit fails if the
+  backup fails; window close with a failed save stays open.
+- Tried and failed: nothing notable. Clippy `too_many_arguments` on
+  `draw_tiles` was fixed by passing a render key instead of an `#[allow]`.
+- State: builds; 108 tests pass; clippy and fmt clean on Linux. UI checked
+  on Xvfb with fixture copies: hints, caret, visual, `F` across columns,
+  sentence motion, mouse drag/double/triple click, highlight + underline
+  (also checked in Poppler), autosave, backup, `q` saves first, external
+  change reload/conflict, undo/redo. Hints checked on one real paper
+  (opened read-only; file unchanged). Feel and speed not judged by Claude.
+- Next: user uses it on real papers for about a week (decision milestone).
+- Watch out: UI test runs must set **both** `XDG_STATE_HOME` and
+  `XDG_DATA_HOME` to scratch dirs (backups go to the data dir), and must
+  only save copies. xdotool sends multi-letter hint labels as separate keys
+  (`a s`, not `as`).
 
 ### 2026-10-28 — Phase 1 follow-up: list keys, timing, wheel
 - Done (branch `phase-1-viewer`): lists open for moving (`j`/`k`, `gg`/`G`,

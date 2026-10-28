@@ -1,4 +1,5 @@
-//! Time opening a PDF and rendering its first page (read-only).
+//! Time opening a PDF, rendering its first page and extracting its text
+//! (read-only).
 //! `cargo run --release -p marg-pdf --example open_timing -- file.pdf`
 
 use std::time::{Duration, Instant};
@@ -39,6 +40,18 @@ fn main() {
     };
     let px = result.expect("render");
     println!("page 1 at 1.5x: {}x{} in {took:?}", px.width, px.height);
+    let text_start = Instant::now();
+    t.send(Request::Text(0));
+    let Some(Response::Text { result, .. }) = t.recv_timeout(Duration::from_secs(60)) else {
+        panic!("no text response")
+    };
+    let text = result.expect("text");
+    println!(
+        "page 1 text: {} lines, {} chars in {:?}",
+        text.lines.len(),
+        text.chars.len(),
+        text_start.elapsed()
+    );
     println!("total: {:?}", start.elapsed());
 
     // Check the fast page-size path against MuPDF's page bounds.
