@@ -71,9 +71,9 @@ struct OpenDoc {
     xrefs: HashMap<u64, i32>,
     /// The annotations of each page, once listed by the document thread.
     annots: Vec<Option<Vec<AnnotInfo>>>,
-    /// Comments for created annotations whose creation is not confirmed
-    /// yet, by edit tag.
-    pending_comments: HashMap<u64, String>,
+    /// What to do with created annotations once their creation is
+    /// confirmed, by edit tag.
+    pending: HashMap<u64, AfterCreate>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -107,6 +107,12 @@ impl OpenDoc {
     fn unsaved(&self) -> bool {
         self.edits > self.saved_edits
     }
+}
+
+/// What to do with an annotation once its creation is confirmed.
+enum AfterCreate {
+    Comment(String),
+    Delete,
 }
 
 /// What to do once the pending save has succeeded.
@@ -475,10 +481,14 @@ impl MargApp {
                     match result {
                         Ok(xref) => {
                             open.xrefs.insert(tag, xref);
-                            if let Some(text) = open.pending_comments.remove(&tag) {
+                            if let Some(after) = open.pending.remove(&tag) {
+                                let edit = match after {
+                                    AfterCreate::Comment(text) => comment_edit(page, xref, text),
+                                    AfterCreate::Delete => Edit::Delete { page, xref },
+                                };
                                 self.doc.send(Request::Edit {
                                     tag: self.next_tag,
-                                    edit: comment_edit(page, xref, text),
+                                    edit,
                                 });
                                 self.next_tag += 1;
                             }
@@ -665,7 +675,7 @@ impl MargApp {
             undo: UndoStack::new(self.config.annotation.undo_steps),
             xrefs: HashMap::new(),
             annots: vec![None; view.page_count()],
-            pending_comments: HashMap::new(),
+            pending: HashMap::new(),
             view,
         }
     }
@@ -1136,8 +1146,75 @@ impl MargApp {
         let target = comment::Target::Created {
             page: spec.page,
             tag,
+            note: false,
         };
         self.editor = Some(CommentEditor::new(target, anchor, String::new()));
+        self.mode = Mode::Insert;
+    }
+
+    /// `i`: a note in the last-used category with its icon above the
+    /// caret, or at the top left of the current page's visible part; the
+    /// comment editor opens on it.
+    fn new_note(&mut self) {
+        let Some(open) = &mut self.open else { return };
+        let Some(cat) = self
+            .config
+            .categories
+            .get(usize::from(self.last_category) - 1)
+        else {
+            return;
+        };
+        let Some(color) = parse_color(&cat.color) else {
+            let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
+            self.error(msg);
+            return;
+        };
+        let size = self.config.annotation.note_size_pt;
+        let at_caret = self.caret.and_then(|c| {
+            let t = open.texts.get(c.pos.page)?.as_ref()?;
+            let b = t.chars.get(c.pos.idx)?.bbox;
+            Some((c.pos.page, b.x0, (b.y0 - size).max(0.0)))
+        });
+        let (page, x, y) = at_caret.unwrap_or_else(|| {
+            let page = open.view.current_page();
+            let top = -open.view.page_rect_on_screen(page).y / open.view.zoom();
+            (page, size / 2.0, top.max(0.0) + size / 2.0)
+        });
+        let spec = AnnotSpec {
+            page,
+            kind: AnnotKind::Note,
+            rects: vec![BBox::new(x, y, x + size, y + size)],
+            color,
+            opacity: 1.0,
+            subject: cat.name.clone(),
+            author: self.author.clone(),
+            contents: None,
+        };
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        open.provisional.push(Provisional {
+            tag,
+            rev: None,
+            spec: spec.clone(),
+        });
+        self.doc.send(Request::Edit {
+            tag,
+            edit: Edit::Create(spec.clone()),
+        });
+        open.undo.push(UndoOp {
+            created: vec![Created {
+                spec: spec.clone(),
+                tag,
+            }],
+            ..UndoOp::default()
+        });
+        self.leave_text_modes();
+        let target = comment::Target::Created {
+            page,
+            tag,
+            note: true,
+        };
+        self.editor = Some(CommentEditor::new(target, spec.rects[0], String::new()));
         self.mode = Mode::Insert;
     }
 
@@ -1245,7 +1322,12 @@ impl MargApp {
     fn select_annot(&mut self, a: Option<&AnnotInfo>) {
         self.selected_annot = a.map(|a| (a.page, a.xref));
         let Some(a) = a else { return };
-        let mut text = format!("{} p. {}  {}", a.kind, a.page + 1, self.category_name(a));
+        let kind = match a.kind.as_str() {
+            "Text" => "Note",
+            "Square" => "Box",
+            k => k,
+        };
+        let mut text = format!("{kind} p. {}  {}", a.page + 1, self.category_name(a));
         if let Some(c) = &a.contents {
             let c: String = c.chars().take(80).collect();
             text.push_str(&format!("  “{}”", c.replace('\n', " ")));
@@ -1510,7 +1592,7 @@ impl MargApp {
                 self.config.annotation.highlight_opacity,
                 "Highlight",
             ),
-            None => {
+            _ => {
                 let msg = format!("Only highlights and underlines can switch ({})", a.kind);
                 self.show(Level::Info, msg);
                 return;
@@ -1548,18 +1630,25 @@ impl MargApp {
             self.mode = Mode::Normal;
             return;
         };
-        let text = match ed.keys(ctx) {
+        // Cancelling saves nothing (a new note without text is removed).
+        let (text, save) = match ed.keys(ctx) {
             comment::Outcome::Editing => return,
-            comment::Outcome::Cancel => {
-                self.editor = None;
-                self.mode = Mode::Normal;
-                return;
-            }
-            comment::Outcome::Save(text) => text,
+            comment::Outcome::Cancel => (String::new(), false),
+            comment::Outcome::Save(text) => (text, true),
         };
         let Some(ed) = self.editor.take() else { return };
         self.mode = Mode::Normal;
-        if !ed.changed() {
+        if let comment::Target::Created {
+            page,
+            tag,
+            note: true,
+        } = ed.target
+            && text.is_empty()
+        {
+            self.drop_new_note(page, tag);
+            return;
+        }
+        if !save || text == ed.original() {
             return;
         }
         match ed.target {
@@ -1579,7 +1668,7 @@ impl MargApp {
                 };
                 self.change_listed(&a, change, "Comment saved".into());
             }
-            comment::Target::Created { page, tag } => {
+            comment::Target::Created { page, tag, .. } => {
                 // Part of the creation's undo step: redo puts the same
                 // object back, comment included.
                 let Some(open) = &mut self.open else { return };
@@ -1592,12 +1681,38 @@ impl MargApp {
                         self.next_tag += 1;
                     }
                     None => {
-                        open.pending_comments.insert(tag, text);
+                        open.pending.insert(tag, AfterCreate::Comment(text));
                     }
                 }
                 self.show(Level::Info, "Comment saved".into());
             }
         }
+    }
+
+    /// A new note left without text: delete it, and forget its undo step.
+    fn drop_new_note(&mut self, page: usize, tag: u64) {
+        let Some(open) = &mut self.open else { return };
+        if open
+            .undo
+            .discard_last()
+            .is_some_and(|op| !op.created.iter().any(|c| c.tag == tag))
+        {
+            log::warn!("dropping a new note: the last undo step was not its creation");
+        }
+        open.provisional.retain(|p| p.tag != tag);
+        match open.xrefs.get(&tag) {
+            Some(&xref) => {
+                self.doc.send(Request::Edit {
+                    tag: self.next_tag,
+                    edit: Edit::Delete { page, xref },
+                });
+                self.next_tag += 1;
+            }
+            None => {
+                open.pending.insert(tag, AfterCreate::Delete);
+            }
+        }
+        self.show(Level::Info, "Empty note removed".into());
     }
 
     /// The annotation under a screen position, if any.
@@ -1820,6 +1935,10 @@ impl MargApp {
                 self.comment_selection();
                 return;
             }
+            Command::Note => {
+                self.new_note();
+                return;
+            }
             Command::PickCategory => {
                 if self.selection.is_some() {
                     self.mode = Mode::Category;
@@ -1884,6 +2003,7 @@ impl MargApp {
             | Command::AnnotToggleType
             | Command::AnnotEdit
             | Command::Comment
+            | Command::Note
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo

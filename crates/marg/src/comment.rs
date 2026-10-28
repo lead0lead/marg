@@ -9,8 +9,9 @@ pub enum Target {
     /// A listed annotation, by object number.
     Annot { page: usize, xref: i32 },
     /// An annotation just created by the edit with this tag (its object
-    /// number may not be known yet).
-    Created { page: usize, tag: u64 },
+    /// number may not be known yet). A `note` is removed again when the
+    /// editor is left without text.
+    Created { page: usize, tag: u64, note: bool },
 }
 
 impl Target {
@@ -51,6 +52,10 @@ impl CommentEditor {
             text,
             armed: false,
         }
+    }
+
+    pub fn original(&self) -> &str {
+        &self.original
     }
 
     pub fn changed(&self) -> bool {

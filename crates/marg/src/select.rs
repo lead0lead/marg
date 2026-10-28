@@ -323,6 +323,16 @@ pub fn draw_provisional(painter: &egui::Painter, view: &View, area: Rect, spec: 
                 let line = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - t), rect.max);
                 painter.rect_filled(line, 0.0, Color32::from_rgb(r, g, b));
             }
+            AnnotKind::Note => {
+                let edge = egui::Stroke::new(1.0, Color32::from_black_alpha(160));
+                painter.rect(
+                    rect,
+                    2.0,
+                    Color32::from_rgb(r, g, b),
+                    edge,
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
     }
 }

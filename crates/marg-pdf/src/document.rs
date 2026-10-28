@@ -391,26 +391,29 @@ impl Doc {
     /// Create an annotation. Returns its object number.
     pub fn create_annotation(&self, spec: &AnnotSpec) -> Result<i32, String> {
         let (ox, oy) = self.page_origin(spec.page)?;
-        let quads: Vec<Quad> = spec
+        let shifted: Vec<mupdf::Rect> = spec
             .rects
             .iter()
-            .map(|r| {
-                let (x0, y0, x1, y1) = (r.x0 + ox, r.y0 + oy, r.x1 + ox, r.y1 + oy);
+            .map(|r| mupdf::Rect::new(r.x0 + ox, r.y0 + oy, r.x1 + ox, r.y1 + oy))
+            .collect();
+        let Some(&first) = shifted.first() else {
+            return Err("nothing to annotate".into());
+        };
+        let quads = || {
+            shifted.iter().map(|r| {
                 Quad::new(
-                    Point::new(x0, y0),
-                    Point::new(x1, y0),
-                    Point::new(x0, y1),
-                    Point::new(x1, y1),
+                    Point::new(r.x0, r.y0),
+                    Point::new(r.x1, r.y0),
+                    Point::new(r.x0, r.y1),
+                    Point::new(r.x1, r.y1),
                 )
             })
-            .collect();
-        if quads.is_empty() {
-            return Err("nothing to annotate".into());
-        }
+        };
         let mut page = self.doc.load_pdf_page(spec.page as i32).map_err(err)?;
         let mut annot = match spec.kind {
-            AnnotKind::Highlight => page.add_highlight_annotation(quads),
-            AnnotKind::Underline => page.add_underline_annotation(quads),
+            AnnotKind::Highlight => page.add_highlight_annotation(quads().collect::<Vec<_>>()),
+            AnnotKind::Underline => page.add_underline_annotation(quads().collect::<Vec<_>>()),
+            AnnotKind::Note => page.add_text_annotation(first, ""),
         }
         .map_err(err)?;
         let [r, g, b] = spec.color.map(|c| c as f32 / 255.0);
@@ -573,6 +576,7 @@ impl Doc {
             let name = match kind {
                 AnnotKind::Highlight => "Highlight",
                 AnnotKind::Underline => "Underline",
+                AnnotKind::Note => "Text",
             };
             let mut obj = annot.object();
             obj.dict_put("Subtype", PdfObject::new_name(name).map_err(err)?)

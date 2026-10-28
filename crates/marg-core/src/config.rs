@@ -74,6 +74,8 @@ pub struct AnnotationConfig {
     pub author: String,
     pub highlight_opacity: f32,
     pub box_stroke_pt: f32,
+    /// Size of a note's icon.
+    pub note_size_pt: f32,
     /// Save this long after the last annotation change.
     pub autosave_secs: f32,
     /// Undo steps kept per session.
@@ -86,6 +88,7 @@ impl Default for AnnotationConfig {
             author: String::new(),
             highlight_opacity: 0.4,
             box_stroke_pt: 1.5,
+            note_size_pt: 20.0,
             autosave_secs: 2.0,
             undo_steps: 100,
         }

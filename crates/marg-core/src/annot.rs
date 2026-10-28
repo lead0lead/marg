@@ -8,6 +8,8 @@ use crate::text::{BBox, PageText};
 pub enum AnnotKind {
     Highlight,
     Underline,
+    /// A sticky note (PDF `Text`); its one rect is the icon.
+    Note,
 }
 
 /// Everything needed to create an annotation (or recreate it on redo).
@@ -15,7 +17,8 @@ pub enum AnnotKind {
 pub struct AnnotSpec {
     pub page: usize,
     pub kind: AnnotKind,
-    /// One box per line, in points from the page's top-left corner.
+    /// One box per line, in points from the page's top-left corner (for a
+    /// note: the icon).
     pub rects: Vec<BBox>,
     /// RGB, 0–255.
     pub color: [u8; 3],

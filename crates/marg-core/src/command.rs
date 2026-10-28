@@ -83,6 +83,9 @@ pub enum Command {
     /// Highlight the selection in the last-used category and open the
     /// comment editor on it.
     Comment,
+    /// A sticky note at the caret (or the top left of the page), with the
+    /// comment editor open.
+    Note,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -272,6 +275,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ),
     ("annot.edit", Command::AnnotEdit, "edit comment"),
     ("annotate.comment", Command::Comment, "highlight + comment"),
+    ("annotate.note", Command::Note, "new note"),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,
