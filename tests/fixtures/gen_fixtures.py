@@ -119,6 +119,48 @@ def boxes_pdf():
     write_pdf(HERE / "boxes.pdf", objs, 1, 12, "6d61726762786573666978747572653031")
 
 
+def columns_pdf():
+    """Two pages in two columns: reading order, paragraphs, sentences, a hyphenated line break."""
+    left = [
+        "Readers mark what matters. Most",
+        "tools need a mouse for this; marg",
+        "uses hints and a caret instead.",
+        "",
+        "The second paragraph starts here.",
+        "It talks about annota-",
+        "tions in the PDF itself.",
+    ]
+    right = [
+        "The right column comes next in",
+        "reading order. Does selection",
+        "follow it? It should!",
+        "",
+        "A last paragraph ends the page.",
+    ]
+    page1 = b"\n".join(
+        [
+            text_stream(["Two columns: a reading order test"], x=72, y=740, size=14),
+            text_stream(left, x=72, y=700, size=10, leading=14),
+            text_stream(right, x=320, y=700, size=10, leading=14),
+        ]
+    )
+    page2 = text_stream(["Page two has one column of text."], x=72, y=740, size=10)
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+        b" /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
+        4: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+        b" /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+        5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        6: stream(page1),
+        7: stream(page2),
+        8: b"<< /Producer (marg gen_fixtures.py) /Title (marg columns fixture) >>",
+    }
+    write_pdf(HERE / "columns.pdf", objs, 1, 8, "6d617267636f6c756d6e736669787431")
+
+
 if __name__ == "__main__":
     text_pdf()
     boxes_pdf()
+    columns_pdf()

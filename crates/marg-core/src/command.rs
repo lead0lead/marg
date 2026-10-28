@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::caret::Motion;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     ScrollDown,
@@ -30,6 +32,48 @@ pub enum Command {
     Open(String),
     Version,
     DebugToggle,
+    /// Hints on words; the picked word gets the caret.
+    HintCaret,
+    /// Hints on two words; selects from the first to the second.
+    HintSelect,
+    /// Move the caret (Caret and Visual mode).
+    Motion(Motion),
+    /// Start a character-wise selection, or switch to it; in a
+    /// character-wise selection, back to Caret mode.
+    VisualChar,
+    /// The same for a line-wise selection.
+    VisualLine,
+    /// Swap the moving end of the selection.
+    VisualSwap,
+    /// Highlight the selection with category 1–5.
+    Highlight(u8),
+    /// Underline the selection in the last-used category.
+    Underline,
+    /// Ask for the category, then highlight the selection.
+    PickCategory,
+    /// Copy the selected text.
+    Copy,
+    Undo,
+    Redo,
+    /// Save now (`:w`).
+    Save,
+    /// Save marg's version even if the file changed on disk (`:w!`).
+    SaveForce,
+    /// Reload from disk, discarding unsaved changes (`:e!`).
+    Reload,
+    /// Save, close the file and show the recent files list.
+    Close,
+    /// Select the next annotation in reading order.
+    AnnotNext,
+    /// Select the previous annotation.
+    AnnotPrev,
+    /// Delete the selected annotation.
+    AnnotDelete,
+    /// Remove highlights and underlines from the selected text (parts of
+    /// them outside the selection stay).
+    Erase,
+    /// Delete every highlight and underline the selection touches, whole.
+    EraseWhole,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -54,6 +98,144 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("quit.force", Command::QuitForce, "quit without saving"),
     ("version", Command::Version, "show version"),
     ("debug.toggle", Command::DebugToggle, "debug overlay"),
+    ("hint.caret", Command::HintCaret, "hint: place caret"),
+    ("hint.select", Command::HintSelect, "hint: select range"),
+    (
+        "caret.char_next",
+        Command::Motion(Motion::CharNext),
+        "next character",
+    ),
+    (
+        "caret.char_prev",
+        Command::Motion(Motion::CharPrev),
+        "previous character",
+    ),
+    (
+        "caret.word_next",
+        Command::Motion(Motion::WordNext),
+        "next word",
+    ),
+    (
+        "caret.word_prev",
+        Command::Motion(Motion::WordPrev),
+        "previous word",
+    ),
+    (
+        "caret.word_end",
+        Command::Motion(Motion::WordEnd),
+        "end of word",
+    ),
+    (
+        "caret.word_end_prev",
+        Command::Motion(Motion::WordEndPrev),
+        "end of previous word",
+    ),
+    (
+        "caret.line_start",
+        Command::Motion(Motion::LineStart),
+        "start of line",
+    ),
+    (
+        "caret.line_end",
+        Command::Motion(Motion::LineEnd),
+        "end of line",
+    ),
+    (
+        "caret.line_down",
+        Command::Motion(Motion::LineDown),
+        "line down",
+    ),
+    ("caret.line_up", Command::Motion(Motion::LineUp), "line up"),
+    (
+        "caret.sentence_prev",
+        Command::Motion(Motion::SentencePrev),
+        "previous sentence",
+    ),
+    (
+        "caret.sentence_next",
+        Command::Motion(Motion::SentenceNext),
+        "next sentence",
+    ),
+    (
+        "caret.block_prev",
+        Command::Motion(Motion::BlockPrev),
+        "previous paragraph",
+    ),
+    (
+        "caret.block_next",
+        Command::Motion(Motion::BlockNext),
+        "next paragraph",
+    ),
+    ("visual.char", Command::VisualChar, "select characters"),
+    ("visual.line", Command::VisualLine, "select lines"),
+    ("visual.swap", Command::VisualSwap, "swap selection end"),
+    (
+        "annotate.highlight(1)",
+        Command::Highlight(1),
+        "highlight, category 1",
+    ),
+    (
+        "annotate.highlight(2)",
+        Command::Highlight(2),
+        "highlight, category 2",
+    ),
+    (
+        "annotate.highlight(3)",
+        Command::Highlight(3),
+        "highlight, category 3",
+    ),
+    (
+        "annotate.highlight(4)",
+        Command::Highlight(4),
+        "highlight, category 4",
+    ),
+    (
+        "annotate.highlight(5)",
+        Command::Highlight(5),
+        "highlight, category 5",
+    ),
+    ("annotate.underline", Command::Underline, "underline"),
+    (
+        "annotate.pick",
+        Command::PickCategory,
+        "highlight: choose category",
+    ),
+    ("selection.copy", Command::Copy, "copy text"),
+    ("undo", Command::Undo, "undo"),
+    ("redo", Command::Redo, "redo"),
+    ("file.save", Command::Save, "save"),
+    (
+        "file.save_force",
+        Command::SaveForce,
+        "save, overwriting changes on disk",
+    ),
+    (
+        "file.reload",
+        Command::Reload,
+        "reload from disk, discarding changes",
+    ),
+    (
+        "file.close",
+        Command::Close,
+        "close the file, show recent files",
+    ),
+    ("annot.next", Command::AnnotNext, "next annotation"),
+    ("annot.prev", Command::AnnotPrev, "previous annotation"),
+    (
+        "annot.delete",
+        Command::AnnotDelete,
+        "delete the selected annotation",
+    ),
+    (
+        "annotate.erase",
+        Command::Erase,
+        "remove highlights from the selection",
+    ),
+    (
+        "annotate.erase_whole",
+        Command::EraseWhole,
+        "delete highlights the selection touches",
+    ),
 ];
 
 impl Command {
@@ -103,6 +285,10 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
     match word {
         "" => Err("empty command".into()),
         "q" | "quit" => no_arg(Command::Quit),
+        "w" | "write" => no_arg(Command::Save),
+        "w!" | "write!" => no_arg(Command::SaveForce),
+        "e!" | "edit!" => no_arg(Command::Reload),
+        "close" | "bd" => no_arg(Command::Close),
         "q!" | "quit!" => no_arg(Command::QuitForce),
         "e" | "edit" => {
             if rest.is_empty() {
@@ -145,6 +331,12 @@ mod tests {
             Ok(Command::Open("~/papers/a b.pdf".into()))
         );
         assert_eq!(parse_ex("42"), Ok(Command::PageGoto(42)));
+        assert_eq!(parse_ex("w"), Ok(Command::Save));
+        assert_eq!(parse_ex("w!"), Ok(Command::SaveForce));
+        assert_eq!(parse_ex("e!"), Ok(Command::Reload));
+        assert_eq!(parse_ex("close"), Ok(Command::Close));
+        assert_eq!(parse_ex("bd"), Ok(Command::Close));
+        assert_eq!(parse_ex("annotate.highlight(3)"), Ok(Command::Highlight(3)));
         assert_eq!(parse_ex("zoom.in"), Ok(Command::ZoomIn));
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());

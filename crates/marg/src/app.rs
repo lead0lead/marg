@@ -1,25 +1,32 @@
 //! The marg window: page view, status bar and command line.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Event, MouseWheelUnit};
+use marg_core::annot::{
+    AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, erase, parse_color, step_annot,
+};
+use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::Config;
-use marg_core::keymap::{Keymap, Matcher, Outcome};
+use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
+use marg_core::text::{BBox, PageText};
+use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
-use marg_pdf::{DocInfo, DocThread, RenderKey, Request, Response, Scale};
+use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::complete;
 use crate::input;
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
+use crate::select::{self, Caret, Hinting, Purpose};
 use crate::statefile;
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
@@ -36,6 +43,90 @@ struct OpenDoc {
     generation: u64,
     file_name: String,
     view: View,
+    /// Text of each page, once extracted.
+    texts: Vec<Option<PageText>>,
+    /// Pages whose text has been requested.
+    text_requested: HashSet<usize>,
+    /// Annotation edits per page, as confirmed by the document thread.
+    revs: Vec<u32>,
+    /// Annotations drawn by the UI until the page's new render arrives.
+    provisional: Vec<Provisional>,
+    /// Successful annotation edits, and how many of them are saved. The
+    /// document thread answers in order, so a save covers every edit
+    /// confirmed before it.
+    edits: u64,
+    saved_edits: u64,
+    /// A save request is on its way.
+    saving: bool,
+    /// When the next autosave is due.
+    save_due: Option<Instant>,
+    /// The file changed on disk while marg has unsaved changes; saving
+    /// waits for `:w!` or `:e!`.
+    conflict: bool,
+    /// Annotation actions of this session.
+    undo: UndoStack<UndoOp>,
+    /// Object numbers of created annotations, by edit tag.
+    xrefs: HashMap<u64, i32>,
+    /// The annotations of each page, once listed by the document thread.
+    annots: Vec<Option<Vec<AnnotInfo>>>,
+}
+
+/// An undoable annotation action: annotations it deleted and created
+/// (a highlight creates one per page, `x` deletes one, erasing does both).
+#[derive(Default)]
+struct UndoOp {
+    /// (page, object number). Undo puts the same objects back.
+    deleted: Vec<(usize, i32)>,
+    created: Vec<Created>,
+}
+
+/// An annotation created by an undoable action.
+struct Created {
+    spec: AnnotSpec,
+    /// Tag of the edit that created it (most recently, after a redo).
+    tag: u64,
+}
+
+impl OpenDoc {
+    fn unsaved(&self) -> bool {
+        self.edits > self.saved_edits
+    }
+}
+
+/// What to do once the pending save has succeeded.
+#[derive(Debug, Clone, PartialEq)]
+enum AfterSave {
+    Nothing,
+    /// `:w`: say "Saved".
+    Report,
+    Quit,
+    Open(PathBuf),
+    Close,
+}
+
+/// An annotation drawn by the UI while the document thread creates it and
+/// re-renders its page.
+struct Provisional {
+    tag: u64,
+    /// The page revision with the annotation, once confirmed.
+    rev: Option<u32>,
+    spec: AnnotSpec,
+}
+
+impl OpenDoc {
+    fn request_text(&mut self, doc: &DocThread, page: usize) {
+        if page < self.texts.len() && self.texts[page].is_none() && self.text_requested.insert(page)
+        {
+            doc.send(Request::Text(page));
+        }
+    }
+
+    /// Ask for the text of the visible pages that do not have it yet.
+    fn request_visible_text(&mut self, doc: &DocThread) {
+        for p in self.view.visible_pages() {
+            self.request_text(doc, p);
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -56,15 +147,62 @@ enum Mode {
     Normal,
     Command,
     Recent,
+    Hint,
+    Caret,
+    Visual,
+    /// Visual mode, asking which category to highlight with.
+    Category,
+}
+
+impl Mode {
+    fn label(self) -> &'static str {
+        match self {
+            Mode::Normal | Mode::Command => "NORMAL",
+            Mode::Recent => "RECENT",
+            Mode::Hint => "HINT",
+            Mode::Caret => "CARET",
+            Mode::Visual | Mode::Category => "VISUAL",
+        }
+    }
 }
 
 pub struct MargApp {
     config: Config,
     version: String,
     keymap: Keymap,
+    caret_map: Keymap,
+    visual_map: Keymap,
     matcher: Matcher,
     clock: Instant,
     mode: Mode,
+    /// Mode to return to from the command line or hints.
+    return_mode: Mode,
+    /// The page view on screen, as of the last input.
+    area: egui::Rect,
+    caret: Option<Caret>,
+    selection: Option<Selection>,
+    hinting: Option<Hinting>,
+    /// The selection before hints started, restored if they are cancelled.
+    selection_before_hints: Option<Selection>,
+    /// Where a mouse drag started, while the primary button is down.
+    drag_anchor: Option<TextPos>,
+    /// Last primary press: time, position, click count (1–3).
+    last_click: Option<(Instant, egui::Pos2, u8)>,
+    /// Category used by the last highlight; underlines use it.
+    last_category: u8,
+    /// The selected annotation: (page, object number).
+    selected_annot: Option<(usize, i32)>,
+    /// Tag of the next annotation edit.
+    next_tag: u64,
+    /// Annotation author.
+    author: String,
+    after_save: AfterSave,
+    /// `:q!`: close without saving.
+    discard: bool,
+    /// When to ask whether the file changed on disk next.
+    next_disk_check: Instant,
+    /// The pending open is a reload of the current file.
+    reloading: bool,
     cmdline: LineEdit,
     doc: DocThread,
     open: Option<OpenDoc>,
@@ -126,7 +264,11 @@ impl MargApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
-        let (keymap, warnings) = Keymap::normal(&s.config.keys.normal);
+        let (keymap, mut warnings) = Keymap::build(KeyMode::Normal, &s.config.keys);
+        let (caret_map, w) = Keymap::build(KeyMode::Caret, &s.config.keys);
+        warnings.extend(w);
+        let (visual_map, w) = Keymap::build(KeyMode::Visual, &s.config.keys);
+        warnings.extend(w);
         for w in &warnings {
             log::warn!("{w}");
         }
@@ -146,14 +288,33 @@ impl MargApp {
                 Some(RecentList::new(&state, s.config.ui.recent_files_max)),
             ),
         };
+        let author = annotation_author(&s.config.annotation.author);
         let mut app = Self {
             cache: PageCache::new(&s.config.render),
             config: s.config,
             version: s.version,
             keymap,
+            caret_map,
+            visual_map,
             matcher: Matcher::default(),
             clock: Instant::now(),
             mode,
+            return_mode: Mode::Normal,
+            area: egui::Rect::NOTHING,
+            caret: None,
+            selection: None,
+            hinting: None,
+            selection_before_hints: None,
+            drag_anchor: None,
+            last_click: None,
+            last_category: 1,
+            selected_annot: None,
+            next_tag: 1,
+            after_save: AfterSave::Nothing,
+            discard: false,
+            next_disk_check: Instant::now(),
+            reloading: false,
+            author,
             cmdline: LineEdit::default(),
             doc,
             open: None,
@@ -222,11 +383,23 @@ impl MargApp {
                             t.log(&format!("document opened (open took {took:?})"));
                         }
                         self.save_state();
+                        if std::mem::take(&mut self.reloading) {
+                            self.show(Level::Info, "Reloaded from disk".into());
+                        }
+                        self.after_save = AfterSave::Nothing;
                         self.cache.clear();
                         self.last_request.clear();
                         self.mode = Mode::Normal;
                         self.recent = None;
+                        self.caret = None;
+                        self.selection = None;
+                        self.hinting = None;
                         let doc = self.open_doc(info, generation);
+                        self.selected_annot = None;
+                        self.doc.send(Request::Annots {
+                            pages: (0..doc.view.page_count()).collect(),
+                            urgent: false,
+                        });
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
                             "{} — marg",
                             doc.file_name
@@ -236,7 +409,10 @@ impl MargApp {
                         // if marg does not exit cleanly.
                         self.save_state();
                     }
-                    Err(e) => self.error(format!("Cannot open: {e}")),
+                    Err(e) => {
+                        self.reloading = false;
+                        self.error(format!("Cannot open: {e}"));
+                    }
                 },
                 Response::Rendered {
                     generation,
@@ -256,6 +432,144 @@ impl MargApp {
                             self.cache.insert(ctx, key, px);
                         }
                         Err(e) => log::error!("render {key:?} failed: {e}"),
+                    }
+                }
+                Response::Edited {
+                    generation,
+                    tag,
+                    page,
+                    rev,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(xref) => {
+                            open.xrefs.insert(tag, xref);
+                            self.doc.send(Request::Annots {
+                                pages: vec![page],
+                                urgent: true,
+                            });
+                            open.revs[page] = open.revs[page].max(rev);
+                            open.edits += 1;
+                            open.save_due = Some(
+                                Instant::now()
+                                    + Duration::from_secs_f32(self.config.annotation.autosave_secs),
+                            );
+                            for p in open.provisional.iter_mut().filter(|p| p.tag == tag) {
+                                p.rev = Some(rev);
+                            }
+                        }
+                        Err(e) => {
+                            open.provisional.retain(|p| p.tag != tag);
+                            self.error(format!("Annotation failed: {e}"));
+                        }
+                    }
+                }
+                Response::DiskChanged { generation } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    if open.unsaved() {
+                        open.conflict = true;
+                        self.show(
+                            Level::Warn,
+                            "File changed on disk; :w! keeps marg's version, :e! reloads".into(),
+                        );
+                    } else {
+                        self.reload();
+                    }
+                }
+                Response::Saved { generation, result } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    open.saving = false;
+                    let after = std::mem::replace(&mut self.after_save, AfterSave::Nothing);
+                    match result {
+                        Ok(_) => {
+                            open.saved_edits = open.edits;
+                            open.conflict = false;
+                            if !open.unsaved() {
+                                open.save_due = None;
+                            }
+                            match after {
+                                AfterSave::Nothing => {}
+                                AfterSave::Report => self.show(Level::Info, "Saved".into()),
+                                AfterSave::Quit => {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close)
+                                }
+                                AfterSave::Open(path) => self.doc.send(Request::Open(path)),
+                                AfterSave::Close => self.close_doc(ctx),
+                            }
+                        }
+                        Err(e) => {
+                            let what = match after {
+                                AfterSave::Quit => "Not quitting: ",
+                                AfterSave::Open(_) => "Not opening the other file: ",
+                                AfterSave::Close => "Not closing: ",
+                                _ => "",
+                            };
+                            let msg = match e {
+                                SaveError::ChangedOnDisk => {
+                                    open.conflict = true;
+                                    format!(
+                                        "{what}file changed on disk; :w! keeps marg's version, :e! reloads"
+                                    )
+                                }
+                                SaveError::Failed(e) => {
+                                    open.save_due = Some(
+                                        Instant::now()
+                                            + Duration::from_secs_f32(
+                                                self.config.annotation.autosave_secs,
+                                            ),
+                                    );
+                                    format!("{what}save failed: {e}; will retry")
+                                }
+                            };
+                            self.error(msg);
+                        }
+                    }
+                }
+                Response::Annots {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(list) => {
+                            if self.selected_annot.is_some_and(|(p, x)| {
+                                p == page && !list.iter().any(|a| a.xref == x)
+                            }) {
+                                self.selected_annot = None;
+                            }
+                            open.annots[page] = Some(list);
+                        }
+                        Err(e) => {
+                            log::error!("annotations of page {} failed: {e}", page + 1)
+                        }
+                    }
+                }
+                Response::Text {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(text) => open.texts[page] = Some(text),
+                        Err(e) => log::error!("text of page {} failed: {e}", page + 1),
                     }
                 }
             }
@@ -305,6 +619,18 @@ impl MargApp {
             key,
             generation,
             file_name,
+            texts: vec![None; view.page_count()],
+            text_requested: HashSet::new(),
+            revs: vec![0; view.page_count()],
+            provisional: Vec::new(),
+            edits: 0,
+            saved_edits: 0,
+            saving: false,
+            save_due: None,
+            conflict: false,
+            undo: UndoStack::new(self.config.annotation.undo_steps),
+            xrefs: HashMap::new(),
+            annots: vec![None; view.page_count()],
             view,
         }
     }
@@ -312,6 +638,7 @@ impl MargApp {
     /// Process this frame's input. `area` is the page view on screen; zoom
     /// anchors are relative to it.
     fn handle_input(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        self.area = area;
         let events = ctx.input(|i| i.events.clone());
         let pointer = ctx.input(|i| i.pointer.hover_pos()).map(|p| p - area.min);
         let mut skip_text = false;
@@ -337,6 +664,13 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
+                _ if self.mode == Mode::Hint => self.hint_event(e),
+                _ if self.mode == Mode::Category => self.category_event(e),
+                Event::PointerButton { .. } | Event::PointerMoved(_)
+                    if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
+                {
+                    self.mouse_event(e)
+                }
                 Event::Text(_) if std::mem::take(&mut skip_text) => {}
                 _ => {
                     if let Some(k) = input::key_press(e) {
@@ -347,6 +681,7 @@ impl MargApp {
                 }
             }
         }
+        self.drag_scroll(ctx, area);
         if self
             .matcher
             .expire(self.now_ms(), self.config.ui.sequence_timeout_ms)
@@ -416,10 +751,645 @@ impl MargApp {
     fn normal_key(&mut self, ctx: &egui::Context, key: KeyPress) {
         let now = self.now_ms();
         let timeout = self.config.ui.sequence_timeout_ms;
-        match self.matcher.feed(&self.keymap, key, now, timeout) {
+        let map = match self.mode {
+            Mode::Caret => &self.caret_map,
+            Mode::Visual => &self.visual_map,
+            _ => &self.keymap,
+        };
+        match self.matcher.feed(map, key, now, timeout) {
             Outcome::Run { command, count } => self.run(ctx, command, count),
+            Outcome::Unbound if key == KeyPress::named(Named::Esc) => {
+                if matches!(self.mode, Mode::Caret | Mode::Visual) {
+                    self.leave_text_modes();
+                } else {
+                    self.selected_annot = None;
+                }
+            }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
         }
+    }
+
+    /// Back to Normal mode: no caret, no selection.
+    fn leave_text_modes(&mut self) {
+        self.mode = Mode::Normal;
+        self.caret = None;
+        self.selection = None;
+    }
+
+    fn start_hints(&mut self, purpose: Purpose) {
+        let Some(open) = &self.open else { return };
+        match Hinting::start(
+            purpose,
+            &open.view,
+            self.area,
+            &open.texts,
+            &self.config.hints,
+        ) {
+            Ok(h) => {
+                if self.mode != Mode::Hint {
+                    self.return_mode = self.mode;
+                    self.selection_before_hints = self.selection;
+                }
+                self.hinting = Some(h);
+                self.mode = Mode::Hint;
+            }
+            Err(msg) => {
+                if self.mode == Mode::Hint {
+                    self.cancel_hints();
+                }
+                self.show(Level::Info, msg.into());
+            }
+        }
+    }
+
+    fn cancel_hints(&mut self) {
+        self.hinting = None;
+        self.mode = self.return_mode;
+        self.selection = self.selection_before_hints.take();
+    }
+
+    fn hint_event(&mut self, e: &Event) {
+        let (Some(open), Some(h)) = (&self.open, &mut self.hinting) else {
+            return;
+        };
+        match e {
+            Event::Text(t) => {
+                let picked = t
+                    .chars()
+                    .find_map(|c| h.push(c, &open.texts, &self.config.hints));
+                if let Some((page, r)) = picked {
+                    self.hint_picked(page, r);
+                }
+            }
+            Event::Key { pressed: true, .. } => match input::key_press(e).map(|k| k.code) {
+                Some(KeyCode::Named(Named::Esc)) => self.cancel_hints(),
+                Some(KeyCode::Named(Named::Backspace)) => {
+                    h.pop();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn hint_picked(&mut self, page: usize, word: std::ops::Range<usize>) {
+        let Some(h) = self.hinting.take() else { return };
+        let start = TextPos::new(page, word.start);
+        let end = TextPos::new(page, word.end - 1);
+        match h.purpose {
+            Purpose::Caret => {
+                self.selection = None;
+                self.set_caret(start);
+                self.mode = Mode::Caret;
+            }
+            Purpose::SelectStart => {
+                // Show the first word while the second is picked.
+                self.selection = Some(Selection::new(start, end));
+                self.start_hints(Purpose::SelectEnd(start, end));
+            }
+            Purpose::SelectEnd(s, e) => {
+                self.selection = Some(Selection::new(s.min(start), e.max(end)));
+                self.set_caret(e.max(end));
+                self.mode = Mode::Visual;
+            }
+        }
+    }
+
+    /// Put the caret at `pos` and load the text of the pages around it.
+    fn set_caret(&mut self, pos: TextPos) {
+        let caret = Caret { pos, want_x: None };
+        self.caret = Some(caret);
+        if let Some(open) = &mut self.open {
+            select::keep_visible(&mut open.view, &caret, &open.texts);
+            open.request_text(&self.doc, pos.page.saturating_sub(1));
+            open.request_text(&self.doc, pos.page + 1);
+        }
+    }
+
+    fn move_caret(&mut self, motion: Motion, count: u32) {
+        let (Some(open), Some(c)) = (&self.open, self.caret) else {
+            return;
+        };
+        let (pos, want_x) = caret::apply_n(&open.texts, c.pos, motion, c.want_x, count);
+        self.set_caret(pos);
+        if let Some(c) = &mut self.caret {
+            c.want_x = want_x;
+        }
+        if let Some(sel) = &mut self.selection {
+            sel.head = pos;
+        }
+    }
+
+    /// `v` / `V`: start a selection from Caret mode, switch its kind, or end
+    /// it when it already has that kind.
+    fn visual(&mut self, linewise: bool) {
+        match (self.mode, &mut self.selection) {
+            (Mode::Caret, _) => {
+                let Some(c) = self.caret else { return };
+                self.selection = Some(Selection {
+                    linewise,
+                    ..Selection::new(c.pos, c.pos)
+                });
+                self.mode = Mode::Visual;
+            }
+            (Mode::Visual, Some(sel)) if sel.linewise == linewise => {
+                self.selection = None;
+                self.mode = Mode::Caret;
+            }
+            (Mode::Visual, Some(sel)) => sel.linewise = linewise,
+            _ => {}
+        }
+    }
+
+    /// The character under a screen position, if its page's text is loaded
+    /// (otherwise the text is requested).
+    fn char_at_screen(&mut self, pos: egui::Pos2) -> Option<TextPos> {
+        let open = self.open.as_mut()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        open.request_text(&self.doc, d.page);
+        let t = open.texts[d.page].as_ref()?;
+        t.char_at(d.x, d.y).map(|i| TextPos::new(d.page, i))
+    }
+
+    /// Mouse selection: drag selects characters, a double click a word, a
+    /// triple click a line. The result works like a keyboard selection.
+    fn mouse_event(&mut self, e: &Event) {
+        match *e {
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                ..
+            } if self.area.contains(pos) => {
+                let now = Instant::now();
+                let multi = Duration::from_millis(self.config.ui.multi_click_ms);
+                let count = match self.last_click {
+                    Some((t, p, n)) if now - t < multi && p.distance(pos) < 4.0 => n % 3 + 1,
+                    _ => 1,
+                };
+                self.last_click = Some((now, pos, count));
+                if count == 1 {
+                    // A click selects the annotation under it (or none).
+                    let hit = self.annot_at_screen(pos);
+                    self.leave_text_modes();
+                    self.select_annot(hit.as_ref());
+                }
+                let Some(at) = self.char_at_screen(pos) else {
+                    return;
+                };
+                match count {
+                    1 => self.drag_anchor = Some(at),
+                    2 => {
+                        let Some(t) = self.open.as_ref().and_then(|o| o.texts[at.page].as_ref())
+                        else {
+                            return;
+                        };
+                        let word = t
+                            .words(t.line_of(at.idx))
+                            .into_iter()
+                            .find(|w| w.contains(&at.idx));
+                        if let Some(w) = word {
+                            let (a, b) = (
+                                TextPos::new(at.page, w.start),
+                                TextPos::new(at.page, w.end - 1),
+                            );
+                            self.mouse_select(Selection::new(a, b));
+                        }
+                    }
+                    _ => self.mouse_select(Selection {
+                        linewise: true,
+                        ..Selection::new(at, at)
+                    }),
+                }
+            }
+            Event::PointerButton {
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            } => self.drag_anchor = None,
+            Event::PointerMoved(pos) => {
+                let Some(anchor) = self.drag_anchor else {
+                    return;
+                };
+                if let Some(at) = self.char_at_screen(pos)
+                    && (at != anchor || self.selection.is_some())
+                {
+                    self.mouse_select(Selection::new(anchor, at));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// While a mouse selection is dragged into the top or bottom edge zone
+    /// (or past it), scroll and extend the selection, every frame.
+    fn drag_scroll(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        let Some(anchor) = self.drag_anchor else {
+            return;
+        };
+        let (pos, down, dt) = ctx.input(|i| {
+            (
+                i.pointer.latest_pos(),
+                i.pointer.primary_down(),
+                i.stable_dt.min(0.1),
+            )
+        });
+        let (Some(p), true) = (pos, down) else { return };
+        let edge = self.config.ui.drag_scroll_edge_px;
+        let over = if p.y < area.min.y + edge {
+            p.y - (area.min.y + edge)
+        } else if p.y > area.max.y - edge {
+            p.y - (area.max.y - edge)
+        } else {
+            return;
+        };
+        let Some(open) = &mut self.open else { return };
+        open.view
+            .scroll_by(0.0, over * self.config.ui.drag_scroll_rate * dt);
+        let inside = egui::pos2(p.x, p.y.clamp(area.min.y + 1.0, area.max.y - 1.0));
+        if let Some(at) = self.char_at_screen(inside) {
+            self.mouse_select(Selection::new(anchor, at));
+        }
+        ctx.request_repaint();
+    }
+
+    fn mouse_select(&mut self, sel: Selection) {
+        self.selected_annot = None;
+        self.selection = Some(sel);
+        self.caret = Some(Caret {
+            pos: sel.head,
+            want_x: None,
+        });
+        self.mode = Mode::Visual;
+    }
+
+    /// Highlight or underline the selection in `category` (1-based), one
+    /// annotation per page, and leave Visual mode.
+    fn annotate(&mut self, kind: AnnotKind, category: u8) {
+        let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
+            return;
+        };
+        let Some(cat) = self.config.categories.get(usize::from(category) - 1) else {
+            self.error(format!("No category {category}"));
+            return;
+        };
+        let Some(color) = parse_color(&cat.color) else {
+            let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
+            self.error(msg);
+            return;
+        };
+        let mut by_page: BTreeMap<usize, Vec<BBox>> = BTreeMap::new();
+        for (page, b) in sel.rects(&open.texts) {
+            by_page.entry(page).or_default().push(b);
+        }
+        let mut group = Vec::new();
+        for (page, rects) in by_page {
+            let spec = AnnotSpec {
+                page,
+                kind,
+                rects,
+                color,
+                opacity: self.config.annotation.highlight_opacity,
+                subject: cat.name.clone(),
+                author: self.author.clone(),
+                contents: None,
+            };
+            let tag = self.next_tag;
+            self.next_tag += 1;
+            open.provisional.push(Provisional {
+                tag,
+                rev: None,
+                spec: spec.clone(),
+            });
+            self.doc.send(Request::Edit {
+                tag,
+                edit: Edit::Create(spec.clone()),
+            });
+            group.push(Created { spec, tag });
+        }
+        open.undo.push(UndoOp {
+            deleted: Vec::new(),
+            created: group,
+        });
+        self.last_category = category;
+        self.leave_text_modes();
+    }
+
+    /// Undo the last annotation action, or redo the last undone one.
+    fn undo(&mut self, redo: bool) {
+        let Some(open) = &mut self.open else { return };
+        let step = if redo {
+            open.undo.redo()
+        } else {
+            open.undo.undo()
+        };
+        let Some(op) = step else {
+            let msg = if redo {
+                "Nothing to redo"
+            } else {
+                "Nothing to undo"
+            };
+            self.show(Level::Info, msg.into());
+            return;
+        };
+        let mut edits = Vec::new();
+        if redo {
+            for &(page, xref) in &op.deleted {
+                edits.push(Edit::Delete { page, xref });
+            }
+            // Create again (new object numbers).
+            for c in op.created.iter_mut() {
+                c.tag = self.next_tag;
+                self.next_tag += 1;
+                open.provisional.push(Provisional {
+                    tag: c.tag,
+                    rev: None,
+                    spec: c.spec.clone(),
+                });
+            }
+        } else {
+            let created: Option<Vec<Edit>> = op
+                .created
+                .iter()
+                .map(|c| {
+                    open.xrefs.get(&c.tag).map(|&xref| Edit::Delete {
+                        page: c.spec.page,
+                        xref,
+                    })
+                })
+                .collect();
+            let Some(created) = created else {
+                // The creation has not been confirmed yet; try again later.
+                open.undo.redo();
+                return;
+            };
+            edits.extend(created);
+            for &(page, xref) in &op.deleted {
+                edits.push(Edit::Restore { page, xref });
+            }
+        }
+        let mut tagged: Vec<(u64, Edit)> = Vec::new();
+        for e in edits {
+            tagged.push((self.next_tag, e));
+            self.next_tag += 1;
+        }
+        if redo {
+            for c in &op.created {
+                tagged.push((c.tag, Edit::Create(c.spec.clone())));
+            }
+        }
+        let edits = tagged;
+        for (tag, edit) in edits {
+            self.doc.send(Request::Edit { tag, edit });
+        }
+        self.selected_annot = None;
+        self.show(Level::Info, if redo { "Redone" } else { "Undone" }.into());
+    }
+
+    /// All annotations listed so far.
+    fn known_annots(&self) -> Vec<AnnotInfo> {
+        self.open
+            .as_ref()
+            .map(|o| o.annots.iter().flatten().flatten().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Select an annotation (or none), and say what it is.
+    fn select_annot(&mut self, a: Option<&AnnotInfo>) {
+        self.selected_annot = a.map(|a| (a.page, a.xref));
+        let Some(a) = a else { return };
+        let mut text = format!("{} p. {}", a.kind, a.page + 1);
+        if let Some(s) = &a.subject {
+            text.push_str(&format!("  {s}"));
+        }
+        if let Some(c) = &a.contents {
+            let c: String = c.chars().take(80).collect();
+            text.push_str(&format!("  “{}”", c.replace('\n', " ")));
+        }
+        self.show(Level::Info, text);
+    }
+
+    /// `]a` / `[a`: the next or previous annotation in reading order, from
+    /// the selected one or from the top of the view; scrolls to it.
+    fn step_annotation(&mut self, forward: bool, count: u32) {
+        let Some(open) = &self.open else { return };
+        let all = self.known_annots();
+        let mut from = match self.selected_annot {
+            Some((page, xref)) => AnnotFrom::Selected { page, xref },
+            None => {
+                let top = open.view.position();
+                AnnotFrom::Pos {
+                    page: top.page,
+                    y: top.y,
+                }
+            }
+        };
+        let mut found = None;
+        for _ in 0..count.max(1) {
+            match step_annot(&all, from, forward) {
+                Some(a) => {
+                    from = AnnotFrom::Selected {
+                        page: a.page,
+                        xref: a.xref,
+                    };
+                    found = Some(a.clone());
+                }
+                None => break,
+            }
+        }
+        let Some(a) = found else {
+            let loading = open.annots.iter().any(|p| p.is_none());
+            let msg = match (loading, forward) {
+                (true, _) => "Still reading the annotations",
+                (false, true) => "No more annotations below",
+                (false, false) => "No more annotations above",
+            };
+            self.show(Level::Info, msg.into());
+            return;
+        };
+        if let Some(open) = &mut self.open {
+            let v = &mut open.view;
+            let r = select::screen_rect(
+                v,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::from(v.viewport())),
+                a.page,
+                a.rect,
+            );
+            let (vw, vh) = v.viewport();
+            if r.min.y < 0.0 || r.max.y > vh || r.max.x < 0.0 || r.min.x > vw {
+                let x = r.min.x.clamp(0.0, vw);
+                v.put_doc_pos_at(
+                    marg_core::view::DocPos {
+                        page: a.page,
+                        x: a.rect.x0,
+                        y: a.rect.y0,
+                    },
+                    x,
+                    vh / 3.0,
+                );
+            }
+        }
+        self.leave_text_modes();
+        self.select_annot(Some(&a));
+    }
+
+    /// Visual `d`: remove highlights and underlines from the selected text.
+    /// The parts of them outside the selection become new annotations with
+    /// the same color, category and author (the comment stays with the first
+    /// part). One undo step.
+    /// With `whole` (Visual `D`), the touched annotations are deleted
+    /// completely instead.
+    fn erase_selection(&mut self, whole: bool) {
+        let (Some(open), Some(sel)) = (&mut self.open, self.selection) else {
+            return;
+        };
+        let mut by_page: BTreeMap<usize, HashSet<usize>> = BTreeMap::new();
+        for (page, _, r) in sel.line_parts(&open.texts) {
+            by_page.entry(page).or_default().extend(r);
+        }
+        if by_page.keys().any(|&p| open.annots[p].is_none()) {
+            self.show(Level::Info, "Still reading the annotations".into());
+            return;
+        }
+        let mut op = UndoOp::default();
+        let mut edits = Vec::new();
+        for (page, selected) in &by_page {
+            let (Some(list), Some(t)) = (&open.annots[*page], &open.texts[*page]) else {
+                continue;
+            };
+            for a in list {
+                let kind = match a.kind.as_str() {
+                    "Highlight" => AnnotKind::Highlight,
+                    "Underline" => AnnotKind::Underline,
+                    _ => continue,
+                };
+                let Some(groups) = erase(a, t, selected) else {
+                    continue;
+                };
+                op.deleted.push((*page, a.xref));
+                edits.push((
+                    self.next_tag,
+                    Edit::Delete {
+                        page: *page,
+                        xref: a.xref,
+                    },
+                ));
+                self.next_tag += 1;
+                let groups = if whole { Vec::new() } else { groups };
+                for (i, rects) in groups.into_iter().enumerate() {
+                    let spec = AnnotSpec {
+                        page: *page,
+                        kind,
+                        rects,
+                        color: a.color.unwrap_or([0xFF, 0xD4, 0x00]),
+                        opacity: a.opacity,
+                        subject: a.subject.clone().unwrap_or_default(),
+                        author: a.author.clone().unwrap_or_else(|| self.author.clone()),
+                        contents: if i == 0 { a.contents.clone() } else { None },
+                    };
+                    let tag = self.next_tag;
+                    self.next_tag += 1;
+                    open.provisional.push(Provisional {
+                        tag,
+                        rev: None,
+                        spec: spec.clone(),
+                    });
+                    edits.push((tag, Edit::Create(spec.clone())));
+                    op.created.push(Created { spec, tag });
+                }
+            }
+        }
+        if op.deleted.is_empty() {
+            self.show(Level::Info, "Nothing highlighted in the selection".into());
+            return;
+        }
+        let n = op.deleted.len();
+        open.undo.push(op);
+        for (tag, edit) in edits {
+            self.doc.send(Request::Edit { tag, edit });
+        }
+        self.leave_text_modes();
+        let what = if n == 1 { "annotation" } else { "annotations" };
+        let verb = if whole { "Deleted" } else { "Erased from" };
+        self.show(Level::Info, format!("{verb} {n} {what} (u to undo)"));
+    }
+
+    /// `x`: delete the selected annotation (undo puts it back).
+    fn delete_annotation(&mut self) {
+        let Some((page, xref)) = self.selected_annot.take() else {
+            self.show(
+                Level::Info,
+                "No annotation selected (]a, [a or click)".into(),
+            );
+            return;
+        };
+        let Some(open) = &mut self.open else { return };
+        open.undo.push(UndoOp {
+            deleted: vec![(page, xref)],
+            created: Vec::new(),
+        });
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        self.doc.send(Request::Edit {
+            tag,
+            edit: Edit::Delete { page, xref },
+        });
+        self.show(Level::Info, "Deleted (u to undo)".into());
+    }
+
+    /// The annotation under a screen position, if any.
+    fn annot_at_screen(&self, pos: egui::Pos2) -> Option<AnnotInfo> {
+        let open = self.open.as_ref()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        let list = open.annots[d.page].as_ref()?;
+        annot_at(list, d.page, d.x, d.y).cloned()
+    }
+
+    /// The category prompt: a digit highlights with that category, Enter
+    /// with the last one, Esc goes back to the selection.
+    fn category_event(&mut self, e: &Event) {
+        let Some(k) = input::key_press(e) else { return };
+        match k.code {
+            KeyCode::Char(c) if !k.ctrl && !k.alt => {
+                let n = self.config.categories.len().min(9);
+                if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
+                    self.annotate(AnnotKind::Highlight, d as u8);
+                }
+            }
+            KeyCode::Named(Named::Enter) => {
+                self.annotate(AnnotKind::Highlight, self.last_category);
+            }
+            KeyCode::Named(Named::Esc) => self.mode = Mode::Visual,
+            _ => {}
+        }
+    }
+
+    /// The status line of the category prompt.
+    fn category_prompt(&self) -> String {
+        let mut out = String::from("highlight:");
+        for (i, c) in self.config.categories.iter().take(9).enumerate() {
+            out.push_str(&format!("  {} {}", i + 1, c.name));
+        }
+        if let Some(last) = self
+            .config
+            .categories
+            .get(usize::from(self.last_category) - 1)
+        {
+            out.push_str(&format!("   ⏎ {}", last.name));
+        }
+        out
+    }
+
+    fn copy_selection(&mut self, ctx: &egui::Context) {
+        let (Some(open), Some(sel)) = (&self.open, &self.selection) else {
+            return;
+        };
+        let text = sel.text(&open.texts);
+        let n = text.chars().count();
+        ctx.copy_text(text);
+        self.show(Level::Info, format!("Copied {n} characters"));
     }
 
     fn cmdline_event(&mut self, ctx: &egui::Context, e: &Event) {
@@ -428,9 +1398,9 @@ impl MargApp {
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {
-                    KeyCode::Named(Named::Esc) => self.mode = Mode::Normal,
+                    KeyCode::Named(Named::Esc) => self.mode = self.return_mode,
                     KeyCode::Named(Named::Enter) => {
-                        self.mode = Mode::Normal;
+                        self.mode = self.return_mode;
                         let line = self.cmdline.submit();
                         match parse_ex(&line) {
                             Ok(c) => self.run(ctx, c, None),
@@ -438,7 +1408,7 @@ impl MargApp {
                         }
                     }
                     KeyCode::Named(Named::Backspace) if self.cmdline.is_empty() => {
-                        self.mode = Mode::Normal;
+                        self.mode = self.return_mode;
                     }
                     KeyCode::Named(Named::Backspace) => self.cmdline.backspace(),
                     KeyCode::Named(Named::Delete) => self.cmdline.delete(),
@@ -477,12 +1447,54 @@ impl MargApp {
         let n = count.unwrap_or(1).max(1);
         match command {
             Command::CommandLine => {
+                self.return_mode = self.mode;
                 self.mode = Mode::Command;
                 self.cmdline.clear();
                 return;
             }
-            Command::Quit | Command::QuitForce => {
+            Command::Quit => {
+                if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+                    self.save(false, AfterSave::Quit);
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                return;
+            }
+            Command::QuitForce => {
+                self.discard = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+            Command::Save | Command::SaveForce => {
+                self.save(command == Command::SaveForce, AfterSave::Report);
+                return;
+            }
+            Command::Reload => {
+                self.reload();
+                return;
+            }
+            Command::AnnotNext | Command::AnnotPrev => {
+                self.step_annotation(command == Command::AnnotNext, n);
+                return;
+            }
+            Command::AnnotDelete => {
+                self.delete_annotation();
+                return;
+            }
+            Command::Erase | Command::EraseWhole => {
+                self.erase_selection(command == Command::EraseWhole);
+                return;
+            }
+            Command::Close => {
+                if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+                    self.save(false, AfterSave::Close);
+                } else {
+                    self.close_doc(ctx);
+                }
+                return;
+            }
+            Command::Undo | Command::Redo => {
+                self.undo(command == Command::Redo);
                 return;
             }
             Command::Open(path) => {
@@ -496,6 +1508,48 @@ impl MargApp {
             }
             Command::DebugToggle => {
                 self.debug = !self.debug;
+                return;
+            }
+            Command::HintCaret => {
+                self.start_hints(Purpose::Caret);
+                return;
+            }
+            Command::HintSelect => {
+                self.start_hints(Purpose::SelectStart);
+                return;
+            }
+            Command::Motion(m) => {
+                self.move_caret(m, n);
+                return;
+            }
+            Command::VisualChar | Command::VisualLine => {
+                self.visual(command == Command::VisualLine);
+                return;
+            }
+            Command::VisualSwap => {
+                if let Some(sel) = &mut self.selection {
+                    sel.swap();
+                    let head = sel.head;
+                    self.set_caret(head);
+                }
+                return;
+            }
+            Command::Copy => {
+                self.copy_selection(ctx);
+                return;
+            }
+            Command::Highlight(n) => {
+                self.annotate(AnnotKind::Highlight, n);
+                return;
+            }
+            Command::PickCategory => {
+                if self.selection.is_some() {
+                    self.mode = Mode::Category;
+                }
+                return;
+            }
+            Command::Underline => {
+                self.annotate(AnnotKind::Underline, self.last_category);
                 return;
             }
             _ => {}
@@ -531,6 +1585,27 @@ impl MargApp {
             | Command::Open(_)
             | Command::Version
             | Command::DebugToggle => {}
+            Command::HintCaret
+            | Command::HintSelect
+            | Command::Motion(_)
+            | Command::VisualChar
+            | Command::VisualLine
+            | Command::VisualSwap
+            | Command::Copy
+            | Command::Highlight(_)
+            | Command::Underline
+            | Command::PickCategory
+            | Command::Save
+            | Command::SaveForce
+            | Command::Reload
+            | Command::Close
+            | Command::AnnotNext
+            | Command::AnnotPrev
+            | Command::AnnotDelete
+            | Command::Erase
+            | Command::EraseWhole
+            | Command::Undo
+            | Command::Redo => {}
         }
     }
 
@@ -540,17 +1615,95 @@ impl MargApp {
             self.error(format!("No such file: {}", path.display()));
             return;
         }
-        // Phase 1 has nothing to save before switching files.
         self.start_page = None;
+        if self.open.as_ref().is_some_and(|o| o.unsaved()) {
+            self.save(false, AfterSave::Open(path));
+        } else {
+            self.doc.send(Request::Open(path));
+        }
+    }
+
+    /// Close the file (saved or not: callers save first) and show the
+    /// recent files list.
+    fn close_doc(&mut self, ctx: &egui::Context) {
+        if self.open.is_none() {
+            return;
+        }
+        self.selected_annot = None;
+        self.save_state();
+        self.doc.send(Request::Close);
+        self.open = None;
+        self.cache.clear();
+        self.last_request.clear();
+        self.caret = None;
+        self.selection = None;
+        self.hinting = None;
+        self.matcher.reset();
+        self.recent = Some(RecentList::new(
+            &self.state,
+            self.config.ui.recent_files_max,
+        ));
+        self.mode = Mode::Recent;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("marg".into()));
+    }
+
+    /// Open the current file again from disk, keeping the position and
+    /// dropping unsaved changes.
+    fn reload(&mut self) {
+        let Some(open) = &self.open else { return };
+        let path = open.info.path.clone();
+        self.save_state();
+        self.reloading = true;
         self.doc.send(Request::Open(path));
     }
 
-    fn status_left(&self) -> String {
-        if self.mode == Mode::Recent {
-            return "RECENT".into();
+    /// Ask the document thread whether the file changed, every
+    /// `file_check_secs`.
+    fn check_disk(&mut self, ctx: &egui::Context) {
+        if self.open.is_none() {
+            return;
         }
-        let Some(open) = &self.open else {
-            return "NORMAL".into();
+        let now = Instant::now();
+        let every = Duration::from_secs_f32(self.config.ui.file_check_secs);
+        if now >= self.next_disk_check {
+            self.doc.send(Request::CheckDisk);
+            self.next_disk_check = now + every;
+        }
+        ctx.request_repaint_after(self.next_disk_check - now);
+    }
+
+    /// Ask the document thread to save, then do `after` if it worked.
+    fn save(&mut self, force: bool, after: AfterSave) {
+        let Some(open) = &mut self.open else { return };
+        if after == AfterSave::Report && !open.unsaved() && !force {
+            self.show(Level::Info, "Nothing to save".into());
+            return;
+        }
+        self.after_save = after;
+        open.saving = true;
+        self.doc.send(Request::Save { force });
+    }
+
+    /// Autosave once it is due, unless a save is running or the file
+    /// changed on disk.
+    fn autosave(&mut self, ctx: &egui::Context) {
+        let Some(open) = &self.open else { return };
+        let Some(due) = open.save_due else { return };
+        if open.saving || open.conflict || !open.unsaved() {
+            return;
+        }
+        let now = Instant::now();
+        if now >= due {
+            self.save(false, AfterSave::Nothing);
+        } else {
+            ctx.request_repaint_after(due - now);
+        }
+    }
+
+    fn status_left(&self) -> String {
+        let mode = self.mode.label();
+        let Some(open) = self.open.as_ref().filter(|_| self.mode != Mode::Recent) else {
+            return mode.into();
         };
         let v = &open.view;
         let page = v.current_page();
@@ -562,9 +1715,10 @@ impl MargApp {
             _ => format!("{}/{count}", page + 1),
         };
         format!(
-            "NORMAL  {}  {page_text}  {:.0}%  continuous",
+            "{mode}  {}  {page_text}  {:.0}%  continuous{}",
             open.file_name,
-            v.zoom() * 100.0
+            v.zoom() * 100.0,
+            if open.unsaved() { "  ●" } else { "" }
         )
     }
 
@@ -580,7 +1734,12 @@ impl MargApp {
                 let (before, after) = line.split_at(at);
                 ui.label(text(&format!(":{before}▏{after}"), STATUS_FG));
             } else {
-                ui.label(text(&self.status_left(), STATUS_FG));
+                let left = if self.mode == Mode::Category {
+                    self.category_prompt()
+                } else {
+                    self.status_left()
+                };
+                ui.label(text(&left, STATUS_FG));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(m) = &self.message {
@@ -589,7 +1748,9 @@ impl MargApp {
                         Level::Warn => WARN_FG,
                         Level::Error => ERROR_FG,
                     };
-                    ui.label(text(&m.text, color));
+                    ui.add(egui::Label::new(text(&m.text, color)).truncate());
+                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                    ui.label(text(h.typed(), STATUS_FG));
                 } else if self.matcher.is_pending() {
                     ui.label(text(&self.matcher.pending_text(), STATUS_FG));
                 }
@@ -601,12 +1762,45 @@ impl MargApp {
 impl eframe::App for MargApp {
     fn on_exit(&mut self) {
         self.save_state();
+        // Last resort: the window closed without going through `q` (which
+        // saves first). Save and wait for the result.
+        if self.discard || !self.open.as_ref().is_some_and(|o| o.unsaved()) {
+            return;
+        }
+        self.doc.send(Request::Save { force: false });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match self.doc.recv_timeout(left) {
+                Some(Response::Saved { result, .. }) => {
+                    match result {
+                        Ok(_) => log::info!("saved on exit"),
+                        Err(e) => log::error!("save on exit failed: {e:?}; changes lost"),
+                    }
+                    return;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+        log::error!("save on exit timed out; changes lost");
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
+        // Closing the window saves first, like `q`.
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.discard
+            && self.open.as_ref().is_some_and(|o| o.unsaved())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.after_save != AfterSave::Quit {
+                self.save(false, AfterSave::Quit);
+            }
+        }
+        self.autosave(&ctx);
+        self.check_disk(&ctx);
         if self
             .message
             .as_ref()
@@ -648,7 +1842,9 @@ impl eframe::App for MargApp {
                 }
                 let Some(open) = &mut self.open else { return };
                 open.view.set_viewport(area.width(), area.height());
-                let plan = self.cache.plan(&open.view, &self.config.render, ppp);
+                let plan = self
+                    .cache
+                    .plan(&open.view, &self.config.render, ppp, &open.revs);
                 if plan.keys != self.last_request {
                     self.doc.send(Request::Render {
                         keys: plan.keys.clone(),
@@ -656,10 +1852,37 @@ impl eframe::App for MargApp {
                     });
                     self.last_request = plan.keys;
                 }
+                open.request_visible_text(&self.doc);
                 let painter = ui.painter_at(area);
-                let exact = self
-                    .cache
-                    .draw(&painter, area, &open.view, &self.config.render);
+                let (exact, stale) =
+                    self.cache
+                        .draw(&painter, area, &open.view, &self.config.render, &open.revs);
+                let cache = &self.cache;
+                open.provisional
+                    .retain(|p| p.rev.is_none_or(|r| !cache.has_rev(p.spec.page, r)));
+                for p in &open.provisional {
+                    if p.rev.is_none() || stale.contains(&p.spec.page) {
+                        select::draw_provisional(&painter, &open.view, area, &p.spec);
+                    }
+                }
+                if let Some(sel) = &self.selection {
+                    select::draw_selection(&painter, &open.view, area, sel, &open.texts);
+                }
+                if matches!(self.mode, Mode::Caret | Mode::Visual)
+                    && let Some(c) = &self.caret
+                {
+                    select::draw_caret(&painter, &open.view, area, c, &open.texts);
+                }
+                if let Some((page, xref)) = self.selected_annot
+                    && let Some(a) = open.annots[page]
+                        .as_ref()
+                        .and_then(|l| l.iter().find(|a| a.xref == xref))
+                {
+                    select::draw_selected_annot(&painter, &open.view, area, a);
+                }
+                if let Some(h) = &self.hinting {
+                    h.draw(&painter, &open.view, area, &open.texts);
+                }
                 if let Some(t) = &mut self.timing
                     && !t.shown
                     && (exact || self.last_request.is_empty())
@@ -731,4 +1954,15 @@ impl MargApp {
                     });
             });
     }
+}
+
+/// The annotation author: the configured one, else the OS user name.
+fn annotation_author(configured: &str) -> String {
+    if !configured.trim().is_empty() {
+        return configured.trim().to_string();
+    }
+    ["USER", "USERNAME", "LOGNAME"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "marg".into())
 }

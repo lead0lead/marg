@@ -16,13 +16,111 @@ pub enum Layout {
     Spread,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub view: ViewConfig,
     pub render: RenderConfig,
     pub ui: UiConfig,
+    pub hints: HintsConfig,
+    pub annotation: AnnotationConfig,
+    /// Highlight categories; keys `1`–`5` pick the first five.
+    #[serde(rename = "category")]
+    pub categories: Vec<Category>,
     pub keys: KeysConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            view: ViewConfig::default(),
+            render: RenderConfig::default(),
+            ui: UiConfig::default(),
+            hints: HintsConfig::default(),
+            annotation: AnnotationConfig::default(),
+            categories: default_categories(),
+            keys: KeysConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Category {
+    pub name: String,
+    /// `#RRGGBB`.
+    pub color: String,
+}
+
+fn default_categories() -> Vec<Category> {
+    [
+        ("Key point", "#FFD400"),
+        ("Question", "#A28AE5"),
+        ("Definition", "#2EA8E5"),
+        ("Disagree", "#FF6666"),
+        ("Evidence", "#5FB236"),
+    ]
+    .into_iter()
+    .map(|(name, color)| Category {
+        name: name.into(),
+        color: color.into(),
+    })
+    .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AnnotationConfig {
+    /// Written as the annotation author; empty = the OS user name.
+    pub author: String,
+    pub highlight_opacity: f32,
+    pub box_stroke_pt: f32,
+    /// Save this long after the last annotation change.
+    pub autosave_secs: f32,
+    /// Undo steps kept per session.
+    pub undo_steps: usize,
+}
+
+impl Default for AnnotationConfig {
+    fn default() -> Self {
+        Self {
+            author: String::new(),
+            highlight_opacity: 0.4,
+            box_stroke_pt: 1.5,
+            autosave_secs: 2.0,
+            undo_steps: 100,
+        }
+    }
+}
+
+/// How text hints label targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HintMode {
+    /// Lines first, then the words of the picked line.
+    TwoStage,
+    /// Every visible word at once.
+    Words,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HintsConfig {
+    /// Label alphabet.
+    pub chars: String,
+    pub mode: HintMode,
+    /// Added to `chars` for the word labels of a picked line, so long lines
+    /// still get single-character labels.
+    pub extra_chars: String,
+}
+
+impl Default for HintsConfig {
+    fn default() -> Self {
+        Self {
+            chars: "asdfghjkl".into(),
+            mode: HintMode::TwoStage,
+            extra_chars: "qwertyuiop".into(),
+        }
+    }
 }
 
 /// Key bindings on top of the defaults: key sequence → command name
@@ -31,6 +129,10 @@ pub struct Config {
 #[serde(default)]
 pub struct KeysConfig {
     pub normal: BTreeMap<String, String>,
+    /// Caret mode, on top of `normal`.
+    pub caret: BTreeMap<String, String>,
+    /// Visual mode, on top of `caret`.
+    pub visual: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -104,6 +206,16 @@ pub struct UiConfig {
     /// Files remembered in the state file; the least recently opened are
     /// dropped beyond this.
     pub state_files_max: usize,
+    /// Presses closer together than this count as a double or triple click.
+    pub multi_click_ms: u64,
+    /// How often the open file is checked for changes by other programs.
+    pub file_check_secs: f32,
+    /// Dragging a selection near or past the top or bottom edge scrolls by
+    /// this many pixels per second for each pixel of distance into the
+    /// edge zone.
+    pub drag_scroll_rate: f32,
+    /// Height of that edge zone, in logical pixels.
+    pub drag_scroll_edge_px: f32,
 }
 
 impl Default for UiConfig {
@@ -114,6 +226,10 @@ impl Default for UiConfig {
             sequence_timeout_ms: 1000,
             recent_files_max: 50,
             state_files_max: 1000,
+            multi_click_ms: 400,
+            file_check_secs: 1.0,
+            drag_scroll_rate: 12.0,
+            drag_scroll_edge_px: 16.0,
         }
     }
 }
@@ -147,6 +263,24 @@ mod tests {
     fn layout_names_parse() {
         let c = Config::from_toml("[view]\ndefault_layout_portrait = \"spread\"\n").unwrap();
         assert_eq!(c.view.default_layout_portrait, Layout::Spread);
+    }
+
+    #[test]
+    fn categories_default_and_replace() {
+        let c = Config::default();
+        assert_eq!(c.categories.len(), 5);
+        assert_eq!(c.categories[0].name, "Key point");
+        let c =
+            Config::from_toml("[[category]]\nname = \"Important\"\ncolor = \"#FF0000\"\n").unwrap();
+        assert_eq!(c.categories.len(), 1);
+        assert_eq!(c.categories[0].name, "Important");
+    }
+
+    #[test]
+    fn hint_mode_parses() {
+        let c = Config::from_toml("[hints]\nmode = \"words\"\n").unwrap();
+        assert_eq!(c.hints.mode, HintMode::Words);
+        assert_eq!(Config::default().hints.mode, HintMode::TwoStage);
     }
 
     #[test]

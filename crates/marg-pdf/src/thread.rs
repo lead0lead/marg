@@ -7,7 +7,10 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::document::{Doc, DocInfo, PixelRect, Pixels};
+use marg_core::annot::{AnnotInfo, AnnotSpec};
+use marg_core::text::PageText;
+
+use crate::document::{Doc, DocInfo, PixelRect, Pixels, SaveError, SaveReport};
 
 /// Render scale as integer thousandths of a pixel per point, so it can be
 /// used as a cache key.
@@ -36,8 +39,28 @@ pub struct Tile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderKey {
     pub page: usize,
+    /// The page's revision as the UI knows it: the number of annotation
+    /// edits on it. Renders always show the current state; the revision
+    /// only keeps renders from before an edit apart in caches.
+    pub rev: u32,
     pub scale: Scale,
     pub tile: Option<Tile>,
+}
+
+/// A change to the document's annotations.
+#[derive(Debug, Clone)]
+pub enum Edit {
+    Create(AnnotSpec),
+    /// Delete the annotation with this object number from a page.
+    Delete {
+        page: usize,
+        xref: i32,
+    },
+    /// Put a deleted annotation back (undo of `Delete`).
+    Restore {
+        page: usize,
+        xref: i32,
+    },
 }
 
 pub enum Request {
@@ -49,6 +72,25 @@ pub enum Request {
     /// number of `Rendered` responses the caller has taken so far: keys
     /// rendered after that are still in transit and are not rendered again.
     Render { keys: Vec<RenderKey>, received: u64 },
+    /// Extract the text of a page. Served before renders.
+    Text(usize),
+    /// Change annotations. Served before text and renders. `tag` comes
+    /// back in the response. The first edit of a document backs the file up
+    /// first (if a backup folder is set); if that fails, the edit fails.
+    Edit { tag: u64, edit: Edit },
+    /// Save the changes (see `Doc::save`).
+    Save { force: bool },
+    /// Folder for backups of files before their first change.
+    BackupDir(PathBuf),
+    /// Check whether another program changed the file; answered with
+    /// `DiskChanged` only if it did (once per change).
+    CheckDisk,
+    /// Close the document without saving. Starts a new generation, so
+    /// responses still in transit can be told apart.
+    Close,
+    /// List the annotations of pages. Urgent requests are served with
+    /// text (before renders); the others when nothing else is queued.
+    Annots { pages: Vec<usize>, urgent: bool },
 }
 
 pub enum Response {
@@ -64,6 +106,33 @@ pub enum Response {
         key: RenderKey,
         result: Result<Pixels, String>,
         took: Duration,
+    },
+    Text {
+        generation: u64,
+        page: usize,
+        result: Result<PageText, String>,
+    },
+    Edited {
+        generation: u64,
+        tag: u64,
+        page: usize,
+        /// The page's revision after the edit.
+        rev: u32,
+        /// The object number of the created or deleted annotation.
+        result: Result<i32, String>,
+    },
+    Saved {
+        generation: u64,
+        /// `Ok(None)`: there was nothing to save.
+        result: Result<Option<SaveReport>, SaveError>,
+    },
+    DiskChanged {
+        generation: u64,
+    },
+    Annots {
+        generation: u64,
+        page: usize,
+        result: Result<Vec<AnnotInfo>, String>,
     },
 }
 
@@ -141,10 +210,31 @@ fn pixel_rect(info: &DocInfo, key: RenderKey) -> Result<PixelRect, String> {
     })
 }
 
+/// Back the file up before its first change.
+fn backup(d: &mut Doc, dir: Option<&std::path::Path>) -> Result<(), String> {
+    let Some(dir) = dir else { return Ok(()) };
+    match d.ensure_backup(dir) {
+        Ok(Some(path)) => {
+            log::info!("backup: {}", path.display());
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(e) => Err(format!(
+            "cannot back up the file, so it was not changed: {e}"
+        )),
+    }
+}
+
 fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut doc: Option<(Doc, DocInfo)> = None;
+    let mut backup_dir: Option<PathBuf> = None;
     let mut generation = 0u64;
     let mut queue: VecDeque<RenderKey> = VecDeque::new();
+    let mut text_queue: VecDeque<usize> = VecDeque::new();
+    let mut annots_urgent: VecDeque<usize> = VecDeque::new();
+    let mut annots_idle: VecDeque<usize> = VecDeque::new();
+    // Annotation edits per page since the document was opened.
+    let mut revs: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     // Rendered responses sent so far, and the keys of those the UI may not
     // have received yet, with their sequence numbers.
     let mut sent = 0u64;
@@ -152,7 +242,11 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     loop {
         // Block only when idle; otherwise take whatever arrived meanwhile.
         let mut incoming = Vec::new();
-        if queue.is_empty() {
+        if queue.is_empty()
+            && text_queue.is_empty()
+            && annots_urgent.is_empty()
+            && annots_idle.is_empty()
+        {
             match rx.recv() {
                 Ok(r) => incoming.push(r),
                 Err(_) => return,
@@ -172,6 +266,10 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     let info = match Doc::open(&path) {
                         Ok((d, info)) => {
                             queue.clear();
+                            text_queue.clear();
+                            annots_urgent.clear();
+                            annots_idle.clear();
+                            revs.clear();
                             generation += 1;
                             doc = Some((d, info.clone()));
                             Ok(info)
@@ -200,7 +298,138 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         .filter(|k| !in_transit.iter().any(|(_, t)| t == k))
                         .collect();
                 }
+                Request::Text(page) => {
+                    if !text_queue.contains(&page) {
+                        text_queue.push_back(page);
+                    }
+                }
+                Request::Edit { tag, edit } => {
+                    let page = match &edit {
+                        Edit::Create(spec) => spec.page,
+                        Edit::Delete { page, .. } | Edit::Restore { page, .. } => *page,
+                    };
+                    let result = match &mut doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => {
+                            backup(d, backup_dir.as_deref()).and_then(|()| match edit {
+                                Edit::Create(spec) => d.create_annotation(&spec),
+                                Edit::Delete { page, xref } => {
+                                    d.delete_annotation(page, xref).map(|()| xref)
+                                }
+                                Edit::Restore { page, xref } => {
+                                    d.restore_annotation(page, xref).map(|()| xref)
+                                }
+                            })
+                        }
+                    };
+                    let rev = revs.entry(page).or_default();
+                    if result.is_ok() {
+                        *rev += 1;
+                    }
+                    let resp = Response::Edited {
+                        generation,
+                        tag,
+                        page,
+                        rev: *rev,
+                        result,
+                    };
+                    if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::Save { force } => {
+                    let result = match &mut doc {
+                        None => Ok(None),
+                        Some((d, _)) => d.save(force),
+                    };
+                    match &result {
+                        Ok(Some(r)) => log::info!("saved (full: {})", r.full),
+                        Ok(None) => {}
+                        Err(e) => log::warn!("save failed: {e:?}"),
+                    }
+                    if tx.send(Response::Saved { generation, result }).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::BackupDir(dir) => backup_dir = Some(dir),
+                Request::Annots { pages, urgent } => {
+                    let q = if urgent {
+                        &mut annots_urgent
+                    } else {
+                        &mut annots_idle
+                    };
+                    for p in pages {
+                        if !q.contains(&p) {
+                            q.push_back(p);
+                        }
+                    }
+                }
+                Request::Close => {
+                    doc = None;
+                    queue.clear();
+                    text_queue.clear();
+                    annots_urgent.clear();
+                    annots_idle.clear();
+                    revs.clear();
+                    generation += 1;
+                }
+                Request::CheckDisk => {
+                    if let Some((d, _)) = &mut doc
+                        && d.poll_disk()
+                    {
+                        if tx.send(Response::DiskChanged { generation }).is_err() {
+                            return;
+                        }
+                        wake();
+                    }
+                }
             }
+        }
+        if let Some(page) = text_queue.pop_front() {
+            let result = match &doc {
+                None => Err("no document open".into()),
+                Some((d, _)) => d.text(page),
+            };
+            if tx
+                .send(Response::Text {
+                    generation,
+                    page,
+                    result,
+                })
+                .is_err()
+            {
+                return;
+            }
+            wake();
+            continue;
+        }
+        let annot_page = annots_urgent.pop_front().or_else(|| {
+            if queue.is_empty() {
+                annots_idle.pop_front()
+            } else {
+                None
+            }
+        });
+        if let Some(page) = annot_page {
+            let result = match &doc {
+                None => Err("no document open".into()),
+                Some((d, _)) => d.annotations(page),
+            };
+            let resp = Response::Annots {
+                generation,
+                page,
+                result,
+            };
+            if tx.send(resp).is_err() {
+                return;
+            }
+            // An idle scan of many pages wakes the UI only now and then.
+            if annots_idle.len().is_multiple_of(64) {
+                wake();
+            }
+            continue;
         }
         let Some(key) = queue.pop_front() else {
             continue;
