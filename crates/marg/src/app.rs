@@ -28,7 +28,7 @@ use crate::complete;
 use crate::input;
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
-use crate::select::{self, Caret, Hinting, Purpose};
+use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::statefile;
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
@@ -853,6 +853,41 @@ impl MargApp {
         }
     }
 
+    /// `ga`: hints on the visible annotations, in reading order.
+    fn annot_hints(&mut self) {
+        let Some(open) = &self.open else { return };
+        let mut found: Vec<&AnnotInfo> = Vec::new();
+        for page in open.view.visible_pages() {
+            let Some(list) = &open.annots[page] else {
+                self.show(Level::Info, "Still reading the annotations".into());
+                return;
+            };
+            found.extend(list.iter().filter(|a| {
+                a.boxes()
+                    .iter()
+                    .any(|&b| select::on_screen(&open.view, self.area, page, b))
+            }));
+        }
+        if found.is_empty() {
+            self.show(Level::Info, "No annotations in view".into());
+            return;
+        }
+        found.sort_by(|a, b| {
+            (a.page, a.rect.y0, a.rect.x0)
+                .partial_cmp(&(b.page, b.rect.y0, b.rect.x0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let boxes = found.iter().map(|a| (a.page, a.boxes()[0])).collect();
+        let ids = found.iter().map(|a| (a.page, a.xref)).collect();
+        let h = Hinting::boxes(Purpose::Annot(ids), boxes, &self.config.hints);
+        if self.mode != Mode::Hint {
+            self.return_mode = self.mode;
+            self.selection_before_hints = self.selection;
+        }
+        self.hinting = Some(h);
+        self.mode = Mode::Hint;
+    }
+
     fn cancel_hints(&mut self) {
         self.hinting = None;
         self.mode = self.return_mode;
@@ -868,8 +903,8 @@ impl MargApp {
                 let picked = t
                     .chars()
                     .find_map(|c| h.push(c, &open.texts, &self.config.hints));
-                if let Some((page, r)) = picked {
-                    self.hint_picked(page, r);
+                if let Some(p) = picked {
+                    self.hint_picked(p);
                 }
             }
             Event::Key { pressed: true, .. } => match input::key_press(e).map(|k| k.code) {
@@ -883,8 +918,24 @@ impl MargApp {
         }
     }
 
-    fn hint_picked(&mut self, page: usize, word: std::ops::Range<usize>) {
+    fn hint_picked(&mut self, picked: Picked) {
         let Some(h) = self.hinting.take() else { return };
+        let (page, word) = match (picked, &h.purpose) {
+            (Picked::Box(i), Purpose::Annot(annots)) => {
+                let (page, xref) = annots[i];
+                self.leave_text_modes();
+                let a = self.open.as_ref().and_then(|o| {
+                    o.annots[page]
+                        .as_ref()
+                        .and_then(|l| l.iter().find(|a| a.xref == xref))
+                        .cloned()
+                });
+                self.select_annot(a.as_ref());
+                return;
+            }
+            (Picked::Word(page, word), _) => (page, word),
+            (Picked::Box(_), _) => return,
+        };
         let start = TextPos::new(page, word.start);
         let end = TextPos::new(page, word.end - 1);
         match h.purpose {
@@ -903,6 +954,7 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
+            Purpose::Annot(_) => {}
         }
     }
 
@@ -1935,6 +1987,10 @@ impl MargApp {
                 self.start_hints(Purpose::SelectStart);
                 return;
             }
+            Command::HintAnnot => {
+                self.annot_hints();
+                return;
+            }
             Command::Motion(m) => {
                 self.move_caret(m, n);
                 return;
@@ -2012,6 +2068,7 @@ impl MargApp {
             | Command::DebugToggle => {}
             Command::HintCaret
             | Command::HintSelect
+            | Command::HintAnnot
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine

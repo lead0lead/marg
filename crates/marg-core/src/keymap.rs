@@ -47,6 +47,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("]a", "annot.next"),
     ("[a", "annot.prev"),
     ("x", "annot.delete"),
+    ("ga", "hint.annot"),
     ("i", "annotate.note"),
 ];
 
