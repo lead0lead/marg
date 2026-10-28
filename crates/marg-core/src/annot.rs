@@ -10,6 +10,8 @@ pub enum AnnotKind {
     Underline,
     /// A sticky note (PDF `Text`); its one rect is the icon.
     Note,
+    /// A rectangle (PDF `Square`), stroked, not filled; one rect.
+    Box,
 }
 
 /// Everything needed to create an annotation (or recreate it on redo).
@@ -23,6 +25,8 @@ pub struct AnnotSpec {
     /// RGB, 0–255.
     pub color: [u8; 3],
     pub opacity: f32,
+    /// Line width of a box, in points.
+    pub stroke_pt: f32,
     /// Category name, written to `/Subj`.
     pub subject: String,
     /// Written to `/T`.

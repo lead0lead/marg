@@ -76,6 +76,12 @@ pub struct AnnotationConfig {
     pub box_stroke_pt: f32,
     /// Size of a note's icon.
     pub note_size_pt: f32,
+    /// Box mode: the label grid over the view.
+    pub box_grid_cols: usize,
+    pub box_grid_rows: usize,
+    /// Box mode: how far `hjkl` / `HJKL` move a corner, and with Ctrl.
+    pub box_step_pt: f32,
+    pub box_fine_step_pt: f32,
     /// Save this long after the last annotation change.
     pub autosave_secs: f32,
     /// Undo steps kept per session.
@@ -89,6 +95,10 @@ impl Default for AnnotationConfig {
             highlight_opacity: 0.4,
             box_stroke_pt: 1.5,
             note_size_pt: 20.0,
+            box_grid_cols: 9,
+            box_grid_rows: 12,
+            box_step_pt: 4.0,
+            box_fine_step_pt: 1.0,
             autosave_secs: 2.0,
             undo_steps: 100,
         }

@@ -351,6 +351,11 @@ pub fn draw_provisional(painter: &egui::Painter, view: &View, area: Rect, spec: 
                 let line = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - t), rect.max);
                 painter.rect_filled(line, 0.0, Color32::from_rgb(r, g, b));
             }
+            AnnotKind::Box => {
+                let w = (spec.stroke_pt * view.zoom()).max(1.0);
+                let stroke = egui::Stroke::new(w, Color32::from_rgb(r, g, b));
+                painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+            }
             AnnotKind::Note => {
                 let edge = egui::Stroke::new(1.0, Color32::from_black_alpha(160));
                 painter.rect(

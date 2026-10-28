@@ -35,6 +35,7 @@ fn spec(kind: AnnotKind) -> AnnotSpec {
         ],
         color: [0xA2, 0x8A, 0xE5],
         opacity: 0.4,
+        stroke_pt: 0.0,
         subject: "Question".into(),
         author: "tester".into(),
         contents: Some("why?".into()),
@@ -264,4 +265,40 @@ fn update_in_place_round_trip() {
         (listed[0].subject.as_ref(), listed[0].contents.as_ref()),
         (None, None)
     );
+}
+
+#[test]
+fn box_and_note_round_trip() {
+    let (_dir, path) = copy("text.pdf", "box");
+    let (mut doc, _) = Doc::open(&path).unwrap();
+    let mut b = spec(AnnotKind::Box);
+    b.rects = vec![BBox::new(100.0, 200.0, 300.0, 260.0)];
+    b.stroke_pt = 1.5;
+    doc.create_annotation(&b).unwrap();
+    let mut n = spec(AnnotKind::Note);
+    n.rects = vec![BBox::new(10.0, 10.0, 30.0, 30.0)];
+    doc.create_annotation(&n).unwrap();
+    doc.save(false).unwrap();
+
+    let pdf = PdfDocument::open(path.to_str().unwrap()).unwrap();
+    let page = pdf.load_pdf_page(0).unwrap();
+    let annots: Vec<_> = page
+        .annotations()
+        .filter(|a| a.r#type().unwrap() != PdfAnnotationType::Link)
+        .collect();
+    assert_eq!(annots.len(), 2);
+    let sq = &annots[0];
+    assert_eq!(sq.r#type().unwrap(), PdfAnnotationType::Square);
+    assert!((sq.border_width().unwrap() - 1.5).abs() < 1e-3);
+    assert!(sq.interior_color().unwrap().is_none(), "not filled");
+    assert_eq!(sq.contents().unwrap(), Some("why?"));
+    assert_eq!(annots[1].r#type().unwrap(), PdfAnnotationType::Text);
+    let listed = Doc::open(&path).unwrap().0.annotations(0).unwrap();
+    let r = listed[0].rect;
+    // The rectangle may grow by half the line width; it covers the box.
+    assert!(
+        r.x0 <= 100.0 && r.y0 <= 200.0 && r.x1 >= 300.0 && r.y1 >= 260.0,
+        "{r:?}"
+    );
+    assert!(r.x1 <= 302.0 && r.y1 <= 262.0, "{r:?}");
 }

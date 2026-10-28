@@ -88,6 +88,8 @@ pub enum Command {
     /// A sticky note at the caret (or the top left of the page), with the
     /// comment editor open.
     Note,
+    /// Box mode: draw a box with grid hints or the mouse.
+    BoxMode,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -279,6 +281,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("annot.edit", Command::AnnotEdit, "edit comment"),
     ("annotate.comment", Command::Comment, "highlight + comment"),
     ("annotate.note", Command::Note, "new note"),
+    ("annotate.box", Command::BoxMode, "box mode"),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,

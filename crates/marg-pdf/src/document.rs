@@ -414,8 +414,12 @@ impl Doc {
             AnnotKind::Highlight => page.add_highlight_annotation(quads().collect::<Vec<_>>()),
             AnnotKind::Underline => page.add_underline_annotation(quads().collect::<Vec<_>>()),
             AnnotKind::Note => page.add_text_annotation(first, ""),
+            AnnotKind::Box => page.add_square_annotation(first),
         }
         .map_err(err)?;
+        if spec.kind == AnnotKind::Box {
+            annot.set_border_width(spec.stroke_pt).map_err(err)?;
+        }
         let [r, g, b] = spec.color.map(|c| c as f32 / 255.0);
         annot
             .set_color(AnnotationColor::Rgb {
@@ -577,6 +581,7 @@ impl Doc {
                 AnnotKind::Highlight => "Highlight",
                 AnnotKind::Underline => "Underline",
                 AnnotKind::Note => "Text",
+                AnnotKind::Box => "Square",
             };
             let mut obj = annot.object();
             obj.dict_put("Subtype", PdfObject::new_name(name).map_err(err)?)

@@ -23,6 +23,7 @@ use marg_core::undo::UndoStack;
 use marg_core::view::{Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, RenderKey, Request, Response, SaveError, Scale};
 
+use crate::boxmode::BoxMode;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
 use crate::input;
@@ -176,6 +177,8 @@ enum Mode {
     Category,
     /// The comment editor is open.
     Insert,
+    /// Drawing a box.
+    Box,
 }
 
 impl Mode {
@@ -187,6 +190,7 @@ impl Mode {
             Mode::Caret => "CARET",
             Mode::Visual | Mode::Category => "VISUAL",
             Mode::Insert => "INSERT",
+            Mode::Box => "BOX",
         }
     }
 }
@@ -211,6 +215,8 @@ pub struct MargApp {
     hinting: Option<Hinting>,
     /// The comment editor (Insert mode).
     editor: Option<CommentEditor>,
+    /// The box being drawn (Box mode).
+    boxing: Option<BoxMode>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
     /// Where a mouse drag started, while the primary button is down.
@@ -337,6 +343,7 @@ impl MargApp {
             selection: None,
             hinting: None,
             editor: None,
+            boxing: None,
             selection_before_hints: None,
             drag_anchor: None,
             last_click: None,
@@ -716,6 +723,7 @@ impl MargApp {
                 _ if self.mode == Mode::Category => self.category_event(e),
                 // The comment editor's text field takes the keys.
                 _ if self.mode == Mode::Insert => {}
+                _ if self.mode == Mode::Box => self.box_event(e),
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -851,6 +859,152 @@ impl MargApp {
                 self.show(Level::Info, msg.into());
             }
         }
+    }
+
+    /// A key or mouse event in Box mode.
+    fn box_event(&mut self, e: &Event) {
+        let (Some(open), Some(b)) = (&self.open, &mut self.boxing) else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let view = &open.view;
+        let cfg = &self.config.annotation;
+        match e {
+            Event::Text(t) => {
+                for c in t.chars() {
+                    if !b.adjusting() {
+                        b.push(c, view);
+                        continue;
+                    }
+                    let step = cfg.box_step_pt;
+                    match c {
+                        'h' => b.nudge(true, -step, 0.0, view),
+                        'l' => b.nudge(true, step, 0.0, view),
+                        'k' => b.nudge(true, 0.0, -step, view),
+                        'j' => b.nudge(true, 0.0, step, view),
+                        'H' => b.nudge(false, -step, 0.0, view),
+                        'L' => b.nudge(false, step, 0.0, view),
+                        'K' => b.nudge(false, 0.0, -step, view),
+                        'J' => b.nudge(false, 0.0, step, view),
+                        _ => {
+                            let n = self.config.categories.len().min(9);
+                            if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
+                                b.category = d as u8;
+                            }
+                        }
+                    }
+                }
+            }
+            Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } => {
+                let fine = cfg.box_fine_step_pt;
+                match key {
+                    egui::Key::Escape => {
+                        self.boxing = None;
+                        self.mode = Mode::Normal;
+                    }
+                    egui::Key::Backspace if !b.adjusting() => b.pop(),
+                    egui::Key::Enter if b.adjusting() => self.confirm_box(),
+                    // Ctrl drops the text event, so fine steps come from
+                    // the key; Shift moves the top-left corner.
+                    egui::Key::H | egui::Key::J | egui::Key::K | egui::Key::L
+                        if modifiers.ctrl && b.adjusting() =>
+                    {
+                        let (dx, dy) = match key {
+                            egui::Key::H => (-fine, 0.0),
+                            egui::Key::L => (fine, 0.0),
+                            egui::Key::K => (0.0, -fine),
+                            _ => (0.0, fine),
+                        };
+                        b.nudge(!modifiers.shift, dx, dy, view);
+                    }
+                    _ => {}
+                }
+            }
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                ..
+            } => {
+                if !*pressed {
+                    b.drag_end();
+                } else if self.area.contains(*pos) {
+                    let p = *pos - self.area.min;
+                    b.drag_start(view, p.x, p.y);
+                }
+            }
+            Event::PointerMoved(pos) => {
+                let p = *pos - self.area.min;
+                b.drag_to(view, p.x, p.y);
+            }
+            _ => {}
+        }
+    }
+
+    /// Enter in Box mode: create the box (one undo step).
+    fn confirm_box(&mut self) {
+        let Some(b) = self.boxing.take() else { return };
+        self.mode = Mode::Normal;
+        let (Some(sel), Some(open)) = (b.sel, &mut self.open) else {
+            return;
+        };
+        let Some(cat) = self.config.categories.get(usize::from(b.category) - 1) else {
+            return;
+        };
+        let Some(color) = parse_color(&cat.color) else {
+            let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
+            self.error(msg);
+            return;
+        };
+        let spec = AnnotSpec {
+            page: sel.page,
+            kind: AnnotKind::Box,
+            rects: vec![sel.rect],
+            color,
+            opacity: 1.0,
+            stroke_pt: self.config.annotation.box_stroke_pt,
+            subject: cat.name.clone(),
+            author: self.author.clone(),
+            contents: None,
+        };
+        let tag = self.next_tag;
+        self.next_tag += 1;
+        open.provisional.push(Provisional {
+            tag,
+            rev: None,
+            spec: spec.clone(),
+        });
+        self.doc.send(Request::Edit {
+            tag,
+            edit: Edit::Create(spec.clone()),
+        });
+        open.undo.push(UndoOp {
+            created: vec![Created { spec, tag }],
+            ..UndoOp::default()
+        });
+        self.last_category = b.category;
+        self.show(Level::Info, format!("Box: {}", cat.name));
+    }
+
+    /// The status line in Box mode.
+    fn box_prompt(&self) -> String {
+        let Some(b) = &self.boxing else {
+            return String::new();
+        };
+        if !b.adjusting() {
+            return "BOX  type a cell for the first corner, then the second (or drag)".into();
+        }
+        let name = self
+            .config
+            .categories
+            .get(usize::from(b.category) - 1)
+            .map_or("", |c| c.name.as_str());
+        format!("BOX  {name}  hjkl/HJKL corners (Ctrl: fine)  1-5 category  ⏎ save  Esc cancel")
     }
 
     /// `ga`: hints on the visible annotations, in reading order.
@@ -1155,6 +1309,7 @@ impl MargApp {
                 rects,
                 color,
                 opacity: self.config.annotation.highlight_opacity,
+                stroke_pt: 0.0,
                 subject: cat.name.clone(),
                 author: self.author.clone(),
                 contents: None,
@@ -1238,6 +1393,7 @@ impl MargApp {
             rects: vec![BBox::new(x, y, x + size, y + size)],
             color,
             opacity: 1.0,
+            stroke_pt: 0.0,
             subject: cat.name.clone(),
             author: self.author.clone(),
             contents: None,
@@ -1499,6 +1655,7 @@ impl MargApp {
                         rects,
                         color: a.color.unwrap_or([0xFF, 0xD4, 0x00]),
                         opacity: a.opacity,
+                        stroke_pt: 0.0,
                         subject: a.subject.clone().unwrap_or_default(),
                         author: a.author.clone().unwrap_or_else(|| self.author.clone()),
                         contents: if i == 0 { a.contents.clone() } else { None },
@@ -2023,6 +2180,20 @@ impl MargApp {
                 self.new_note();
                 return;
             }
+            Command::BoxMode => {
+                self.leave_text_modes();
+                self.selected_annot = None;
+                let cfg = &self.config.annotation;
+                let chars: Vec<char> = self.config.hints.chars.chars().collect();
+                self.boxing = Some(BoxMode::new(
+                    cfg.box_grid_cols,
+                    cfg.box_grid_rows,
+                    &dedup(chars),
+                    self.last_category,
+                ));
+                self.mode = Mode::Box;
+                return;
+            }
             Command::PickCategory => {
                 if self.selection.is_some() {
                     self.mode = Mode::Category;
@@ -2089,6 +2260,7 @@ impl MargApp {
             | Command::AnnotEdit
             | Command::Comment
             | Command::Note
+            | Command::BoxMode
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2223,6 +2395,8 @@ impl MargApp {
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
+                } else if self.mode == Mode::Box {
+                    self.box_prompt()
                 } else {
                     self.status_left()
                 };
@@ -2243,6 +2417,8 @@ impl MargApp {
                     ui.add(egui::Label::new(text(&m.text, color)).truncate());
                 } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
                     ui.label(text(h.typed(), STATUS_FG));
+                } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
+                    ui.label(text(b.typed(), STATUS_FG));
                 } else if self.matcher.is_pending() {
                     ui.label(text(&self.matcher.pending_text(), STATUS_FG));
                 }
@@ -2375,6 +2551,15 @@ impl eframe::App for MargApp {
                 if let Some(h) = &self.hinting {
                     h.draw(&painter, &open.view, area, &open.texts);
                 }
+                if let Some(b) = &self.boxing {
+                    let color = self
+                        .config
+                        .categories
+                        .get(usize::from(b.category) - 1)
+                        .and_then(|c| parse_color(&c.color))
+                        .map_or(Color32::RED, |[r, g, b]| Color32::from_rgb(r, g, b));
+                    b.draw(&painter, &open.view, area, color);
+                }
                 if let Some(t) = &mut self.timing
                     && !t.shown
                     && (exact || self.last_request.is_empty())
@@ -2458,6 +2643,17 @@ impl MargApp {
                     });
             });
     }
+}
+
+/// Characters without repeats, in order.
+fn dedup(chars: Vec<char>) -> Vec<char> {
+    let mut out = Vec::new();
+    for c in chars {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The edit that sets an annotation's comment.
