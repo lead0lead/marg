@@ -445,6 +445,8 @@ mod tests {
     /// them.
     #[test]
     fn committed_cheat_sheets_match_the_defaults() {
+        // Git may check text out with CRLF line endings (Windows).
+        let read = |p: &Path| std::fs::read_to_string(p).map(|t| t.replace("\r\n", "\n"));
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let doc_path = root.join("docs/cheatsheet.md");
         let doc = format!(
@@ -453,7 +455,7 @@ mod tests {
             cheatsheet(2)
         );
         let readme_path = root.join("README.md");
-        let readme = std::fs::read_to_string(&readme_path).unwrap();
+        let readme = read(&readme_path).unwrap();
         let (Some(start), Some(end)) = (readme.find(SHEET_START), readme.find(SHEET_END)) else {
             panic!("README.md has no cheat sheet markers");
         };
@@ -469,7 +471,7 @@ mod tests {
             return;
         }
         let hint = "run MARG_BLESS=1 cargo test -p marg-core cheat to update";
-        assert_eq!(std::fs::read_to_string(&doc_path).ok(), Some(doc), "{hint}");
+        assert_eq!(read(&doc_path).ok(), Some(doc), "{hint}");
         assert_eq!(readme, new_readme, "{hint}");
     }
 
