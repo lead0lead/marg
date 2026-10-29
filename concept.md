@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 4 in progress on branch `phase-4-reading` (not merged). Done: steps 1 (single and spread layouts), 2 (jump history, marks), 3 (outline), 4 (search), 5 (links). |
+| **Status** | Phase 4 in progress on branch `phase-4-reading` (not merged). Done: steps 1 (single and spread layouts), 2 (jump history, marks), 3 (outline), 4 (search), 5 (links), 6 (help). |
 | **Current phase** | 4 — reading features |
-| **Next step** | Phase 4 step 6: help overlay (`?`) and `:help` page. Then 7 handover (plan in §11 "Phase 4 steps"). |
+| **Next step** | Phase 4 step 7: docs and handover (plan in §11 "Phase 4 steps"). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 4 step 5) |
+| **Last updated** | 2026-10-29 (Phase 4 step 6) |
 
 ---
 

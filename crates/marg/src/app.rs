@@ -13,6 +13,7 @@ use marg_core::annot::{
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::{Config, Layout};
+use marg_core::help;
 use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
@@ -31,6 +32,7 @@ use crate::boxmode::BoxMode;
 use crate::browser;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
+use crate::help::HelpView;
 use crate::input;
 use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
@@ -225,6 +227,8 @@ enum Mode {
     Outline,
     /// Asking whether to open an external link.
     Confirm,
+    /// The help overlay or page is open.
+    Help,
     /// Typing a search.
     Search,
 }
@@ -233,6 +237,7 @@ impl Mode {
     fn label(self) -> &'static str {
         match self {
             Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm => "NORMAL",
+            Mode::Help => "HELP",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
@@ -275,6 +280,8 @@ pub struct MargApp {
     annot_list: Option<AnnotList>,
     /// The outline overlay (Outline mode).
     outline_list: Option<OutlineList>,
+    /// The help (Help mode), and whether it is the whole page.
+    help: Option<(HelpView, bool)>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
     /// The external link waiting for `y` (Confirm mode).
@@ -421,6 +428,7 @@ impl MargApp {
             boxing: None,
             annot_list: None,
             outline_list: None,
+            help: None,
             selection_before_hints: None,
             pending_mark: None,
             pending_url: None,
@@ -934,6 +942,12 @@ impl MargApp {
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Search => self.search_event(e),
                 _ if self.mode == Mode::Confirm => self.confirm_event(e),
+                _ if self.mode == Mode::Help => {
+                    if self.help.as_mut().is_none_or(|(h, _)| h.event(e)) {
+                        self.help = None;
+                        self.mode = self.return_mode;
+                    }
+                }
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
                 _ if self.mode == Mode::Category => self.category_event(e),
@@ -1455,6 +1469,44 @@ impl MargApp {
         }
         self.hinting = Some(h);
         self.mode = Mode::Hint;
+    }
+
+    /// `?`: the keys of the current mode; `:help` (`page`): everything.
+    fn show_help(&mut self, page: bool) {
+        let view = if page {
+            let names: Vec<String> = self
+                .config
+                .categories
+                .iter()
+                .map(|c| c.name.clone())
+                .collect();
+            let maps = help::Maps {
+                normal: &self.keymap,
+                caret: &self.caret_map,
+                visual: &self.visual_map,
+                annot: &self.annot_map,
+            };
+            HelpView::new("marg help".into(), help::page(&maps, &names))
+        } else {
+            let (title, map) = match self.mode {
+                Mode::Caret => ("Caret mode keys", &self.caret_map),
+                Mode::Visual => ("Visual mode keys", &self.visual_map),
+                Mode::Normal if self.selected_annot.is_some() => {
+                    ("Keys with an annotation selected", &self.annot_map)
+                }
+                _ => ("Normal mode keys", &self.keymap),
+            };
+            let mut lines = help::section("", map, None);
+            lines.push(help::HelpLine::Text(
+                ":help shows every mode, the : commands and more.".into(),
+            ));
+            HelpView::new(title.into(), lines)
+        };
+        if self.mode != Mode::Help {
+            self.return_mode = self.mode;
+        }
+        self.help = Some((view, page));
+        self.mode = Mode::Help;
     }
 
     /// `gl`: hints on the visible links.
@@ -2822,6 +2874,10 @@ impl MargApp {
                 self.link_hints();
                 return;
             }
+            Command::Help | Command::HelpPage => {
+                self.show_help(command == Command::HelpPage);
+                return;
+            }
             Command::Motion(m) => {
                 self.move_caret(m, n);
                 return;
@@ -2991,6 +3047,8 @@ impl MargApp {
             | Command::HintSelect
             | Command::HintAnnot
             | Command::HintLinks
+            | Command::Help
+            | Command::HelpPage
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
@@ -3322,6 +3380,25 @@ impl eframe::App for MargApp {
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
+        if let Some((h, page)) = self.help.as_mut().filter(|_| self.mode == Mode::Help) {
+            // The page fills the view; the overlay sits in the middle.
+            let rect = if *page {
+                area
+            } else {
+                egui::Rect::from_center_size(
+                    area.center(),
+                    egui::vec2((area.width() * 0.7).min(760.0), area.height() * 0.85),
+                )
+            };
+            egui::Area::new(egui::Id::unique("marg-help"))
+                .fixed_pos(rect.min)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    ui.set_min_size(rect.size());
+                    ui.set_max_size(rect.size());
+                    h.draw(ui, &th);
+                });
+        }
         if let Some(list) = self
             .outline_list
             .as_mut()

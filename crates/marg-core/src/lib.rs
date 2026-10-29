@@ -7,6 +7,7 @@ pub mod caret;
 pub mod command;
 pub mod config;
 pub mod fuzzy;
+pub mod help;
 pub mod hints;
 pub mod jumps;
 pub mod keymap;

@@ -123,6 +123,10 @@ pub enum Command {
     SearchNext,
     /// Go to the previous search hit.
     SearchPrev,
+    /// The keys of the current mode (`?`).
+    Help,
+    /// The help page with everything (`:help`).
+    HelpPage,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -337,6 +341,8 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("search", Command::Search, "search"),
     ("search.next", Command::SearchNext, "next search hit"),
     ("search.prev", Command::SearchPrev, "previous search hit"),
+    ("help", Command::Help, "keys of this mode"),
+    ("help.page", Command::HelpPage, "help page"),
     (
         "view.spread_first_alone",
         Command::SpreadFirstAlone,
@@ -415,6 +421,7 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
             "spread" => Ok(Command::SetLayout(Layout::Spread)),
             _ => Err("usage: layout continuous|single|spread".into()),
         },
+        "help" | "h" => no_arg(Command::HelpPage),
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -461,6 +468,7 @@ mod tests {
             Ok(Command::SetLayout(Layout::Spread))
         );
         assert!(parse_ex("layout").is_err());
+        assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());
