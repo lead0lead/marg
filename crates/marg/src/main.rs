@@ -74,10 +74,7 @@ fn main() -> eframe::Result {
     };
     let paths = paths::Paths::resolve();
     startup::init_logging(paths.as_ref());
-    let (config, config_error) = startup::load_config(paths.as_ref());
-    if let Some(e) = &config_error {
-        log::error!("{e}");
-    }
+    let (config, config_errors) = startup::load_config(paths.as_ref());
     // Open the file while the window is being created.
     let repaint: Arc<OnceLock<egui::Context>> = Arc::default();
     let wake = repaint.clone();
@@ -90,7 +87,10 @@ fn main() -> eframe::Result {
         doc.send(marg_pdf::Request::BackupDir(p.backup_dir.clone()));
     }
     if let Some(path) = &args.path {
-        doc.send(marg_pdf::Request::Open(path.clone()));
+        doc.send(marg_pdf::Request::Open {
+            path: path.clone(),
+            password: None,
+        });
     }
     let title = args
         .path
@@ -117,7 +117,8 @@ fn main() -> eframe::Result {
                     path: args.path,
                     start_page: args.page.map(|p| p - 1),
                     state_path: paths.as_ref().map(|p| p.state_file.clone()),
-                    errors: config_error.into_iter().collect(),
+                    config_path: paths.as_ref().map(|p| p.config_file.clone()),
+                    errors: config_errors,
                     timing_start: timing.then_some(start),
                 },
             )))

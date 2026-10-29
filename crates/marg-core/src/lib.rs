@@ -6,6 +6,8 @@ pub mod boxsel;
 pub mod caret;
 pub mod command;
 pub mod config;
+pub mod default_config;
+pub mod export;
 pub mod fuzzy;
 pub mod help;
 pub mod hints;

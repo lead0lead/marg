@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29 (Phase 4 at the user's request, "merge and push"). Phase 5 not started. |
-| **Current phase** | 5 — export & release, next |
-| **Next step** | Start Phase 5 in a fresh session, on branch `phase-5-release`: plan the steps (§11: Markdown export, `:config`, config reload and errors, password prompt, read-only, README + cheat sheet, release builds, polish), then one commit per step. The Phase 4 choices in §12 are still open for the user. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 built on branch `phase-5-release` (not merged, not pushed): Markdown export, `:config`, config errors and reload, password prompt, read-only files, cheat sheet and README, release workflow. Handed to the user to try. |
+| **Current phase** | 5 — export & release |
+| **Next step** | The user tries the Phase 5 build and collects a polish list; then polish, merge, push, bump the version to 1.0.0 and tag `v1.0.0` (when the user asks). The Phase 4 and 5 choices in §12 are open. | (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 4 merged) |
+| **Last updated** | 2026-10-29 (Phase 5 handover) |
 
 ---
 
@@ -142,6 +142,43 @@ defaults of `config.toml` (see §8), not scattered in code.
   whose permissions forbid annotation open read-only, with a status message.
 - Files that fail to open: show the MuPDF error in the status bar and in the
   log. Never crash.
+
+**As implemented (Phase 5, passwords):** `Request::Open { path, password
+}`; `Doc::open_with_password` answers `OpenError::NeedsPassword` or
+`WrongPassword` (other failures `Failed`). The UI then shows the prompt
+"Password for <name>: ••••" in the status bar (mode `Password`; the
+typed text is never shown, kept in history or logged); Enter tries it
+("Wrong password for <name>" and the prompt again), Esc gives up ("Not
+opened"; back to the current file, or the recent files list). The
+password that worked is kept in memory for the session (`OpenDoc`, and
+in `Doc` for reopening after a full save), so `:e!` and reloads after
+outside changes do not ask again; it is never written anywhere. Saving
+keeps the encryption: incremental saves append encrypted objects and
+full saves use MuPDF's default "keep" (tests in
+`marg-pdf/tests/password.rs` on a file MuPDF encrypts with AES-256: no
+clear text of a comment in the file, still needs the password). The
+`mupdf` crate cannot tell whether the user or the owner password
+worked. Opening that AES-256 file takes ~165 ms instead of ~6 ms
+(MuPDF's key derivation; release, Xvfb).
+
+**As implemented (Phase 5, read-only):** decided by the user
+2026-10-29: obey the permissions, with an override for all files and
+one for the open file. `DocInfo.can_annotate` is bit 6 of `/P` in the
+encryption dictionary (read directly: the `mupdf` crate's
+`permissions()` falls back to "everything" because `/P` always has
+undefined high bits; checked, it gives 3900 = all for a file that
+forbids annotations); `DocInfo.writable` is false when opening the file
+for appending is refused (a lock by another program does not count).
+Read-only files show "Read-only: the PDF forbids annotations; :unlock"
+(or "… no permission to write this file") on opening and when an edit
+is tried, and `[RO]` after the file name. Refused: every command with
+`Command::edits()` (highlights, underline, category prompt, comment,
+note, box mode, delete, recolor, type switch, comment edit, erase,
+undo, redo) and `e`/`x` in the annotation list; reading, copying and
+exporting work. `[annotation] ignore_permissions = true` annotates such
+files anyway (applies on config reload); `:unlock` (`file.unlock`) does
+it for the open file until it is closed (a reload keeps it; not saved
+in the state file). Neither helps a file marg may not write.
 
 ### 2.2 Rendering and caching
 
@@ -687,6 +724,22 @@ Comment on the box.
   1-based page index.
 - Standalone notes appear as **[Note]** entries with their comment.
 
+**As implemented (Phase 5):** `:export md [path]` (`Command::Export`,
+`file.export`); text in `marg-core/src/export.rs` from the annotation
+list's rows (`annotlist::entries`), so the marked text is the same as
+there and in `y`. The path: `<stem>.notes.md` next to the PDF; a given
+path (`~` expanded, relative to the working directory like `:e`), or
+that name inside it if it is a folder. Before writing, every page's
+annotations are listed again (idle queue; edits are applied as they
+arrive, so this includes every edit sent before) and the text of the
+annotated pages is read; "Exporting…" until then, then "Exported N
+annotations to <name>" (a warning if pages could not be read). Title
+and section names are put on one line; quoted text is joined into one
+line; comments are written as typed (trimmed). Highlights, underlines,
+squiggly and strike-out are quotes; boxes, notes and other types are
+**[Box]**, **[Note]**, **[<Subtype>]**. The date is UTC. Written on the
+UI thread (small file).
+
 ### 2.12 Help overlay
 
 `?` shows the bindings active in the current mode, generated from the live
@@ -719,6 +772,17 @@ command name. Both use the list keys; `/` filters (every word of the
 query must appear in a line, ignoring case: fuzzy matching matched most
 long lines), keeping each match's heading. Esc (or `?` outside the
 filter) closes.
+
+**As implemented (Phase 5, cheat sheet):** `help::cheatsheet(level)`
+renders the help page of the default config (without the list of
+command names) as Markdown tables, with `1`–`5` rows merged ("1-5").
+`docs/cheatsheet.md` and the "Keys" section of `README.md` (between
+the `<!-- cheat sheet … -->` markers) hold it; the test
+`committed_cheat_sheets_match_the_defaults` fails when either differs,
+and `MARG_BLESS=1 cargo test -p marg-core cheat` rewrites both. The
+README covers install, use (with Zotero), saving, config paths and
+licence; it says the Windows `.exe` needs the MSVC runtime (to change
+if step 7 links it statically).
 
 ---
 
@@ -777,7 +841,7 @@ remappable (§8).
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
-| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
+| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set name=value`, `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -793,7 +857,8 @@ character sequences (`gg`, `]a`) or space-separated keys (`g Ctrl-o`).
 `zoom.in|out|reset|fit_width|fit_page`, `cmdline`, `quit`, `quit.force`,
 `version`, `debug.toggle`. A digit is a count unless a binding starts with
 it. `:` commands: `q`, `q!`, `e <path>` (Tab completes directories and PDFs),
-`version`, `debug`, `<n>` (go to page n), or any command name. Up/Down
+`version`, `debug`, `<n>` (go to page n), or any command name
+(Phase 5 adds `export md [path]` and `config`). Up/Down
 browse the session's command history. Windows AltGr (Ctrl+Alt) characters
 are taken from the key event, since egui drops text while Ctrl is held.
 
@@ -1155,6 +1220,53 @@ outline_width = 0.4`; `[colors] search_hit`, `search_current`;
 `[statusbar] right` defaults to `["search", "keys"]`. The example themes
 set the new colors.
 
+**As implemented (Phase 5, `:config`):** `:config` (`config.write`)
+writes `marg-core/src/default_config.toml` plus the default key tables
+(generated from `keymap::DEFAULT_*`, each line with the command's help
+text) to the config path, creating the folder; an existing file is
+never changed ("… exists; not changed"). Every setting is **commented
+out** with its default (`#key = value`, explanations as `# text`), so
+untouched settings keep following marg's defaults when they change
+(Claude's choice; the alternative is writing them active). Tests: the
+file as written parses to the defaults; with every `#key`/`#[table]`
+line uncommented it parses to the defaults plus the default keymaps and
+has exactly the keys of `Config` (so a new setting must be added to the
+file), and every bound command has a help text. Messages show paths
+with `~` for the home folder.
+
+**As implemented (Phase 5, errors and reload):** unknown settings
+(`config::unknown_settings`: every dotted key not in `Config`; the
+`keys.*` tables count as one each) are reported for the config and the
+theme file ("config.toml: unknown setting view.zom_step"); the rest is
+used. Keymap problems (unknown commands, unparsable keys, conflicts)
+were already reported since Phase 1. TOML errors are put on one line
+for the status bar ("config.toml: line 4, column 6: unclosed table,
+expected `]`"); messages about a file's contents name the file only,
+read errors the whole path. **Reload:** every `ui.file_check_secs` the
+UI thread compares the modification time and size of the config and
+its theme file (two `stat`s); on a change it reads both again. A broken
+config keeps the current one ("Config not reloaded: …"); otherwise the
+keymaps, status bar parts, colors, fonts, author and dark pages
+(`[view] recolor`, `recolor_fg/bg`) change at once ("Config
+reloaded", or the first problem). Settings read when a file opens
+(`[view]` layout, gap, zoom limits, `spread_first_page_alone`,
+`jump_history`, `undo_steps`) apply to the next file; `[render]
+cache_mb` on the next start.
+
+**As implemented (Phase 5, `:set`; added 2026-10-29 at the user's
+request):** `:set name=value` (`:se`, `config.set`) changes one setting
+for the session; `:set name` shows it ("view.zoom_step = 1.1"). Names
+are dotted, or the last part alone when unique (`:set zoom_step=1.2`).
+The value is TOML, else a string (`words`, `#000000`); the whole config
+is checked by deserializing it (`Config::set`/`get` in core), so a bad
+value changes nothing and the error names the setting. Not for `keys.*`,
+`[[category]]` and `theme` ("change it in the config file"). The app
+applies a change like a reload (`apply_config`: keymaps, status bar,
+colors, fonts, author, dark pages) and also gives the open view the new
+gap and zoom limits (`View::set_spacing`); `:set` values are kept in
+`session_sets` and applied again on top of the file after every
+reload.
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -1170,6 +1282,9 @@ position is the document point at the window's top-left. Saved when a file
 opens, before `:e` switches files, and on exit; each save re-reads the file
 and changes only its own entry (several windows can share it). At most 1000
 files (`state_files_max`); the least recently opened are dropped.
+**As implemented (Phase 5):** also saved every `ui.state_save_secs`
+while the entry differs from the last one written (on the UI thread;
+the file is small).
 **As implemented (Phase 4):** the layout and marks (`[files."…".marks.a]`
 = page, x, y) are saved per file; older state files without marks load
 (empty).
@@ -1292,7 +1407,22 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   Windows built with the MSVC toolchain and the **dynamic** CRT: `mupdf-sys`
   builds MuPDF's own `platform/win32/mupdf.sln`, whose projects use `/MD`
   (Release) and `/MDd` (Debug), so `+crt-static` would mismatch. The `.exe`
-  currently needs the MSVC runtime (see open questions).
+  needs the MSVC runtime: decided by the user 2026-10-29 (Phase 5) to
+  ship it that way and say so in the README, instead of patching MuPDF's
+  vcxproj files for a static CRT or bundling the runtime DLLs.
+
+**Binary size (Phase 5, measured 2026-10-29, Linux):** release 37.4 MB,
+`dist` 30.6 MB (26.1 MB stripped). Most of it is Rust code, led by
+`wgpu`/`naga` (eframe's default renderer). A trial with eframe's `glow`
+(OpenGL) renderer, without `accesskit` and system fonts, gave 22.9 MB
+(18.0 MB stripped), startup the same within noise on Xvfb; it needs only
+`on_exit(&mut self, _gl: Option<&glow::Context>)`. **Rejected by the
+user** (Claude agreeing): size does not matter for this tool, wgpu's
+Vulkan/DX12/Metal fallbacks are safer on untested drivers (and a future
+macOS build), and symbol names in backtraces help diagnose crashes, so
+`strip` stays off too. For comparison (Arch, installed): Zathura 1.9 MB
+plus GTK4 54 MB, GLib 38 MB and a PDF backend (Poppler ~10 MB or libmupdf
+56 MB); Okular 19.5 MB plus Qt and KDE Frameworks.
 
 ### Folder structure
 
@@ -1350,7 +1480,18 @@ test files), so their licence is clear.
   every push. The user develops mainly on one OS; CI keeps the other one from
   breaking silently.
 - **Releases**: when the user asks, tag `vX.Y.Z` on `main`; CI attaches the
-  Linux binary and the portable Windows `.exe` to a GitHub release. Locally
+  Linux binary and the portable Windows `.exe` to a GitHub release.
+  **As implemented (Phase 5):** `.github/workflows/release.yml`: on a
+  `v*` tag, Linux and Windows run the tests, build `--profile dist -p
+  marg` and upload `marg-linux-x86_64` and `marg-windows-x86_64.exe`; a
+  last job creates the release with `gh release create` and generated
+  notes. The tag must equal `v` + the workspace version in `Cargo.toml`
+  (bump it in a commit before tagging). Windows warns (not fails) if
+  `LNK4098` shows up in the release build. "Run workflow" by hand builds
+  the artifacts without a release. The Linux binary links the glibc of
+  `ubuntu-latest`. Checked locally: `cargo build --profile dist -p
+  marg` works (30 MB binary, ~11 min from clean, mostly MuPDF); the
+  workflow itself runs only once pushed. Locally
   the user runs `cargo run --release -- file.pdf`.
 - Unit-test pure logic in `marg-core`. Round-trip-test annotations in
   `marg-pdf` (create → save → reopen → verify). Check behaviour and speed
@@ -1421,6 +1562,16 @@ choice); 2 jump history and marks; 3 outline overlay; 4 search; 5 links
 (`gl`, click, external URLs after `y`, opened with `xdg-open` / `start`);
 6 help overlay `?` and `:help`; 7 docs and handover.
 
+**Phase 5 steps** (branch `phase-5-release`, planned 2026-10-29 with the
+user, one commit each): 1 Markdown export (`:export md [path]`); 2
+`:config` (commented default config); 3 config errors (unknown keys,
+keymap conflicts) and auto-reload; 4 password prompt; 5 read-only files;
+6 cheat sheet (generated, checked by a test) and README; 7 release
+builds in CI on `v*` tags; 8 polish from the user's list (none yet; it
+grows as they test), docs and handover. To ask at their step: `:set`
+(Phase 1 put it in Phase 5, the Phase 3b choice ruled out runtime
+settings), the Windows CRT (§12), the Phase 4 choices.
+
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
 building more.
@@ -1438,13 +1589,10 @@ building more.
 - Two-stage hints are a design proposal; the `words` mode exists as an
   alternative. Confirm at the decision milestone.
 - `spread_first_page_alone` default (`false`).
+- **`:config` writes every setting commented out** (Phase 5, Claude's
+  choice): untouched settings follow later default changes. The other
+  way, active values, pins today's defaults.
 - Exact grid size and step sizes in box mode.
-- **Portable Windows `.exe` (Phase 5)**: MuPDF's Windows build (via
-  `mupdf-sys` → `mupdf.sln`) uses the dynamic CRT, so static CRT is off and
-  the `.exe` needs the MSVC runtime. `CFLAGS` won't change this (MSBuild, not
-  `cc`). Options: patch `RuntimeLibrary` to `MultiThreaded` in MuPDF's
-  vcxproj files (patching MuPDF: ask the user first), or ship with the
-  runtime requirement / app-local runtime DLLs.
 
 - **List keys** (§3, "Lists"): built as decided on 2026-10-28; the user
   will re-evaluate after using it. List keys are not remappable yet.
@@ -1469,6 +1617,15 @@ building more.
   image areas from `Request::Images` boxes); `gr` as the key; theme files
   may not set `[statusbar]` (only colors and fonts); the two example
   themes.
+- **Phase 5 choices to confirm** (Claude's defaults, the user's call
+  after trying): `:export md` paths relative to the working directory
+  (like `:e`), a folder gets `<stem>.notes.md`, the date is UTC;
+  `:unlock` lasts until the file is closed and is not remembered for
+  the next time; read-only shows `[RO]` after the file name (no own
+  status bar part); after a config reload, `[view]` settings apply to
+  the next opened file and `cache_mb` to the next start; config
+  messages name the file only; the cheat sheet is the help page as
+  tables (about 200 lines, not one printed page).
 - **Phase 4 choices to confirm** (Claude's defaults, the user's call
   after trying): Space in **Continuous** stays next page (Zathura scrolls
   a screen there too; say if it should); the wheel does not turn pages
@@ -1504,7 +1661,8 @@ building more.
   dead keys could not be simulated there (§8). To check on the user's
   keyboard (Linux) and on Windows.
 - **Incremental save edge cases** (repaired files, encrypted files, Windows
-  file locks while Zotero has the file open). Mitigated by backups and the
+  file locks while Zotero has the file open). Encrypted files: checked in
+  Phase 5 (tests, AES-256 made by MuPDF; RC4 and real-world files not). Mitigated by backups and the
   rules in §2.9; round-trip tests in Phase 2.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.
@@ -1534,8 +1692,9 @@ building more.
 - Phase 2: the clipboard after `y` was not checked under Xvfb (no `xclip`);
   copy text is covered by unit tests.
 
-- Phase 3: a comment longer than the tooltip height is cut off in the
-  tooltip (the editor scrolls).
+- ~~Phase 3: a comment longer than the tooltip height is cut off~~
+  Fixed in Phase 5: the tooltip shows as many rows as fit and ends the
+  last in "…" (`e` shows the whole comment).
 - Phase 3: Square and Text annotations from other programs can be
   recolored (color and `/Subj`) but not switched with `U` (message).
 
@@ -1548,14 +1707,16 @@ building more.
   two magazine-style PDFs 268–291 ms; light pages 132–137 ms. Window ready at
   ~67 ms, document at ~80 ms; the rest is the cover render. A quick
   low-resolution first render could help; not done.
-- The state file is written on open, file switch and exit only; if marg is
-  killed, the reading position since opening is lost.
+- ~~The state file is written on open, file switch and exit only~~
+  Fixed in Phase 5: also every `[ui] state_save_secs` (5) while the
+  position, zoom, fit, layout or marks differ from the last write
+  (checked on Xvfb: killed after paging, the new page was saved). A
+  failing write is reported once, then only logged.
 - Tiles re-run the whole page's content per tile (MuPDF clips the drawing
   only). If tiled zoom feels slow, cache a display list per page on the
   document thread.
 - Windows AltGr handling and Linux Alt bindings are untested on real
   keyboards (no Alt bindings exist by default).
-- Unknown config keys are ignored silently (reported from Phase 5).
 - Under Xvfb each simulated wheel click arrives twice. Cause (confirmed
   2026-10-28): winit 0.30 X11 turns buttons 4–7 into a wheel event on both
   press and release, ignoring the state. Real mice have XI2 scroll
@@ -1604,6 +1765,44 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-29 — Phase 5: export & release
+- Done (branch `phase-5-release`, not merged, not pushed): plan agreed
+  with the user (§11 "Phase 5 steps"), then one commit per step:
+  `:export md`; `:config`; unknown settings and config reload; password
+  prompt; read-only files and `:unlock`; README and generated cheat
+  sheet; release workflow. No polish list yet (the user collects it
+  while testing).
+- Decisions: files whose permissions forbid annotations open read-only,
+  with `[annotation] ignore_permissions` for all files and a command for
+  the open file (user, 2026-10-29; Claude named it `:unlock`). Windows
+  `.exe` ships needing the MSVC runtime (user, 2026-10-29). Claude:
+  `:config` writes settings commented out (§12).
+- Tried and failed: nothing lasting. The `mupdf` crate's
+  `permissions()` reports everything allowed for real files (`/P` has
+  undefined high bits; `from_bits` fails, falls back to all), so `/P`
+  is read directly.
+- Checks: unit and round-trip tests (encrypted files made by MuPDF:
+  open, incremental and full save keep the encryption; restricted and
+  write-protected files); Xvfb with screenshots (export, `:config`,
+  reload with good/unknown/broken config, password prompt, wrong
+  password, `:e!` without asking again, Esc to the recent list,
+  read-only, `:unlock`, save). Local `--profile dist` build. Not
+  checked: the release workflow (runs only when pushed), Windows,
+  RC4 or real-world encrypted PDFs, a restricted publisher PDF.
+- State: builds; 174 tests pass; clippy and fmt clean.
+- Added after the handover, at the user's request: `:set` (§8);
+  fixed known issues: the reading position is saved every
+  `state_save_secs`, long comments end in "…" in tooltips. Binary size
+  options measured and rejected (§9 "Binary size").
+- Next: the user tries Phase 5; polish from their list; merge, push;
+  bump `Cargo.toml` to 1.0.0 and tag `v1.0.0` when the user asks (the
+  workflow refuses a tag that does not match the version).
+- Watch out: `MARG_BLESS=1 cargo test -p marg-core cheat` after
+  changing default keys or help texts, or the cheat sheet test fails.
+  A new config setting must go into `default_config.toml` too (test).
+  `Request::Open` now carries the password; the UI keeps the one that
+  worked in `OpenDoc.password` (`opening` tracks the pending open).
 
 ### 2026-10-29 — Phase 4: reading features
 - Done (branch `phase-4-reading`, not merged, not pushed): plan agreed

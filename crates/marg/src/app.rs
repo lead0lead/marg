@@ -25,7 +25,9 @@ use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
 use marg_core::view::{DocPos, Fit, View};
-use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
+use marg_pdf::{
+    DocInfo, DocThread, Edit, OpenError, Recolor, RenderKey, Request, Response, SaveError, Scale,
+};
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
@@ -38,6 +40,7 @@ use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
+use crate::startup;
 use crate::statefile;
 use crate::theme::Theme;
 use marg_core::theme::{StatusPart, status_line};
@@ -91,6 +94,23 @@ struct OpenDoc {
     pending: HashMap<u64, AfterCreate>,
     /// Where images are on each page, once asked for (box snapping).
     images: Vec<Option<Vec<BBox>>>,
+    /// The password the file was opened with, for reloading it.
+    password: Option<String>,
+    /// `:unlock`: annotate although the file's permissions forbid it.
+    unlocked: bool,
+    /// Pages whose annotations or text could not be read.
+    annots_failed: HashSet<usize>,
+    text_failed: HashSet<usize>,
+    /// `:export md`, waiting for annotations and text.
+    export: Option<PendingExport>,
+}
+
+/// A Markdown export waiting for the annotations of every page and the
+/// text of the annotated ones.
+struct PendingExport {
+    path: PathBuf,
+    /// Pages not listed again yet (so that recent edits are included).
+    relist: HashSet<usize>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -123,6 +143,35 @@ struct Created {
 impl OpenDoc {
     fn unsaved(&self) -> bool {
         self.edits > self.saved_edits
+    }
+
+    /// Why annotations cannot be changed, if they cannot.
+    fn read_only(&self, ignore_permissions: bool) -> Option<ReadOnly> {
+        if !self.info.writable {
+            Some(ReadOnly::NotWritable)
+        } else if !self.info.can_annotate && !ignore_permissions && !self.unlocked {
+            Some(ReadOnly::Forbidden)
+        } else {
+            None
+        }
+    }
+}
+
+/// Why a file is read-only.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReadOnly {
+    /// The PDF's permissions forbid annotations (`:unlock` allows them).
+    Forbidden,
+    /// marg may not write the file.
+    NotWritable,
+}
+
+impl ReadOnly {
+    fn message(self) -> &'static str {
+        match self {
+            ReadOnly::Forbidden => "Read-only: the PDF forbids annotations; :unlock",
+            ReadOnly::NotWritable => "Read-only: no permission to write this file",
+        }
     }
 }
 
@@ -231,12 +280,16 @@ enum Mode {
     Help,
     /// Typing a search.
     Search,
+    /// Asking for the password of an encrypted file.
+    Password,
 }
 
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm => "NORMAL",
+            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm | Mode::Password => {
+                "NORMAL"
+            }
             Mode::Help => "HELP",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
@@ -307,10 +360,27 @@ pub struct MargApp {
     discard: bool,
     /// When to ask whether the file changed on disk next.
     next_disk_check: Instant,
+    /// The config and theme files as last read, and when to look again.
+    config_stamp: startup::Stamp,
+    next_config_check: Instant,
+    /// The open file's entry as last written to the state file (with
+    /// `last_opened` 0), when to compare again, and whether the last write
+    /// failed (reported once).
+    saved_state: Option<FileState>,
+    next_state_save: Instant,
+    state_save_failed: bool,
+    /// `:set` changes of this session, re-applied after a config reload:
+    /// (full name, value).
+    session_sets: Vec<(String, String)>,
     /// The pending open is a reload of the current file.
     reloading: bool,
     cmdline: LineEdit,
     searchline: LineEdit,
+    /// The password prompt (no history).
+    passline: LineEdit,
+    /// The file being opened and the password sent with it; the file the
+    /// password prompt is for.
+    opening: Option<(PathBuf, Option<String>)>,
     /// Where the view was when the search prompt opened.
     search_origin: Option<DocPos>,
     next_search_id: u64,
@@ -324,6 +394,7 @@ pub struct MargApp {
     last_request: Vec<RenderKey>,
     message: Option<Message>,
     state_path: Option<PathBuf>,
+    config_path: Option<PathBuf>,
     state: State,
     recent: Option<RecentList>,
     debug: bool,
@@ -364,6 +435,7 @@ pub struct Startup {
     pub path: Option<PathBuf>,
     pub start_page: Option<usize>,
     pub state_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
     /// Problems found before the window existed (e.g. config errors).
     pub errors: Vec<String>,
     /// Process start, when `MARG_TIMING` is set.
@@ -376,13 +448,7 @@ impl MargApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
-        let (keymap, mut warnings) = Keymap::build(KeyMode::Normal, &s.config.keys);
-        let (caret_map, w) = Keymap::build(KeyMode::Caret, &s.config.keys);
-        warnings.extend(w);
-        let (visual_map, w) = Keymap::build(KeyMode::Visual, &s.config.keys);
-        warnings.extend(w);
-        let (annot_map, w) = Keymap::build(KeyMode::Annot, &s.config.keys);
-        warnings.extend(w);
+        let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&s.config);
         for w in &warnings {
             log::warn!("{w}");
         }
@@ -441,10 +507,18 @@ impl MargApp {
             after_save: AfterSave::Nothing,
             discard: false,
             next_disk_check: Instant::now(),
+            config_stamp: Vec::new(),
+            next_config_check: Instant::now(),
+            session_sets: Vec::new(),
+            saved_state: None,
+            next_state_save: Instant::now(),
+            state_save_failed: false,
             reloading: false,
             author,
             cmdline: LineEdit::default(),
             searchline: LineEdit::default(),
+            passline: LineEdit::default(),
+            opening: s.path.clone().map(|p| (p, None)),
             search_origin: None,
             next_search_id: 0,
             doc,
@@ -454,6 +528,7 @@ impl MargApp {
             last_request: Vec::new(),
             message: None,
             state_path: s.state_path,
+            config_path: s.config_path,
             state,
             recent,
             debug: false,
@@ -467,6 +542,7 @@ impl MargApp {
             }),
         };
         app.set_recolor(app.config.view.recolor);
+        app.config_stamp = startup::stamp(&app.config_files());
         if let Some(t) = &app.timing {
             t.log("window created");
         }
@@ -521,7 +597,10 @@ impl MargApp {
                             t.log(&format!("document opened (open took {took:?})"));
                         }
                         self.save_state();
-                        if std::mem::take(&mut self.reloading) {
+                        let reloaded = std::mem::take(&mut self.reloading);
+                        // A reload keeps `:unlock`.
+                        let unlocked = reloaded && self.open.as_ref().is_some_and(|o| o.unlocked);
+                        if reloaded {
                             self.show(Level::Info, "Reloaded from disk".into());
                         }
                         self.after_save = AfterSave::Nothing;
@@ -532,7 +611,15 @@ impl MargApp {
                         self.caret = None;
                         self.selection = None;
                         self.hinting = None;
-                        let doc = self.open_doc(info, generation);
+                        let mut doc = self.open_doc(info, generation);
+                        doc.password = self.opening.take().and_then(|(_, pw)| pw);
+                        doc.unlocked = unlocked;
+                        if !reloaded
+                            && let Some(r) =
+                                doc.read_only(self.config.annotation.ignore_permissions)
+                        {
+                            self.show(Level::Warn, r.message().into());
+                        }
                         self.selected_annot = None;
                         self.doc.send(Request::Annots {
                             pages: (0..doc.view.page_count()).collect(),
@@ -547,8 +634,25 @@ impl MargApp {
                         // if marg does not exit cleanly.
                         self.save_state();
                     }
+                    Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
+                        self.reloading = false;
+                        let Some((path, _)) = &self.opening else {
+                            continue;
+                        };
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        log::info!("{}: {e}", path.display());
+                        if e == OpenError::WrongPassword {
+                            self.show(Level::Warn, format!("Wrong password for {name}"));
+                        }
+                        self.passline.clear();
+                        if self.mode != Mode::Password {
+                            self.return_mode = self.mode;
+                        }
+                        self.mode = Mode::Password;
+                    }
                     Err(e) => {
                         self.reloading = false;
+                        self.opening = None;
                         self.error(format!("Cannot open: {e}"));
                     }
                 },
@@ -766,7 +870,7 @@ impl MargApp {
                                 AfterSave::Quit => {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close)
                                 }
-                                AfterSave::Open(path) => self.doc.send(Request::Open(path)),
+                                AfterSave::Open(path) => self.send_open(path, None),
                                 AfterSave::Close => self.close_doc(ctx),
                             }
                         }
@@ -807,6 +911,9 @@ impl MargApp {
                     if generation != open.generation {
                         continue;
                     }
+                    if let Some(x) = &mut open.export {
+                        x.relist.remove(&page);
+                    }
                     match result {
                         Ok(list) => {
                             if self.selected_annot.is_some_and(|(p, x)| {
@@ -815,9 +922,11 @@ impl MargApp {
                                 self.selected_annot = None;
                             }
                             open.annots[page] = Some(list);
+                            open.annots_failed.remove(&page);
                         }
                         Err(e) => {
-                            log::error!("annotations of page {} failed: {e}", page + 1)
+                            log::error!("annotations of page {} failed: {e}", page + 1);
+                            open.annots_failed.insert(page);
                         }
                     }
                 }
@@ -832,7 +941,10 @@ impl MargApp {
                     }
                     match result {
                         Ok(text) => open.texts[page] = Some(text),
-                        Err(e) => log::error!("text of page {} failed: {e}", page + 1),
+                        Err(e) => {
+                            log::error!("text of page {} failed: {e}", page + 1);
+                            open.text_failed.insert(page);
+                        }
                     }
                 }
             }
@@ -903,6 +1015,11 @@ impl MargApp {
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
+            password: None,
+            unlocked: false,
+            annots_failed: HashSet::new(),
+            text_failed: HashSet::new(),
+            export: None,
             links: vec![None; view.page_count()],
             links_requested: HashSet::new(),
             view,
@@ -941,6 +1058,7 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Search => self.search_event(e),
+                _ if self.mode == Mode::Password => self.password_event(e),
                 _ if self.mode == Mode::Confirm => self.confirm_event(e),
                 _ if self.mode == Mode::Help => {
                     if self.help.as_mut().is_none_or(|(h, _)| h.event(e)) {
@@ -1027,21 +1145,52 @@ impl MargApp {
 
     /// Write the open document's reading position to the state file.
     fn save_state(&mut self) {
+        let Some(mut file) = self.file_state() else {
+            return;
+        };
         let Some(open) = &self.open else { return };
-        let file = FileState {
+        let key = open.key.clone();
+        self.saved_state = Some(file.clone());
+        file.last_opened = statefile::now_secs();
+        let max = self.config.ui.state_files_max;
+        self.state.update(key.clone(), file.clone(), max);
+        let Some(path) = &self.state_path else { return };
+        match statefile::save_entry(path, &key, file, max) {
+            Ok(()) => self.state_save_failed = false,
+            Err(e) if self.state_save_failed => log::error!("cannot save state: {e}"),
+            Err(e) => {
+                self.state_save_failed = true;
+                self.error(format!("Cannot save state: {e}"));
+            }
+        }
+    }
+
+    /// The open file's state-file entry, with `last_opened` 0.
+    fn file_state(&self) -> Option<FileState> {
+        let open = self.open.as_ref()?;
+        Some(FileState {
             path: open.info.path.to_string_lossy().into_owned(),
-            last_opened: statefile::now_secs(),
+            last_opened: 0,
             position: open.view.position(),
             zoom: open.view.zoom(),
             fit: open.view.fit(),
             layout: open.view.layout(),
             marks: open.marks.clone(),
-        };
-        let max = self.config.ui.state_files_max;
-        self.state.update(open.key.clone(), file.clone(), max);
-        let Some(path) = &self.state_path else { return };
-        if let Err(e) = statefile::save_entry(path, &open.key, file, max) {
-            self.error(format!("Cannot save state: {e}"));
+        })
+    }
+
+    /// Every `ui.state_save_secs`: save the reading position if it moved,
+    /// so it survives marg being killed. (The UI wakes up at least every
+    /// `file_check_secs` for the file checks, so an idle window gets here.)
+    fn autosave_state(&mut self) {
+        let now = Instant::now();
+        if now < self.next_state_save {
+            return;
+        }
+        self.next_state_save =
+            now + Duration::from_secs_f32(self.config.ui.state_save_secs.max(0.5));
+        if self.open.is_some() && self.file_state() != self.saved_state {
+            self.save_state();
         }
     }
 
@@ -1403,6 +1552,8 @@ impl MargApp {
                     self.reveal_annot(&a);
                 }
             }
+            annotlist::Action::Edit { .. } | annotlist::Action::Delete { .. }
+                if self.refuse_edit() => {}
             annotlist::Action::Edit { page, xref } => {
                 self.annot_list = None;
                 self.mode = Mode::Normal;
@@ -2781,6 +2932,9 @@ impl MargApp {
 
     fn run(&mut self, ctx: &egui::Context, command: Command, count: Option<u32>) {
         let n = count.unwrap_or(1).max(1);
+        if command.edits() && self.refuse_edit() {
+            return;
+        }
         match command {
             Command::CommandLine => {
                 self.return_mode = self.mode;
@@ -2847,6 +3001,22 @@ impl MargApp {
             }
             Command::Open(path) => {
                 self.open_path(&path);
+                return;
+            }
+            Command::WriteConfig => {
+                self.write_config();
+                return;
+            }
+            Command::Unlock => {
+                self.unlock();
+                return;
+            }
+            Command::Set(arg) => {
+                self.set_setting(ctx, &arg);
+                return;
+            }
+            Command::Export(path) => {
+                self.start_export(path.as_deref());
                 return;
             }
             Command::Version => {
@@ -3041,6 +3211,10 @@ impl MargApp {
             | Command::Quit
             | Command::QuitForce
             | Command::Open(_)
+            | Command::Export(_)
+            | Command::WriteConfig
+            | Command::Unlock
+            | Command::Set(_)
             | Command::Version
             | Command::DebugToggle => {}
             Command::HintCaret
@@ -3097,7 +3271,168 @@ impl MargApp {
         if self.open.as_ref().is_some_and(|o| o.unsaved()) {
             self.save(false, AfterSave::Open(path));
         } else {
-            self.doc.send(Request::Open(path));
+            self.send_open(path, None);
+        }
+    }
+
+    /// In a read-only file: say why, and true (the edit is not made).
+    fn refuse_edit(&mut self) -> bool {
+        let ignore = self.config.annotation.ignore_permissions;
+        match self.open.as_ref().and_then(|o| o.read_only(ignore)) {
+            Some(r) => {
+                self.show(Level::Warn, r.message().into());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `:unlock`: allow annotations in the open file until it is closed.
+    fn unlock(&mut self) {
+        let ignore = self.config.annotation.ignore_permissions;
+        let Some(open) = &mut self.open else {
+            self.error("No file open".into());
+            return;
+        };
+        match open.read_only(ignore) {
+            Some(ReadOnly::Forbidden) => {
+                open.unlocked = true;
+                self.show(
+                    Level::Info,
+                    "Annotations allowed in this file until it is closed".into(),
+                );
+            }
+            Some(ReadOnly::NotWritable) => {
+                self.show(Level::Warn, ReadOnly::NotWritable.message().into());
+            }
+            None => self.show(Level::Info, "Not read-only".into()),
+        }
+    }
+
+    /// `:config`: write the commented default config, unless a config
+    /// file exists.
+    fn write_config(&mut self) {
+        let Some(path) = self.config_path.clone() else {
+            self.error("No config folder on this system".into());
+            return;
+        };
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let mut f = std::fs::File::create_new(&path)?;
+            std::io::Write::write_all(&mut f, marg_core::default_config::text().as_bytes())
+        };
+        match write() {
+            Ok(()) => self.show(Level::Info, format!("Wrote {}", complete::tilde(&path))),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => self.show(
+                Level::Info,
+                format!("{} exists; not changed", complete::tilde(&path)),
+            ),
+            Err(e) => self.error(format!("Cannot write {}: {e}", complete::tilde(&path))),
+        }
+    }
+
+    /// `:export md [path]`: list the annotations again, then write the file once everything is read
+    /// (`poll_export`). `path` may be a folder.
+    fn start_export(&mut self, path: Option<&str>) {
+        let Some(open) = &mut self.open else {
+            self.error("No file open".into());
+            return;
+        };
+        let pdf = &open.info.path;
+        let default_name = || {
+            let stem = pdf.file_stem().unwrap_or_default().to_string_lossy();
+            format!("{stem}.notes.md")
+        };
+        let path = match path {
+            None => pdf.with_file_name(default_name()),
+            Some(p) => {
+                let p = complete::expand_tilde(p);
+                if p.is_dir() {
+                    p.join(default_name())
+                } else {
+                    p
+                }
+            }
+        };
+        // Edits are applied as they arrive and listings answered later, so
+        // listing every page again includes every edit sent so far. Idle:
+        // renders go first.
+        let pages: Vec<usize> = (0..open.annots.len()).collect();
+        let relist = pages.iter().copied().collect();
+        self.doc.send(Request::Annots {
+            pages,
+            urgent: false,
+        });
+        open.export = Some(PendingExport { path, relist });
+        self.show(Level::Info, "Exporting…".into());
+        self.poll_export();
+    }
+
+    /// Write the pending export once the annotations of every page and the
+    /// text of every annotated page are read (or failed).
+    fn poll_export(&mut self) {
+        let Some(open) = &mut self.open else { return };
+        let Some(x) = &open.export else { return };
+        if !x.relist.is_empty() {
+            return;
+        }
+        let annotated: Vec<usize> = (0..open.annots.len())
+            .filter(|&p| open.annots[p].as_ref().is_some_and(|a| !a.is_empty()))
+            .collect();
+        let mut waiting = false;
+        for &p in &annotated {
+            if open.texts[p].is_none() && !open.text_failed.contains(&p) {
+                open.request_text(&self.doc, p);
+                waiting = true;
+            }
+        }
+        if waiting {
+            return;
+        }
+        let Some(x) = open.export.take() else { return };
+        let all: Vec<AnnotInfo> = open.annots.iter().flatten().flatten().cloned().collect();
+        let cats: Vec<_> = self
+            .config
+            .categories
+            .iter()
+            .map(|c| (c.name.as_str(), parse_color(&c.color)))
+            .collect();
+        let entries = marg_core::annotlist::entries(&all, &open.texts, &cats);
+        let names: Vec<&str> = cats.iter().map(|c| c.0).collect();
+        let md = marg_core::export::markdown(
+            &marg_core::export::Export {
+                file_name: &open.file_name,
+                title: open.info.title.as_deref(),
+                date: &marg_core::export::date(statefile::now_secs()),
+                labels: open.info.labels.as_deref(),
+                categories: &names,
+            },
+            &entries,
+        );
+        let unread = annotated
+            .iter()
+            .filter(|p| open.text_failed.contains(p))
+            .count()
+            + open.annots_failed.len();
+        let shown = x.path.file_name().map_or_else(
+            || x.path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        );
+        match std::fs::write(&x.path, md) {
+            Ok(()) if unread > 0 => self.show(
+                Level::Warn,
+                format!(
+                    "Exported {} annotations to {shown}; {unread} pages could not be read",
+                    entries.len()
+                ),
+            ),
+            Ok(()) => self.show(
+                Level::Info,
+                format!("Exported {} annotations to {shown}", entries.len()),
+            ),
+            Err(e) => self.error(format!("Export failed: {}: {e}", x.path.display())),
         }
     }
 
@@ -3129,10 +3464,58 @@ impl MargApp {
     /// dropping unsaved changes.
     fn reload(&mut self) {
         let Some(open) = &self.open else { return };
-        let path = open.info.path.clone();
+        let (path, password) = (open.info.path.clone(), open.password.clone());
         self.save_state();
         self.reloading = true;
-        self.doc.send(Request::Open(path));
+        self.send_open(path, password);
+    }
+
+    /// Ask the document thread to open `path`; remembered for the password
+    /// prompt and for reloading.
+    fn send_open(&mut self, path: PathBuf, password: Option<String>) {
+        self.opening = Some((path.clone(), password.clone()));
+        self.doc.send(Request::Open { path, password });
+    }
+
+    /// A key in the password prompt: Enter tries the password, Esc gives
+    /// up on the file.
+    fn password_event(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => self.passline.insert(t),
+            Event::Key { pressed: true, .. } => {
+                let Some(k) = input::key_press(e) else { return };
+                match k.code {
+                    KeyCode::Named(Named::Esc) => {
+                        self.passline.clear();
+                        self.opening = None;
+                        self.mode = self.return_mode;
+                        if self.open.is_none() {
+                            self.recent = Some(RecentList::new(
+                                &self.state,
+                                self.config.ui.recent_files_max,
+                            ));
+                            self.mode = Mode::Recent;
+                        }
+                        self.show(Level::Info, "Not opened".into());
+                    }
+                    KeyCode::Named(Named::Enter) => {
+                        let password = self.passline.text().to_string();
+                        self.passline.clear();
+                        if let Some((path, _)) = self.opening.clone() {
+                            self.send_open(path, Some(password));
+                        }
+                    }
+                    KeyCode::Named(Named::Backspace) => self.passline.backspace(),
+                    KeyCode::Named(Named::Delete) => self.passline.delete(),
+                    KeyCode::Named(Named::Left) => self.passline.left(),
+                    KeyCode::Named(Named::Right) => self.passline.right(),
+                    KeyCode::Named(Named::Home) => self.passline.home(),
+                    KeyCode::Named(Named::End) => self.passline.end(),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Ask the document thread whether the file changed, every
@@ -3148,6 +3531,149 @@ impl MargApp {
             self.next_disk_check = now + every;
         }
         ctx.request_repaint_after(self.next_disk_check - now);
+    }
+
+    /// The files the config comes from: the config and its theme.
+    fn config_files(&self) -> Vec<PathBuf> {
+        let Some(path) = &self.config_path else {
+            return Vec::new();
+        };
+        let mut files = vec![path.clone()];
+        files.extend(startup::theme_file(path, &self.config));
+        files
+    }
+
+    /// Every `ui.file_check_secs`: reload the config if it or its theme
+    /// changed.
+    fn check_config(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        if now >= self.next_config_check {
+            self.next_config_check =
+                now + Duration::from_secs_f32(self.config.ui.file_check_secs.max(0.1));
+            let stamp = startup::stamp(&self.config_files());
+            if stamp != self.config_stamp {
+                self.reload_config(ctx);
+            }
+        }
+        ctx.request_repaint_after(self.next_config_check - now);
+    }
+
+    /// Read the config again. A broken file keeps the current config.
+    /// Settings used when a file opens (`[view]` layout and size values,
+    /// `jump_history`, `undo_steps`) apply to the next file; `cache_mb` on
+    /// the next start.
+    fn reload_config(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.config_path.clone() else {
+            return;
+        };
+        let result = startup::read_config(&path);
+        // The theme may have changed with the config.
+        let (mut config, mut problems) = match result {
+            Ok(c) => c,
+            Err(e) => {
+                self.config_stamp = startup::stamp(&self.config_files());
+                self.error(format!("Config not reloaded: {e}"));
+                return;
+            }
+        };
+        for (name, value) in &self.session_sets {
+            match config.set(name, value) {
+                Ok((c, _)) => config = c,
+                Err(e) => problems.push(format!(":set {e}")),
+            }
+        }
+        let old = std::mem::replace(&mut self.config, config);
+        self.config_stamp = startup::stamp(&self.config_files());
+        let warnings = self.apply_config(ctx, &old, &mut problems);
+        for p in &problems {
+            log::error!("{p}");
+        }
+        for w in &warnings {
+            log::warn!("{w}");
+        }
+        log::info!("config reloaded");
+        if let Some(p) = problems.first() {
+            self.show(Level::Error, p.clone());
+        } else if let Some(w) = warnings.first() {
+            self.show(Level::Warn, w.clone());
+        } else {
+            self.show(Level::Info, "Config reloaded".into());
+        }
+    }
+
+    /// `:set name=value` (for this session) or `:set name` (show it).
+    fn set_setting(&mut self, ctx: &egui::Context, arg: &str) {
+        let Some((name, value)) = arg.split_once('=') else {
+            match self.config.get(arg) {
+                Ok((name, value)) => self.show(Level::Info, format!("{name} = {value}")),
+                Err(e) => self.error(e),
+            }
+            return;
+        };
+        let (config, name) = match self.config.set(name, value.trim()) {
+            Ok(c) => c,
+            Err(e) => {
+                self.error(e);
+                return;
+            }
+        };
+        let value = value.trim().to_string();
+        self.session_sets.retain(|(n, _)| *n != name);
+        self.session_sets.push((name.clone(), value));
+        let old = std::mem::replace(&mut self.config, config);
+        let mut problems = Vec::new();
+        let warnings = self.apply_config(ctx, &old, &mut problems);
+        let shown = self
+            .config
+            .get(&name)
+            .map_or_else(|_| name.clone(), |(n, v)| format!("{n} = {v}"));
+        if let Some(p) = problems.first().or(warnings.first()) {
+            self.error(p.clone());
+        } else {
+            self.show(Level::Info, format!("{shown} (this session)"));
+        }
+    }
+
+    /// Bring everything made from the config up to date after it changed
+    /// from `old`. Returns keymap warnings; adds other problems.
+    fn apply_config(
+        &mut self,
+        ctx: &egui::Context,
+        old: &Config,
+        problems: &mut Vec<String>,
+    ) -> Vec<String> {
+        let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&self.config);
+        (self.keymap, self.caret_map, self.visual_map, self.annot_map) =
+            (keymap, caret_map, visual_map, annot_map);
+        if self.config.keys != old.keys {
+            self.matcher.reset();
+        }
+        let (left, right, w) = self.config.statusbar.parts();
+        problems.extend(w);
+        self.status_parts = (left, right);
+        if self.config.fonts != old.fonts {
+            // From the built-in fonts, also if the new file fails.
+            ctx.set_fonts(egui::FontDefinitions::default());
+            problems.extend(crate::theme::install_fonts(ctx, &self.config.fonts));
+        }
+        self.theme = Theme::new(&self.config.colors, &self.config.fonts);
+        self.author = annotation_author(&self.config.annotation.author);
+        if self.config.view.recolor != old.view.recolor {
+            self.set_recolor(self.config.view.recolor);
+        } else if self.recolor
+            && (self.config.colors.recolor_fg, self.config.colors.recolor_bg)
+                != (old.colors.recolor_fg, old.colors.recolor_bg)
+        {
+            self.set_recolor(true);
+        }
+        let (new, was) = (&self.config.view, &old.view);
+        if (new.page_gap_px, new.zoom_min, new.zoom_max)
+            != (was.page_gap_px, was.zoom_min, was.zoom_max)
+            && let Some(open) = &mut self.open
+        {
+            open.view.set_spacing(new);
+        }
+        warnings
     }
 
     /// Ask the document thread to save, then do `after` if it worked.
@@ -3207,7 +3733,12 @@ impl MargApp {
                 }
             }
             (_, None) => String::new(),
-            (StatusPart::File, Some(open)) => open.file_name.clone(),
+            (StatusPart::File, Some(open)) => {
+                match open.read_only(self.config.annotation.ignore_permissions) {
+                    Some(_) => format!("{} [RO]", open.file_name),
+                    None => open.file_name.clone(),
+                }
+            }
             (StatusPart::Page, Some(open)) => {
                 let v = &open.view;
                 let pages = v.current_pages();
@@ -3265,6 +3796,20 @@ impl MargApp {
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
                 ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
+            } else if self.mode == Mode::Password {
+                let name = self
+                    .opening
+                    .as_ref()
+                    .and_then(|(p, _)| p.file_name())
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let len = self.passline.text().chars().count();
+                let at = self.passline.cursor();
+                let (before, after) = ("•".repeat(at), "•".repeat(len - at));
+                ui.label(text(
+                    &format!("Password for {name}: {before}▏{after}"),
+                    th.statusbar_fg,
+                ));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
@@ -3335,6 +3880,7 @@ impl eframe::App for MargApp {
         let th = self.theme.clone();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
+        self.poll_export();
         // Closing the window saves first, like `q`.
         if ctx.input(|i| i.viewport().close_requested())
             && !self.discard
@@ -3347,6 +3893,8 @@ impl eframe::App for MargApp {
         }
         self.autosave(&ctx);
         self.check_disk(&ctx);
+        self.check_config(&ctx);
+        self.autosave_state();
         if self
             .message
             .as_ref()
@@ -3629,6 +4177,24 @@ fn annot_kind(subtype: &str) -> Option<AnnotKind> {
 }
 
 /// The annotation author: the configured one, else the OS user name.
+/// The Normal, Caret, Visual and Annot keymaps, and warnings about the
+/// `[keys.*]` tables.
+fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
+    let mut warnings = Vec::new();
+    let maps = [
+        KeyMode::Normal,
+        KeyMode::Caret,
+        KeyMode::Visual,
+        KeyMode::Annot,
+    ]
+    .map(|m| {
+        let (map, w) = Keymap::build(m, &config.keys);
+        warnings.extend(w);
+        map
+    });
+    (maps, warnings)
+}
+
 fn annotation_author(configured: &str) -> String {
     if !configured.trim().is_empty() {
         return configured.trim().to_string();

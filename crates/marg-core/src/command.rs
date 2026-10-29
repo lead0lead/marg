@@ -35,6 +35,16 @@ pub enum Command {
     Quit,
     QuitForce,
     Open(String),
+    /// Write the commented default config, if there is no config file.
+    WriteConfig,
+    /// `:set name=value` changes a setting for this session; `:set name`
+    /// shows it.
+    Set(String),
+    /// Allow annotating the open file although its permissions forbid it,
+    /// until it is closed.
+    Unlock,
+    /// `:export md [path]`: write the annotations as Markdown.
+    Export(Option<String>),
     Version,
     DebugToggle,
     /// Hints on words; the picked word gets the caret.
@@ -344,6 +354,16 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("help", Command::Help, "keys of this mode"),
     ("help.page", Command::HelpPage, "help page"),
     (
+        "file.unlock",
+        Command::Unlock,
+        "annotate this file although it forbids it",
+    ),
+    (
+        "config.write",
+        Command::WriteConfig,
+        "write the default config file",
+    ),
+    (
         "view.spread_first_alone",
         Command::SpreadFirstAlone,
         "spread: first page alone on/off",
@@ -356,6 +376,28 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
 ];
 
 impl Command {
+    /// Whether the command changes annotations (refused in read-only
+    /// files).
+    pub fn edits(&self) -> bool {
+        matches!(
+            self,
+            Command::Highlight(_)
+                | Command::Underline
+                | Command::PickCategory
+                | Command::Comment
+                | Command::Note
+                | Command::BoxMode
+                | Command::AnnotDelete
+                | Command::AnnotRecolor(_)
+                | Command::AnnotToggleType
+                | Command::AnnotEdit
+                | Command::Erase
+                | Command::EraseWhole
+                | Command::Undo
+                | Command::Redo
+        )
+    }
+
     /// Look up a bindable command by name.
     pub fn from_name(name: &str) -> Option<Self> {
         REGISTRY
@@ -368,6 +410,8 @@ impl Command {
         match self {
             Command::PageGoto(_) => "page.goto",
             Command::Open(_) => "file.open",
+            Command::Export(_) => "file.export",
+            Command::Set(_) => "config.set",
             Command::SetLayout(_) => "view.layout",
             c => REGISTRY
                 .iter()
@@ -385,7 +429,7 @@ impl fmt::Display for Command {
 
 /// Parse a `:` command line (without the colon).
 ///
-/// `q`, `q!`, `e <path>`, `layout <name>`, `version`, `debug`, a page
+/// `q`, `q!`, `e <path>`, `export md [path]`, `layout <name>`, `version`, `debug`, a page
 /// number, or any registered command name (`zoom.in`).
 pub fn parse_ex(line: &str) -> Result<Command, String> {
     let line = line.trim();
@@ -415,6 +459,11 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
                 Ok(Command::Open(rest.to_string()))
             }
         }
+        "export" => match rest.split_once(char::is_whitespace) {
+            None if rest == "md" => Ok(Command::Export(None)),
+            Some(("md", path)) => Ok(Command::Export(Some(path.trim().to_string()))),
+            _ => Err("usage: export md [path]".into()),
+        },
         "layout" => match rest {
             "continuous" => Ok(Command::SetLayout(Layout::Continuous)),
             "single" => Ok(Command::SetLayout(Layout::Single)),
@@ -422,6 +471,15 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
             _ => Err("usage: layout continuous|single|spread".into()),
         },
         "help" | "h" => no_arg(Command::HelpPage),
+        "config" => no_arg(Command::WriteConfig),
+        "unlock" => no_arg(Command::Unlock),
+        "set" | "se" => {
+            if rest.is_empty() {
+                Err("usage: set name=value, or set name to show it".into())
+            } else {
+                Ok(Command::Set(rest.to_string()))
+            }
+        }
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -448,6 +506,27 @@ mod tests {
     }
 
     #[test]
+    fn edits_are_the_annotation_commands() {
+        let edits: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|(_, c, _)| c.edits())
+            .map(|(n, _, _)| *n)
+            .collect();
+        for n in &edits {
+            assert!(
+                n.starts_with("annotate.")
+                    || n.starts_with("annot.")
+                    || ["undo", "redo"].contains(n),
+                "{n}"
+            );
+        }
+        for n in ["annot.next", "annot.prev", "annot.list", "selection.copy"] {
+            assert!(!edits.contains(&n), "{n}");
+        }
+        assert!(edits.contains(&"annotate.box") && edits.contains(&"annot.delete"));
+    }
+
+    #[test]
     fn parses_ex_commands() {
         assert_eq!(parse_ex("q"), Ok(Command::Quit));
         assert_eq!(parse_ex(" q! "), Ok(Command::QuitForce));
@@ -468,7 +547,21 @@ mod tests {
             Ok(Command::SetLayout(Layout::Spread))
         );
         assert!(parse_ex("layout").is_err());
+        assert_eq!(parse_ex("export md"), Ok(Command::Export(None)));
+        assert_eq!(
+            parse_ex("export md ~/notes/a b.md"),
+            Ok(Command::Export(Some("~/notes/a b.md".into())))
+        );
+        assert!(parse_ex("export").is_err());
+        assert!(parse_ex("export html").is_err());
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
+        assert_eq!(parse_ex("config"), Ok(Command::WriteConfig));
+        assert_eq!(parse_ex("unlock"), Ok(Command::Unlock));
+        assert_eq!(
+            parse_ex("set zoom_step = 1.2"),
+            Ok(Command::Set("zoom_step = 1.2".into()))
+        );
+        assert!(parse_ex("set").is_err());
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());

@@ -1,0 +1,164 @@
+# marg config, written by :config.
+#
+# Every setting below is commented out and shows its default. Uncomment a
+# line and change it to use your own value; settings left commented out keep
+# following marg's defaults, also when a later version changes them.
+# marg reads this file again when it changes; errors show in the status bar.
+# Sizes: pt = PDF points (1/72 inch), px = logical pixels.
+
+# A theme file with [colors] and [fonts], relative to this folder (~ works).
+# Values set in this file win over the theme's. Empty: no theme.
+#theme = ""
+
+#[view]
+# Layout of a file opened the first time: continuous | single | spread.
+# Portrait first page: fit width; landscape first page: fit page.
+#default_layout_portrait = "continuous"
+#default_layout_landscape = "single"
+# Gap between pages (px).
+#page_gap_px = 8.0
+# One j/k/h/l step (px).
+#scroll_step_px = 60.0
+# Zoom factor per +/- step, and the zoom range (1.0 = 100%).
+#zoom_step = 1.1
+#zoom_min = 0.1
+#zoom_max = 8.0
+# Not used yet: scrolling is instant.
+#scroll_smooth = false
+# Spread layout: show the first page (a book's cover) alone.
+#spread_first_page_alone = false
+# Positions kept in the jump history (Ctrl-o / Ctrl-i).
+#jump_history = 100
+# Dark pages at start (gr toggles them); colors: recolor_fg / recolor_bg.
+#recolor = false
+
+#[render]
+# Pages rendered ahead before and after the visible ones.
+#prerender_pages = 2
+# Texture cache budget (MB).
+#cache_mb = 256
+# Above this zoom, pages render in tiles of tile_px device pixels.
+#tile_above_zoom = 2.0
+#tile_px = 512
+
+#[ui]
+# Status bar height (px; at least the font size + 8).
+#status_bar_px = 22.0
+# How long a message stays in the status bar.
+#message_secs = 4.0
+# Time to finish a key sequence such as gg (ms).
+#sequence_timeout_ms = 1000
+# Length of the recent files list, and files remembered in the state file.
+#recent_files_max = 50
+#state_files_max = 1000
+# How often the reading position is saved while it changes.
+#state_save_secs = 5.0
+# Presses closer than this make a double or triple click (ms).
+#multi_click_ms = 400
+# How often the open file is checked for changes by other programs.
+#file_check_secs = 1.0
+# Selecting with the mouse near the top or bottom edge scrolls: px/s per px
+# into the edge zone, and the zone's height (px).
+#drag_scroll_rate = 12.0
+#drag_scroll_edge_px = 16.0
+# Comment editor width (px) and maximum height (share of the window).
+#comment_width_px = 360.0
+#comment_max_height = 0.4
+# Annotation list and outline width (share of the window).
+#annot_list_width = 0.35
+#outline_width = 0.4
+
+#[hints]
+# Label characters; two-stage (lines, then words) or words (all at once).
+#chars = "asdfghjkl"
+#mode = "two-stage"
+# Added to chars for the word labels of a picked line.
+#extra_chars = "qwertyuiop"
+
+#[annotation]
+# Annotation author; empty: your user name.
+#author = ""
+#highlight_opacity = 0.4
+# Box line width and note icon size (pt).
+#box_stroke_pt = 1.5
+#note_size_pt = 20.0
+# Box mode: label grid, and how far hjkl / HJKL move a corner (pt), with Ctrl.
+#box_grid_cols = 9
+#box_grid_rows = 12
+#box_step_pt = 4.0
+#box_fine_step_pt = 1.0
+# Save this long after the last change.
+#autosave_secs = 2.0
+# Undo steps per session.
+#undo_steps = 100
+# Files whose permissions forbid annotations open read-only; true annotates
+# them anyway. :unlock does it for the open file only.
+#ignore_permissions = false
+
+# Highlight categories, keys 1-5 in order. The name is written to the
+# annotation's subject; the colors match Zotero's. Setting any [[category]]
+# replaces all five, so uncomment all of them to change one.
+#[[category]]
+#name = "Key point"
+#color = "#FFD400"
+#[[category]]
+#name = "Question"
+#color = "#A28AE5"
+#[[category]]
+#name = "Definition"
+#color = "#2EA8E5"
+#[[category]]
+#name = "Disagree"
+#color = "#FF6666"
+#[[category]]
+#name = "Evidence"
+#color = "#5FB236"
+
+# Every color marg draws: #RRGGBB or #RRGGBBAA.
+#[colors]
+# Around the pages, and the line at page edges.
+#background = "#2B2B2B"
+#page_edge = "#0000005A"
+#statusbar_bg = "#1E1E1E"
+#statusbar_fg = "#D0D0D0"
+#statusbar_warn = "#FFC060"
+#statusbar_error = "#FF7070"
+# Lists, the comment editor, tooltips, the debug overlay.
+#panel_bg = "#1E1E1E"
+#panel_fg = "#D0D0D0"
+#panel_dim = "#808080"
+#panel_border = "#555555"
+#panel_selected_bg = "#3A3A3A"
+# Selected text in the comment editor.
+#editor_selection = "#2D4E8F"
+# Hint and grid labels.
+#hint_bg = "#FFD84D"
+#hint_fg = "#000000"
+#hint_typed = "#9A8020"
+#hint_border = "#806810"
+# Text selection and caret on the page.
+#selection = "#3D7EFF59"
+#caret = "#E02020"
+#caret_fill = "#E0202028"
+# Search hits, and the current one.
+#search_hit = "#FF9F1A4D"
+#search_current = "#FF5F1A99"
+# Box mode grid, and the picked cell.
+#grid_line = "#3D7EFF5A"
+#grid_cell = "#3D7EFF3C"
+# What black and white become on dark pages.
+#recolor_fg = "#D0D0D0"
+#recolor_bg = "#1E1E1E"
+
+#[fonts]
+# A .ttf/.otf/.ttc file (~ works); empty: the built-in monospace font.
+#file = ""
+# Status bar, lists, editor, tooltips; hint and grid labels.
+#size = 12.0
+#hint_size = 12.0
+
+#[statusbar]
+# Parts: mode, file, page, zoom, layout, unsaved, search, keys.
+#left = ["mode", "file", "page", "zoom", "layout", "unsaved"]
+#right = ["search", "keys"]
+#separator = "  "

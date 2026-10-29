@@ -12,7 +12,7 @@ use marg_core::outline::{Link, OutlineEntry};
 use marg_core::search::{Hit, Query};
 use marg_core::text::{BBox, PageText};
 
-use crate::document::{Doc, DocInfo, PixelRect, Pixels, Recolor, SaveError, SaveReport};
+use crate::document::{Doc, DocInfo, OpenError, PixelRect, Pixels, Recolor, SaveError, SaveReport};
 
 /// Render scale as integer thousandths of a pixel per point, so it can be
 /// used as a cache key.
@@ -76,7 +76,11 @@ pub enum Edit {
 pub enum Request {
     /// Open a document. On success it replaces the current one, clears the
     /// queue and starts a new generation; on failure the current one stays.
-    Open(PathBuf),
+    /// `password` is used if the file is encrypted.
+    Open {
+        path: PathBuf,
+        password: Option<String>,
+    },
     /// Replace the render queue. Jobs are done in order; jobs from an
     /// earlier queue that have not started are dropped. `received` is the
     /// number of `Rendered` responses the caller has taken so far: keys
@@ -116,7 +120,7 @@ pub enum Request {
 pub enum Response {
     Opened {
         generation: u64,
-        result: Result<DocInfo, String>,
+        result: Result<DocInfo, OpenError>,
         took: Duration,
     },
     Rendered {
@@ -310,9 +314,9 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
         }
         for req in incoming {
             match req {
-                Request::Open(path) => {
+                Request::Open { path, password } => {
                     let start = Instant::now();
-                    let info = match Doc::open(&path) {
+                    let info = match Doc::open_with_password(&path, password.as_deref()) {
                         Ok((d, info)) => {
                             queue.clear();
                             text_queue.clear();

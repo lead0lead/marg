@@ -3,7 +3,7 @@
 //! Every tuning value lives here, so the defaults are defined in one place.
 //! A missing config file or a missing key means the default below.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -98,6 +98,9 @@ pub struct AnnotationConfig {
     pub autosave_secs: f32,
     /// Undo steps kept per session.
     pub undo_steps: usize,
+    /// Annotate files whose permissions forbid it (otherwise they open
+    /// read-only; `:unlock` allows it for one file).
+    pub ignore_permissions: bool,
 }
 
 impl Default for AnnotationConfig {
@@ -113,6 +116,7 @@ impl Default for AnnotationConfig {
             box_fine_step_pt: 1.0,
             autosave_secs: 2.0,
             undo_steps: 100,
+            ignore_permissions: false,
         }
     }
 }
@@ -240,6 +244,9 @@ pub struct UiConfig {
     /// Files remembered in the state file; the least recently opened are
     /// dropped beyond this.
     pub state_files_max: usize,
+    /// The reading position is saved this often while it changes (and on
+    /// opening, switching files and exit).
+    pub state_save_secs: f32,
     /// Presses closer together than this count as a double or triple click.
     pub multi_click_ms: u64,
     /// How often the open file is checked for changes by other programs.
@@ -269,6 +276,7 @@ impl Default for UiConfig {
             sequence_timeout_ms: 1000,
             recent_files_max: 50,
             state_files_max: 1000,
+            state_save_secs: 5.0,
             multi_click_ms: 400,
             file_check_secs: 1.0,
             drag_scroll_rate: 12.0,
@@ -285,7 +293,7 @@ impl Config {
     /// Parse a config file. Missing keys take their defaults. The error
     /// message includes the line number.
     pub fn from_toml(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        toml::from_str(text).map_err(|e| one_line(&e))
     }
 
     /// Parse a config file on top of a theme file: the theme's values are
@@ -293,9 +301,9 @@ impl Config {
     /// (`Err((in_theme, message))`), with the line number.
     pub fn with_theme(text: &str, theme: &str) -> Result<Self, (bool, String)> {
         let own = Self::from_toml(text).map_err(|e| (false, e))?;
-        toml::from_str::<ThemeFile>(theme).map_err(|e| (true, e.to_string()))?;
-        let mut merged: toml::Table = toml::from_str(text).map_err(|e| (false, e.to_string()))?;
-        let theme: toml::Table = toml::from_str(theme).map_err(|e| (true, e.to_string()))?;
+        toml::from_str::<ThemeFile>(theme).map_err(|e| (true, one_line(&e)))?;
+        let mut merged: toml::Table = toml::from_str(text).map_err(|e| (false, one_line(&e)))?;
+        let theme: toml::Table = toml::from_str(theme).map_err(|e| (true, one_line(&e)))?;
         for (section, values) in theme {
             let (Some(entry), toml::Value::Table(values)) = (
                 merged
@@ -310,11 +318,164 @@ impl Config {
                 entry.entry(k).or_insert(v);
             }
         }
-        let merged = Self::deserialize(merged).map_err(|e| (true, e.to_string()))?;
+        let merged = Self::deserialize(merged).map_err(|e| (true, one_line(&e)))?;
         Ok(Self {
             theme: own.theme,
             ..merged
         })
+    }
+}
+
+/// Settings `:set` does not change: tables and the theme file.
+const NOT_SET: [&str; 3] = ["keys", "category", "theme"];
+
+impl Config {
+    /// `:set name=value`: this config with one setting changed. `name` is
+    /// dotted (`view.zoom_step`) or, when unique, the last part alone
+    /// (`zoom_step`). `value` is TOML (`1.2`, `true`, `"x"`, `["a"]`);
+    /// anything else is taken as a string (`words`, `#000000`). Returns
+    /// the full name too.
+    pub fn set(&self, name: &str, value: &str) -> Result<(Config, String), String> {
+        let path = self.setting_name(name)?;
+        let value = match toml::from_str::<toml::Table>(&format!("v = {value}")) {
+            Ok(mut t) => t
+                .remove("v")
+                .unwrap_or_else(|| toml::Value::String(value.into())),
+            Err(_) => toml::Value::String(value.trim().into()),
+        };
+        let mut table = toml::Table::try_from(self).map_err(|e| e.to_string())?;
+        let (section, key) = match path.split_once('.') {
+            Some((s, k)) => (
+                table
+                    .get_mut(s)
+                    .and_then(|v| v.as_table_mut())
+                    .ok_or("no such setting")?,
+                k,
+            ),
+            None => (&mut table, path.as_str()),
+        };
+        section.insert(key.to_string(), value);
+        let config = Config::deserialize(table).map_err(|e| format!("{path}: {}", one_line(&e)))?;
+        Ok((config, path))
+    }
+
+    /// `:set name`: the full name and the current value, as TOML.
+    pub fn get(&self, name: &str) -> Result<(String, String), String> {
+        let path = self.setting_name(name)?;
+        let root = toml::Value::try_from(self).map_err(|e| e.to_string())?;
+        let value = path
+            .split('.')
+            .try_fold(&root, |v, k| v.get(k))
+            .ok_or("no such setting")?;
+        // Settings are f32: show 1.1, not 1.100000023841858.
+        let shown = match value {
+            toml::Value::Float(f) => format!("{}", *f as f32),
+            v => v.to_string(),
+        };
+        Ok((path, shown))
+    }
+
+    /// The full dotted name of a setting `:set` may change.
+    fn setting_name(&self, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        if NOT_SET
+            .iter()
+            .any(|n| name == *n || name.starts_with(&format!("{n}.")))
+        {
+            return Err(format!("{name}: change it in the config file"));
+        }
+        let mut all = BTreeSet::new();
+        if let Ok(t) = toml::Table::try_from(Config::default()) {
+            setting_paths(&t, "", &mut all);
+        }
+        let all: Vec<String> = all
+            .into_iter()
+            .filter(|p| {
+                !NOT_SET
+                    .iter()
+                    .any(|n| p == n || p.starts_with(&format!("{n}.")))
+            })
+            .collect();
+        if all.iter().any(|p| p == name) {
+            return Ok(name.to_string());
+        }
+        let matches: Vec<&String> = all
+            .iter()
+            .filter(|p| p.rsplit('.').next() == Some(name))
+            .collect();
+        match matches.as_slice() {
+            [one] => Ok((*one).clone()),
+            [] => Err(format!("unknown setting {name}")),
+            many => Err(format!(
+                "{name} is ambiguous: {}",
+                many.iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+}
+
+/// A TOML error on one line, for the status bar: its position, then the
+/// reason, without the quoted source lines.
+fn one_line(e: &impl std::fmt::Display) -> String {
+    let text = e.to_string();
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let first = lines.next().unwrap_or_default();
+    let first = first.strip_prefix("TOML parse error at ").unwrap_or(first);
+    // The quoted source: "|", "4 | [view", "|      ^".
+    let rest: Vec<&str> = lines
+        .filter(|l| {
+            !l.starts_with('|')
+                && !l
+                    .split_once(" |")
+                    .is_some_and(|(n, _)| n.trim().parse::<u32>().is_ok())
+        })
+        .collect();
+    if rest.is_empty() {
+        first.to_string()
+    } else {
+        format!("{first}: {}", rest.join(": "))
+    }
+}
+
+/// Settings in a config or theme file that marg does not know (dotted,
+/// such as `view.zom_step`); serde would ignore them silently. Empty if
+/// the text does not parse (that error is reported by the parse).
+pub fn unknown_settings(text: &str) -> Vec<String> {
+    let Ok(table) = toml::from_str::<toml::Table>(text) else {
+        return Vec::new();
+    };
+    let mut known = BTreeSet::new();
+    if let Ok(t) = toml::Table::try_from(Config::default()) {
+        setting_paths(&t, "", &mut known);
+    }
+    let mut written = BTreeSet::new();
+    setting_paths(&table, "", &mut written);
+    written.difference(&known).cloned().collect()
+}
+
+/// Every setting in `t`, dotted. The `keys.*` tables count as one
+/// setting each (their keys are key sequences); arrays of tables (such as
+/// `category`) by their tables' keys.
+fn setting_paths(t: &toml::Table, prefix: &str, out: &mut BTreeSet<String>) {
+    for (k, v) in t {
+        let p = format!("{prefix}{k}");
+        match v {
+            toml::Value::Table(_) if prefix == "keys." => {
+                out.insert(p);
+            }
+            toml::Value::Table(t) => setting_paths(t, &format!("{p}."), out),
+            toml::Value::Array(a) if !a.is_empty() && a.iter().all(|v| v.is_table()) => {
+                for t in a.iter().filter_map(|v| v.as_table()) {
+                    setting_paths(t, &format!("{p}."), out);
+                }
+            }
+            _ => {
+                out.insert(p);
+            }
+        }
     }
 }
 
@@ -428,8 +589,116 @@ mod tests {
     }
 
     #[test]
+    fn set_changes_one_setting() {
+        let c = Config::default();
+        let (c2, name) = c.set("view.zoom_step", "1.2").unwrap();
+        assert_eq!((c2.view.zoom_step, name.as_str()), (1.2, "view.zoom_step"));
+        // Short names, integers for floats, bare strings, enums.
+        let (c2, name) = c.set("scroll_step_px", "80").unwrap();
+        assert_eq!(
+            (c2.view.scroll_step_px, name.as_str()),
+            (80.0, "view.scroll_step_px")
+        );
+        assert_eq!(
+            c.set("mode", "words").unwrap().0.hints.mode,
+            HintMode::Words
+        );
+        assert!(c.set("recolor", "true").unwrap().0.view.recolor);
+        let (c2, _) = c.set("colors.background", "#102030").unwrap();
+        assert_eq!(c2.colors.background.to_string(), "#102030");
+        let (c2, _) = c.set("statusbar.right", "[\"keys\"]").unwrap();
+        assert_eq!(c2.statusbar.right, ["keys"]);
+        // Everything else stays.
+        assert_eq!(c.set("zoom_step", "1.1").unwrap().0, c);
+        // Errors.
+        assert!(
+            c.set("zoom_step", "fast")
+                .unwrap_err()
+                .contains("view.zoom_step")
+        );
+        assert!(c.set("mode", "fuzzy").is_err());
+        assert!(
+            c.set("background", "blue")
+                .unwrap_err()
+                .contains("not a color")
+        );
+        assert!(
+            c.set("nonsense", "1")
+                .unwrap_err()
+                .contains("unknown setting")
+        );
+        assert!(
+            c.set("keys.normal", "1")
+                .unwrap_err()
+                .contains("config file")
+        );
+        assert!(
+            c.set("theme", "x.toml")
+                .unwrap_err()
+                .contains("config file")
+        );
+        assert!(c.set("category.name", "x").is_err());
+    }
+
+    #[test]
+    fn get_shows_values_and_finds_ambiguous_names() {
+        let c = Config::default();
+        assert_eq!(
+            c.get("zoom_step"),
+            Ok(("view.zoom_step".into(), "1.1".into()))
+        );
+        assert_eq!(
+            c.get("hints.mode"),
+            Ok(("hints.mode".into(), "\"two-stage\"".into()))
+        );
+        // `size` is only in [fonts]; `chars` in [hints].
+        assert_eq!(c.get("chars").unwrap().0, "hints.chars");
+        let names: Vec<String> = {
+            let mut s = BTreeSet::new();
+            setting_paths(
+                &toml::Table::try_from(Config::default()).unwrap(),
+                "",
+                &mut s,
+            );
+            s.into_iter()
+                .filter(|p| !NOT_SET.iter().any(|n| p.starts_with(n)))
+                .collect()
+        };
+        let last = |p: &String| p.rsplit('.').next().unwrap().to_string();
+        if let Some(dup) = names
+            .iter()
+            .find(|p| names.iter().filter(|q| last(q) == last(p)).count() > 1)
+        {
+            assert!(c.get(&last(dup)).unwrap_err().contains("ambiguous"));
+        }
+    }
+
+    #[test]
+    fn unknown_settings_are_found() {
+        let text = "zoom = 2\n[view]\nzom_step = 1.2\nzoom_step = 1.2\n\
+                    [keys.normal]\n\"j\" = \"scroll.up\"\n[keys.insert]\n\"x\" = \"undo\"\n\
+                    [[category]]\nname = \"A\"\ncolour = \"#FF0000\"\n\
+                    [colors]\nbackgrund = \"#000000\"\n[fonts]\nsize = 14.0\n";
+        assert_eq!(
+            unknown_settings(text),
+            [
+                "category.colour",
+                "colors.backgrund",
+                "keys.insert",
+                "view.zom_step",
+                "zoom"
+            ]
+        );
+        assert!(unknown_settings("").is_empty());
+        assert!(unknown_settings("[view\n").is_empty(), "a parse error");
+    }
+
+    #[test]
     fn error_mentions_line() {
         let e = Config::from_toml("[view]\n\nzoom_step = \"x\"\n").unwrap_err();
         assert!(e.contains("line 3"), "{e}");
+        let e = Config::from_toml("[colors]\n\n[view\n").unwrap_err();
+        assert!(!e.contains('\n') && !e.contains('|'), "one line: {e}");
+        assert!(e.contains("line 3") && e.contains("unclosed table"), "{e}");
     }
 }
