@@ -2947,6 +2947,13 @@ impl MargApp {
 
     fn run(&mut self, ctx: &egui::Context, command: Command, count: Option<u32>) {
         let n = count.unwrap_or(1).max(1);
+        if self.open.is_none() && command.needs_document() {
+            // Keys pressed while the first file loads are dropped quietly.
+            if self.opening.is_none() {
+                self.error("No file open".into());
+            }
+            return;
+        }
         if command.edits() && self.refuse_edit() {
             return;
         }

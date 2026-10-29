@@ -398,6 +398,25 @@ impl Command {
         )
     }
 
+    /// Whether the command needs an open document. The others also work
+    /// in the recent files list.
+    pub fn needs_document(&self) -> bool {
+        !matches!(
+            self,
+            Command::CommandLine
+                | Command::Quit
+                | Command::QuitForce
+                | Command::Open(_)
+                | Command::WriteConfig
+                | Command::Set(_)
+                | Command::Version
+                | Command::DebugToggle
+                | Command::Help
+                | Command::HelpPage
+                | Command::Recolor
+        )
+    }
+
     /// Look up a bindable command by name.
     pub fn from_name(name: &str) -> Option<Self> {
         REGISTRY
@@ -496,6 +515,16 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn document_commands() {
+        assert!(Command::BoxMode.needs_document());
+        assert!(Command::Save.needs_document());
+        assert!(Command::PageGoto(3).needs_document());
+        assert!(!Command::Open("a.pdf".into()).needs_document());
+        assert!(!Command::CommandLine.needs_document());
+        assert!(!Command::Help.needs_document());
+    }
 
     #[test]
     fn names_round_trip() {
