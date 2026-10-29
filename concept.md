@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.0.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.0.0): Linux binary and Windows `.exe`. Phases 0–5 merged into `main`. |
 | **Current phase** | none: all planned phases are done; the user uses marg daily |
-| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. App icon, window icon and Windows `.exe` icon merged into `main` and pushed (not released yet: the next 1.0.x / 1.1.0 ships them). |
+| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. App icon, window icon and Windows `.exe` icon merged into `main` and pushed (not released yet: the next 1.0.x / 1.1.0 ships them). Branch `polish-1` (not merged, not pushed): the user's first polish items (prompt cursor, paste, `:` from the recent files list, no console window on Windows); the user tries it, the Windows part needs a test `.exe`. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.0.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (app icons merged) |
+| **Last updated** | 2026-10-29 (polish items on branch `polish-1`) |
 
 ---
 
@@ -131,6 +131,8 @@ defaults of `config.toml` (see §8), not scattered in code.
   file, no tabs. The window manager handles multiple documents.
 - `marg` with no argument shows a **recent files** list (from the state file,
   most recent first, max 50 *(start)*), fuzzy-filterable; Enter opens.
+  The command line key (`:`) works there too, so `:e <path>` opens a file
+  even when the list is empty (added 2026-10-29, the user's polish list).
 - `:e <path>` opens another file in the same window, with path completion on
   Tab. The previous file is saved first if it has pending changes.
 - `:close` (alias `:bd`, key `Ctrl-w`) saves pending changes, closes the
@@ -876,8 +878,18 @@ for filtering (`:` stays for commands) and opening lists in filter mode
 (telescope-style; conflicts with single-key actions in the annotation list
 and costs an extra Esc). **As implemented:** `marg-core/src/list.rs`
 (`ListNav`), used by `marg/src/recent.rs`; keys are fixed (not in the
-keymap yet). The prompt line shows `/filter▏` while filtering, the filter
-dimmed after Esc, or a key hint when empty.
+keymap yet), except that the recent files list also takes the key bound
+to `cmdline` when it is not filtering. The prompt line shows `/filter`
+with a text cursor while filtering, the filter dimmed after Esc, or a key
+hint when empty.
+
+**Prompts (as implemented, 2026-10-29):** every one-line prompt (command
+line, search, password, list filters) draws its cursor with
+`marg/src/prompt.rs`: a thin line between characters, egui's text cursor
+width, in the prompt's color. (Before, a `▏` character in the text took a
+whole monospace cell.) Ctrl-V (egui's `Paste` event) pastes at the cursor
+via `LineEdit::paste` (`ListNav::paste` for filters): line breaks at the
+ends are dropped, the ones inside become spaces.
 
 **As implemented (Phase 2):** Caret and Visual mode have their own
 tables, `[keys.caret]` and `[keys.visual]` (`marg-core/src/keymap.rs`,
@@ -1418,6 +1430,11 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   needs the MSVC runtime: decided by the user 2026-10-29 (Phase 5) to
   ship it that way and say so in the README, instead of patching MuPDF's
   vcxproj files for a static CRT or bundling the runtime DLLs.
+  The `.exe` is a windows-subsystem program (no console window, the
+  user's polish list 2026-10-29). Started from a terminal, it calls
+  `AttachConsole(ATTACH_PARENT_PROCESS)` (declared in `main.rs`, from
+  kernel32, no crate) so `--version`, usage errors and the log print there;
+  the terminal's prompt returns at once, so that output can land after it.
 
 **Binary size (Phase 5, measured 2026-10-29, Linux):** release 37.4 MB,
 `dist` 30.6 MB (26.1 MB stripped). Most of it is Rust code, led by
@@ -1774,6 +1791,30 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-29 — Polish list, first items
+- Done (branch `polish-1`, not merged, not pushed), one commit each: prompt
+  cursor drawn as a thin line (`marg/src/prompt.rs`) in all one-line
+  prompts; Ctrl-V paste in the command line, search, password and list
+  filters (`LineEdit::paste`, `ListNav::paste`); `:` from the recent files
+  list (`Keymap::exact` is public now), with the list's hint and empty
+  message mentioning it; key help, cheat sheet and README updated; no
+  console window on Windows (windows subsystem plus `AttachConsole`).
+- Decisions: the user reported the four items after using v1.0.0 and the
+  icon test build. Paste joins line breaks into spaces (a copied path
+  often ends with a newline). In the recent list only the `cmdline` key is
+  taken from the keymap, not the rest of Normal mode.
+- State: builds; all tests pass; clippy and fmt clean. Checked under Xvfb:
+  cursor in `:` and the recent filter; empty recent list → `:e <path>` →
+  file opens. Paste not tried (no clipboard tool installed); the Windows
+  change was only type-checked (clippy for `x86_64-pc-windows-msvc` in a
+  scratch crate; that target's std was added with rustup).
+- Next: the user tries the branch on Linux; a test `.exe` (Release
+  workflow by hand on the branch, temporary pre-release, as for the icon)
+  for the console change: double-click shows no console, and
+  `marg.exe --version` in PowerShell prints the version. Then merge.
+- Watch out: Windows-only code is not compiled by Linux CI checks; check it
+  with `--target x86_64-pc-windows-msvc` in a scratch crate or on CI.
 
 ### 2026-10-29 — After v1.0.0: install and app icon
 - Done: installed the `dist` build locally for the user (outside the
