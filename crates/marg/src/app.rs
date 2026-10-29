@@ -38,6 +38,7 @@ use crate::help::HelpView;
 use crate::input;
 use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
+use crate::prompt;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::startup;
@@ -3784,18 +3785,12 @@ impl MargApp {
         let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
-            if let Some((prompt, edit)) = match self.mode {
-                Mode::Command => Some((':', &self.cmdline)),
-                Mode::Search => Some(('/', &self.searchline)),
+            if let Some((sign, edit)) = match self.mode {
+                Mode::Command => Some((":", &self.cmdline)),
+                Mode::Search => Some(("/", &self.searchline)),
                 _ => None,
             } {
-                let line = edit.text();
-                let at = line
-                    .char_indices()
-                    .nth(edit.cursor())
-                    .map_or(line.len(), |(i, _)| i);
-                let (before, after) = line.split_at(at);
-                ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
+                prompt::show(ui, sign, edit.text(), edit.cursor(), th.statusbar_fg);
             } else if self.mode == Mode::Password {
                 let name = self
                     .opening
@@ -3803,13 +3798,9 @@ impl MargApp {
                     .and_then(|(p, _)| p.file_name())
                     .unwrap_or_default()
                     .to_string_lossy();
-                let len = self.passline.text().chars().count();
-                let at = self.passline.cursor();
-                let (before, after) = ("•".repeat(at), "•".repeat(len - at));
-                ui.label(text(
-                    &format!("Password for {name}: {before}▏{after}"),
-                    th.statusbar_fg,
-                ));
+                let dots = "•".repeat(self.passline.text().chars().count());
+                let prefix = format!("Password for {name}: ");
+                prompt::show(ui, &prefix, &dots, self.passline.cursor(), th.statusbar_fg);
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()

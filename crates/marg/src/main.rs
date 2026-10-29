@@ -16,6 +16,7 @@ mod input;
 mod outline;
 mod pages;
 mod paths;
+mod prompt;
 mod recent;
 mod select;
 mod startup;

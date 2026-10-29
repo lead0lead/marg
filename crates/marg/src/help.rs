@@ -8,6 +8,7 @@ use marg_core::keys::KeyCode;
 use marg_core::list::{ListAction, ListNav};
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 /// Width of the keys column, in characters.
@@ -70,12 +71,7 @@ impl HelpView {
                     ui.label(text(&self.title, th.panel_fg).strong());
                     let filter = self.nav.filter();
                     if self.nav.filtering() {
-                        let at = filter
-                            .char_indices()
-                            .nth(self.nav.cursor())
-                            .map_or(filter.len(), |(i, _)| i);
-                        let (before, after) = filter.split_at(at);
-                        ui.label(text(&format!("/{before}▏{after}"), th.panel_fg));
+                        prompt::show(ui, "/", filter, self.nav.cursor(), th.panel_fg);
                     } else if !filter.is_empty() {
                         ui.label(text(&format!("/{filter}"), th.panel_dim));
                     } else {

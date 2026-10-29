@@ -8,6 +8,7 @@ use marg_core::list::{ListAction, ListNav};
 use marg_core::state::State;
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 struct Item {
@@ -84,12 +85,7 @@ impl RecentList {
         egui::Frame::new().inner_margin(16).show(ui, |ui| {
             let filter = self.nav.filter();
             if self.nav.filtering() {
-                let at = filter
-                    .char_indices()
-                    .nth(self.nav.cursor())
-                    .map_or(filter.len(), |(i, _)| i);
-                let (before, after) = filter.split_at(at);
-                ui.label(text(&format!("/{before}▏{after}"), th.panel_fg));
+                prompt::show(ui, "/", filter, self.nav.cursor(), th.panel_fg);
             } else if !filter.is_empty() {
                 ui.label(text(&format!("/{filter}"), th.panel_dim));
             } else {

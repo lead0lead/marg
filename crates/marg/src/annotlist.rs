@@ -6,6 +6,7 @@ use marg_core::keys::KeyCode;
 use marg_core::list::{ListAction, ListNav};
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 /// Characters of marked text shown per row.
@@ -157,12 +158,8 @@ impl AnnotList {
                     }
                 };
                 if self.nav.filtering() {
-                    let at = filter
-                        .char_indices()
-                        .nth(self.nav.cursor())
-                        .map_or(filter.len(), |(i, _)| i);
-                    let (before, after) = filter.split_at(at);
-                    ui.label(text(&format!("{shown_cat}/{before}▏{after}"), th.panel_fg));
+                    let prefix = format!("{shown_cat}/");
+                    prompt::show(ui, &prefix, filter, self.nav.cursor(), th.panel_fg);
                 } else if !filter.is_empty() || !shown_cat.is_empty() {
                     let f = if filter.is_empty() {
                         String::new()
