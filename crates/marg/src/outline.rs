@@ -6,6 +6,7 @@ use marg_core::list::{ListAction, ListNav};
 use marg_core::outline::{Dest, OutlineEntry, entry_for_page};
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 pub enum Action {
@@ -48,6 +49,7 @@ impl OutlineList {
     pub fn event(&mut self, e: &Event) -> Action {
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => match input::key_press(e) {
                 Some(k) => self.nav.key(k, self.half_page),
                 None => return Action::None,
@@ -77,12 +79,7 @@ impl OutlineList {
                 ui.set_min_size(ui.available_size());
                 let filter = self.nav.filter();
                 if self.nav.filtering() {
-                    let at = filter
-                        .char_indices()
-                        .nth(self.nav.cursor())
-                        .map_or(filter.len(), |(i, _)| i);
-                    let (before, after) = filter.split_at(at);
-                    ui.label(text(&format!("/{before}▏{after}"), th.panel_fg));
+                    prompt::show(ui, "/", filter, self.nav.cursor(), th.panel_fg);
                 } else if !filter.is_empty() {
                     ui.label(text(&format!("/{filter}"), th.panel_dim));
                 } else {

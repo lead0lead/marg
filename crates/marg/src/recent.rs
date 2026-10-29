@@ -8,6 +8,7 @@ use marg_core::list::{ListAction, ListNav};
 use marg_core::state::State;
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 struct Item {
@@ -56,11 +57,17 @@ impl RecentList {
         self.nav.set_len(self.shown.len());
     }
 
+    /// Whether typed text goes to the filter.
+    pub fn filtering(&self) -> bool {
+        self.nav.filtering()
+    }
+
     /// Moving and filtering as in `marg_core::list`; Esc with no filter
     /// quits.
     pub fn event(&mut self, e: &Event) -> Action {
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => match input::key_press(e) {
                 Some(k) => self.nav.key(k, self.half_page),
                 None => return Action::None,
@@ -84,17 +91,12 @@ impl RecentList {
         egui::Frame::new().inner_margin(16).show(ui, |ui| {
             let filter = self.nav.filter();
             if self.nav.filtering() {
-                let at = filter
-                    .char_indices()
-                    .nth(self.nav.cursor())
-                    .map_or(filter.len(), |(i, _)| i);
-                let (before, after) = filter.split_at(at);
-                ui.label(text(&format!("/{before}▏{after}"), th.panel_fg));
+                prompt::show(ui, "/", filter, self.nav.cursor(), th.panel_fg);
             } else if !filter.is_empty() {
                 ui.label(text(&format!("/{filter}"), th.panel_dim));
             } else {
                 ui.label(text(
-                    "j/k move   / filter   Enter open   Esc quit",
+                    "j/k move   / filter   Enter open   : command   Esc quit",
                     th.panel_dim,
                 ));
             }
@@ -104,7 +106,10 @@ impl RecentList {
                 + ui.spacing().item_spacing.y;
             self.half_page = ((ui.available_height() / row_h) as usize / 2).max(1);
             if self.items.is_empty() {
-                ui.label(text("No recent files. Run marg <file.pdf>.", th.panel_dim));
+                ui.label(text(
+                    "No recent files. Open one with :e <file.pdf>.",
+                    th.panel_dim,
+                ));
                 return;
             }
             egui::ScrollArea::vertical().show(ui, |ui| {

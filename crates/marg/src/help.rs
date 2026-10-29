@@ -8,6 +8,7 @@ use marg_core::keys::KeyCode;
 use marg_core::list::{ListAction, ListNav};
 
 use crate::input;
+use crate::prompt;
 use crate::theme::Theme;
 
 /// Width of the keys column, in characters.
@@ -44,6 +45,7 @@ impl HelpView {
     pub fn event(&mut self, e: &Event) -> bool {
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => match input::key_press(e) {
                 Some(k) if k.code == KeyCode::Char('?') && !self.nav.filtering() => return true,
                 Some(k) => self.nav.key(k, self.half_page),
@@ -70,12 +72,7 @@ impl HelpView {
                     ui.label(text(&self.title, th.panel_fg).strong());
                     let filter = self.nav.filter();
                     if self.nav.filtering() {
-                        let at = filter
-                            .char_indices()
-                            .nth(self.nav.cursor())
-                            .map_or(filter.len(), |(i, _)| i);
-                        let (before, after) = filter.split_at(at);
-                        ui.label(text(&format!("/{before}▏{after}"), th.panel_fg));
+                        prompt::show(ui, "/", filter, self.nav.cursor(), th.panel_fg);
                     } else if !filter.is_empty() {
                         ui.label(text(&format!("/{filter}"), th.panel_dim));
                     } else {

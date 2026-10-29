@@ -38,6 +38,7 @@ use crate::help::HelpView;
 use crate::input;
 use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
+use crate::prompt;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
 use crate::startup;
@@ -1136,6 +1137,15 @@ impl MargApp {
 
     fn recent_event(&mut self, ctx: &egui::Context, e: &Event) {
         let Some(list) = &mut self.recent else { return };
+        // The command line key (`:`), so that `:e` works before any file
+        // was opened.
+        if !list.filtering()
+            && let Some(k) = input::key_press(e)
+            && self.keymap.exact(&[k]) == Some(&Command::CommandLine)
+        {
+            self.run(ctx, Command::CommandLine, None);
+            return;
+        }
         match list.event(e) {
             recent::Action::None => {}
             recent::Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -2728,6 +2738,7 @@ impl MargApp {
     fn cmdline_event(&mut self, ctx: &egui::Context, e: &Event) {
         match e {
             Event::Text(t) => self.cmdline.insert(t),
+            Event::Paste(t) => self.cmdline.paste(t),
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {
@@ -2765,6 +2776,10 @@ impl MargApp {
         match e {
             Event::Text(t) => {
                 self.searchline.insert(t);
+                self.search_typed();
+            }
+            Event::Paste(t) => {
+                self.searchline.paste(t);
                 self.search_typed();
             }
             Event::Key { pressed: true, .. } => {
@@ -2932,6 +2947,13 @@ impl MargApp {
 
     fn run(&mut self, ctx: &egui::Context, command: Command, count: Option<u32>) {
         let n = count.unwrap_or(1).max(1);
+        if self.open.is_none() && command.needs_document() {
+            // Keys pressed while the first file loads are dropped quietly.
+            if self.opening.is_none() {
+                self.error("No file open".into());
+            }
+            return;
+        }
         if command.edits() && self.refuse_edit() {
             return;
         }
@@ -3482,6 +3504,7 @@ impl MargApp {
     fn password_event(&mut self, e: &Event) {
         match e {
             Event::Text(t) => self.passline.insert(t),
+            Event::Paste(t) => self.passline.paste(t),
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {
@@ -3784,18 +3807,12 @@ impl MargApp {
         let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
-            if let Some((prompt, edit)) = match self.mode {
-                Mode::Command => Some((':', &self.cmdline)),
-                Mode::Search => Some(('/', &self.searchline)),
+            if let Some((sign, edit)) = match self.mode {
+                Mode::Command => Some((":", &self.cmdline)),
+                Mode::Search => Some(("/", &self.searchline)),
                 _ => None,
             } {
-                let line = edit.text();
-                let at = line
-                    .char_indices()
-                    .nth(edit.cursor())
-                    .map_or(line.len(), |(i, _)| i);
-                let (before, after) = line.split_at(at);
-                ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
+                prompt::show(ui, sign, edit.text(), edit.cursor(), th.statusbar_fg);
             } else if self.mode == Mode::Password {
                 let name = self
                     .opening
@@ -3803,13 +3820,9 @@ impl MargApp {
                     .and_then(|(p, _)| p.file_name())
                     .unwrap_or_default()
                     .to_string_lossy();
-                let len = self.passline.text().chars().count();
-                let at = self.passline.cursor();
-                let (before, after) = ("•".repeat(at), "•".repeat(len - at));
-                ui.label(text(
-                    &format!("Password for {name}: {before}▏{after}"),
-                    th.statusbar_fg,
-                ));
+                let dots = "•".repeat(self.passline.text().chars().count());
+                let prefix = format!("Password for {name}: ");
+                prompt::show(ui, &prefix, &dots, self.passline.cursor(), th.statusbar_fg);
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
