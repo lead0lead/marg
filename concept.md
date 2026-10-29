@@ -67,11 +67,11 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.1.0** on 2026-10-29: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
+| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
 | **Current phase** | none: all planned phases are done; the user uses marg daily |
-| **Next step** | Check the v1.1.0 release run; the user checks the `.exe` (no console window; `marg.exe --version` in PowerShell prints the version). The user keeps using marg daily and collects the next polish list; then plan the fixes with them (feature branch, 1.1.x / 1.2.0). The Phase 3–5 choices in §12 are open. |
+| **Next step** | The user checks the `.exe` (no console window; `marg.exe --version` in PowerShell prints the version). The user keeps using marg daily and collects the next polish list; then plan the fixes with them (feature branch, 1.1.x / 1.2.0). The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
-| **Live version** | v1.1.0 (tag pushed 2026-10-29) |
+| **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
@@ -1817,6 +1817,9 @@ Format:
 - Decisions (release): the user said to push the polish branch and "just
   ship the exe directly", without a test pre-release or trying the branch
   first. Released as 1.1.0 (new features: icons, paste), not 1.0.1.
+- Release: tag `v1.1.0`; CI and the Release workflow green on Linux and
+  Windows; the published `.exe` is a GUI-subsystem PE (v1.0.0's was a
+  console one). Local install updated to 1.1.0.
 - Next: the user checks the 1.1.0 `.exe`: double-click shows no console,
   and `marg.exe --version` in PowerShell prints the version.
 - Watch out: Windows-only code is not compiled by Linux CI checks; check it
