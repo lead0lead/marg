@@ -25,7 +25,9 @@ use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
 use marg_core::view::{DocPos, Fit, View};
-use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
+use marg_pdf::{
+    DocInfo, DocThread, Edit, OpenError, Recolor, RenderKey, Request, Response, SaveError, Scale,
+};
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
@@ -92,6 +94,8 @@ struct OpenDoc {
     pending: HashMap<u64, AfterCreate>,
     /// Where images are on each page, once asked for (box snapping).
     images: Vec<Option<Vec<BBox>>>,
+    /// The password the file was opened with, for reloading it.
+    password: Option<String>,
     /// Pages whose annotations or text could not be read.
     annots_failed: HashSet<usize>,
     text_failed: HashSet<usize>,
@@ -245,12 +249,16 @@ enum Mode {
     Help,
     /// Typing a search.
     Search,
+    /// Asking for the password of an encrypted file.
+    Password,
 }
 
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm => "NORMAL",
+            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm | Mode::Password => {
+                "NORMAL"
+            }
             Mode::Help => "HELP",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
@@ -328,6 +336,11 @@ pub struct MargApp {
     reloading: bool,
     cmdline: LineEdit,
     searchline: LineEdit,
+    /// The password prompt (no history).
+    passline: LineEdit,
+    /// The file being opened and the password sent with it; the file the
+    /// password prompt is for.
+    opening: Option<(PathBuf, Option<String>)>,
     /// Where the view was when the search prompt opened.
     search_origin: Option<DocPos>,
     next_search_id: u64,
@@ -460,6 +473,8 @@ impl MargApp {
             author,
             cmdline: LineEdit::default(),
             searchline: LineEdit::default(),
+            passline: LineEdit::default(),
+            opening: s.path.clone().map(|p| (p, None)),
             search_origin: None,
             next_search_id: 0,
             doc,
@@ -549,7 +564,8 @@ impl MargApp {
                         self.caret = None;
                         self.selection = None;
                         self.hinting = None;
-                        let doc = self.open_doc(info, generation);
+                        let mut doc = self.open_doc(info, generation);
+                        doc.password = self.opening.take().and_then(|(_, pw)| pw);
                         self.selected_annot = None;
                         self.doc.send(Request::Annots {
                             pages: (0..doc.view.page_count()).collect(),
@@ -564,8 +580,25 @@ impl MargApp {
                         // if marg does not exit cleanly.
                         self.save_state();
                     }
+                    Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
+                        self.reloading = false;
+                        let Some((path, _)) = &self.opening else {
+                            continue;
+                        };
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        log::info!("{}: {e}", path.display());
+                        if e == OpenError::WrongPassword {
+                            self.show(Level::Warn, format!("Wrong password for {name}"));
+                        }
+                        self.passline.clear();
+                        if self.mode != Mode::Password {
+                            self.return_mode = self.mode;
+                        }
+                        self.mode = Mode::Password;
+                    }
                     Err(e) => {
                         self.reloading = false;
+                        self.opening = None;
                         self.error(format!("Cannot open: {e}"));
                     }
                 },
@@ -783,7 +816,7 @@ impl MargApp {
                                 AfterSave::Quit => {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close)
                                 }
-                                AfterSave::Open(path) => self.doc.send(Request::Open(path)),
+                                AfterSave::Open(path) => self.send_open(path, None),
                                 AfterSave::Close => self.close_doc(ctx),
                             }
                         }
@@ -928,6 +961,7 @@ impl MargApp {
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
+            password: None,
             annots_failed: HashSet::new(),
             text_failed: HashSet::new(),
             export: None,
@@ -969,6 +1003,7 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Search => self.search_event(e),
+                _ if self.mode == Mode::Password => self.password_event(e),
                 _ if self.mode == Mode::Confirm => self.confirm_event(e),
                 _ if self.mode == Mode::Help => {
                     if self.help.as_mut().is_none_or(|(h, _)| h.event(e)) {
@@ -3135,7 +3170,7 @@ impl MargApp {
         if self.open.as_ref().is_some_and(|o| o.unsaved()) {
             self.save(false, AfterSave::Open(path));
         } else {
-            self.doc.send(Request::Open(path));
+            self.send_open(path, None);
         }
     }
 
@@ -3294,10 +3329,58 @@ impl MargApp {
     /// dropping unsaved changes.
     fn reload(&mut self) {
         let Some(open) = &self.open else { return };
-        let path = open.info.path.clone();
+        let (path, password) = (open.info.path.clone(), open.password.clone());
         self.save_state();
         self.reloading = true;
-        self.doc.send(Request::Open(path));
+        self.send_open(path, password);
+    }
+
+    /// Ask the document thread to open `path`; remembered for the password
+    /// prompt and for reloading.
+    fn send_open(&mut self, path: PathBuf, password: Option<String>) {
+        self.opening = Some((path.clone(), password.clone()));
+        self.doc.send(Request::Open { path, password });
+    }
+
+    /// A key in the password prompt: Enter tries the password, Esc gives
+    /// up on the file.
+    fn password_event(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => self.passline.insert(t),
+            Event::Key { pressed: true, .. } => {
+                let Some(k) = input::key_press(e) else { return };
+                match k.code {
+                    KeyCode::Named(Named::Esc) => {
+                        self.passline.clear();
+                        self.opening = None;
+                        self.mode = self.return_mode;
+                        if self.open.is_none() {
+                            self.recent = Some(RecentList::new(
+                                &self.state,
+                                self.config.ui.recent_files_max,
+                            ));
+                            self.mode = Mode::Recent;
+                        }
+                        self.show(Level::Info, "Not opened".into());
+                    }
+                    KeyCode::Named(Named::Enter) => {
+                        let password = self.passline.text().to_string();
+                        self.passline.clear();
+                        if let Some((path, _)) = self.opening.clone() {
+                            self.send_open(path, Some(password));
+                        }
+                    }
+                    KeyCode::Named(Named::Backspace) => self.passline.backspace(),
+                    KeyCode::Named(Named::Delete) => self.passline.delete(),
+                    KeyCode::Named(Named::Left) => self.passline.left(),
+                    KeyCode::Named(Named::Right) => self.passline.right(),
+                    KeyCode::Named(Named::Home) => self.passline.home(),
+                    KeyCode::Named(Named::End) => self.passline.end(),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Ask the document thread whether the file changed, every
@@ -3513,6 +3596,20 @@ impl MargApp {
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
                 ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
+            } else if self.mode == Mode::Password {
+                let name = self
+                    .opening
+                    .as_ref()
+                    .and_then(|(p, _)| p.file_name())
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let len = self.passline.text().chars().count();
+                let at = self.passline.cursor();
+                let (before, after) = ("•".repeat(at), "•".repeat(len - at));
+                ui.label(text(
+                    &format!("Password for {name}: {before}▏{after}"),
+                    th.statusbar_fg,
+                ));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()

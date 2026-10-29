@@ -73,6 +73,29 @@ pub struct Doc {
     backed_up: bool,
     /// The last external version reported by `poll_disk`.
     reported: Option<Stamp>,
+    /// The password the file was opened with, to open it again after a
+    /// full save.
+    password: Option<String>,
+}
+
+/// Why a document did not open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenError {
+    /// The file is encrypted and no password was given.
+    NeedsPassword,
+    /// The password given is not the file's.
+    WrongPassword,
+    Failed(String),
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpenError::NeedsPassword => f.write_str("the file needs a password"),
+            OpenError::WrongPassword => f.write_str("wrong password"),
+            OpenError::Failed(e) => f.write_str(e),
+        }
+    }
 }
 
 /// What identifies a version of a file on disk.
@@ -137,9 +160,22 @@ fn temp_path(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{file}.{}-{n}.marg-tmp", std::process::id()))
 }
 
-fn open_pdf(path: &Path) -> Result<PdfDocument, String> {
-    let s = path.to_str().ok_or("path is not valid UTF-8")?;
-    PdfDocument::open(s).map_err(err)
+/// Open `path`, with `password` if it is encrypted.
+fn open_pdf(path: &Path, password: Option<&str>) -> Result<PdfDocument, OpenError> {
+    let fail = |e: mupdf::Error| OpenError::Failed(err(e));
+    let s = path
+        .to_str()
+        .ok_or(OpenError::Failed("path is not valid UTF-8".into()))?;
+    let mut doc = PdfDocument::open(s).map_err(fail)?;
+    if doc.needs_password().map_err(fail)? {
+        let Some(password) = password else {
+            return Err(OpenError::NeedsPassword);
+        };
+        if !doc.authenticate(password).map_err(fail)? {
+            return Err(OpenError::WrongPassword);
+        }
+    }
+    Ok(doc)
 }
 
 /// A URI with a scheme (`https:`, `mailto:`), as opposed to `#page=3`.
@@ -238,8 +274,23 @@ fn page_size_from_dict(page: &PdfObject) -> Result<Option<PageSize>, mupdf::Erro
 
 impl Doc {
     pub fn open(path: &Path) -> Result<(Self, DocInfo), String> {
-        let path_str = path.to_str().ok_or("path is not valid UTF-8")?;
-        let doc = PdfDocument::open(path_str).map_err(err)?;
+        Self::open_with_password(path, None).map_err(|e| e.to_string())
+    }
+
+    /// Open `path`; `password` is used if the file is encrypted.
+    pub fn open_with_password(
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<(Self, DocInfo), OpenError> {
+        let doc = open_pdf(path, password)?;
+        Self::from_pdf(doc, path, password).map_err(OpenError::Failed)
+    }
+
+    fn from_pdf(
+        doc: PdfDocument,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<(Self, DocInfo), String> {
         let count = doc.page_count().map_err(err)? as usize;
         let page_sizes = (0..count)
             .map(|i| Self::page_size(&doc, i))
@@ -286,6 +337,7 @@ impl Doc {
             backup_name: backup_name(path, info.id.as_deref()),
             backed_up: false,
             reported: disk,
+            password: password.map(str::to_string),
         };
         Ok((doc, info))
     }
@@ -866,7 +918,7 @@ impl Doc {
         } else {
             tmp.clone()
         };
-        self.doc = open_pdf(&from)?;
+        self.doc = open_pdf(&from, self.password.as_deref()).map_err(|e| e.to_string())?;
         self.source = from;
         renamed.map_err(|e| {
             format!(

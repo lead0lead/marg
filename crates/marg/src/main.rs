@@ -87,7 +87,10 @@ fn main() -> eframe::Result {
         doc.send(marg_pdf::Request::BackupDir(p.backup_dir.clone()));
     }
     if let Some(path) = &args.path {
-        doc.send(marg_pdf::Request::Open(path.clone()));
+        doc.send(marg_pdf::Request::Open {
+            path: path.clone(),
+            password: None,
+        });
     }
     let title = args
         .path

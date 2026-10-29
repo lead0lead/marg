@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`) and 3 (config errors, auto-reload) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload) and 4 (password prompt) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 4: password prompt (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 5: read-only files (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 3) |
+| **Last updated** | 2026-10-29 (Phase 5 step 4) |
 
 ---
 
@@ -142,6 +142,24 @@ defaults of `config.toml` (see §8), not scattered in code.
   whose permissions forbid annotation open read-only, with a status message.
 - Files that fail to open: show the MuPDF error in the status bar and in the
   log. Never crash.
+
+**As implemented (Phase 5, passwords):** `Request::Open { path, password
+}`; `Doc::open_with_password` answers `OpenError::NeedsPassword` or
+`WrongPassword` (other failures `Failed`). The UI then shows the prompt
+"Password for <name>: ••••" in the status bar (mode `Password`; the
+typed text is never shown, kept in history or logged); Enter tries it
+("Wrong password for <name>" and the prompt again), Esc gives up ("Not
+opened"; back to the current file, or the recent files list). The
+password that worked is kept in memory for the session (`OpenDoc`, and
+in `Doc` for reopening after a full save), so `:e!` and reloads after
+outside changes do not ask again; it is never written anywhere. Saving
+keeps the encryption: incremental saves append encrypted objects and
+full saves use MuPDF's default "keep" (tests in
+`marg-pdf/tests/password.rs` on a file MuPDF encrypts with AES-256: no
+clear text of a comment in the file, still needs the password). The
+`mupdf` crate cannot tell whether the user or the owner password
+worked. Opening that AES-256 file takes ~165 ms instead of ~6 ms
+(MuPDF's key derivation; release, Xvfb).
 
 ### 2.2 Rendering and caching
 
@@ -1571,7 +1589,8 @@ building more.
   dead keys could not be simulated there (§8). To check on the user's
   keyboard (Linux) and on Windows.
 - **Incremental save edge cases** (repaired files, encrypted files, Windows
-  file locks while Zotero has the file open). Mitigated by backups and the
+  file locks while Zotero has the file open). Encrypted files: checked in
+  Phase 5 (tests, AES-256 made by MuPDF; RC4 and real-world files not). Mitigated by backups and the
   rules in §2.9; round-trip tests in Phase 2.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.

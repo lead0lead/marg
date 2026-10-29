@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use marg_pdf::{DocInfo, DocThread, Edit, Pixels, RenderKey, Request, Response, Scale, Tile};
+use marg_pdf::{
+    DocInfo, DocThread, Edit, OpenError, Pixels, RenderKey, Request, Response, Scale, Tile,
+};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -15,8 +17,11 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn open(t: &DocThread, path: PathBuf) -> (u64, Result<DocInfo, String>) {
-    t.send(Request::Open(path));
+fn open(t: &DocThread, path: PathBuf) -> (u64, Result<DocInfo, OpenError>) {
+    t.send(Request::Open {
+        path,
+        password: None,
+    });
     match t.recv_timeout(WAIT).expect("open response") {
         Response::Opened {
             generation, result, ..

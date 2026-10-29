@@ -13,7 +13,10 @@ fn main() {
         .expect("usage: open_timing <file.pdf>");
     let t = DocThread::spawn(|| ());
     let start = Instant::now();
-    t.send(Request::Open(path.clone().into()));
+    t.send(Request::Open {
+        path: path.clone().into(),
+        password: None,
+    });
     let Some(Response::Opened { result, took, .. }) = t.recv_timeout(Duration::from_secs(60))
     else {
         panic!("no open response")
