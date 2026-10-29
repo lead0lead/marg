@@ -178,6 +178,8 @@ pub struct ViewConfig {
     pub zoom_max: f32,
     pub scroll_smooth: bool,
     pub spread_first_page_alone: bool,
+    /// Positions kept in the jump history (`Ctrl-o` / `Ctrl-i`).
+    pub jump_history: usize,
     /// Dark pages: page content in `recolor_fg` on `recolor_bg`
     /// (`[colors]`); `view.recolor` toggles it.
     pub recolor: bool,
@@ -195,6 +197,7 @@ impl Default for ViewConfig {
             zoom_max: 8.0,
             scroll_smooth: false,
             spread_first_page_alone: false,
+            jump_history: 100,
             recolor: false,
         }
     }
@@ -254,6 +257,8 @@ pub struct UiConfig {
     pub comment_max_height: f32,
     /// Width of the annotation list, as a share of the window width.
     pub annot_list_width: f32,
+    /// Width of the outline, as a share of the window width.
+    pub outline_width: f32,
 }
 
 impl Default for UiConfig {
@@ -271,6 +276,7 @@ impl Default for UiConfig {
             comment_width_px: 360.0,
             comment_max_height: 0.4,
             annot_list_width: 0.35,
+            outline_width: 0.4,
         }
     }
 }

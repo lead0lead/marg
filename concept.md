@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 3 and 3b merged into `main` and pushed on 2026-10-28 after the user's checks. Phase 4 not started. |
-| **Current phase** | 4 — reading features, next |
-| **Next step** | Start Phase 4 in a fresh session, on branch `phase-4-reading`: plan the steps (single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and following, help overlay, `:help` page; §11, §2.3–2.6, §2.12), then one commit per step. New overlays use the theme colors (§6 "Theming"). |
+| **Status** | Phase 4 built on branch `phase-4-reading` (steps 1–7, not merged, not pushed). Waiting for the user's check. |
+| **Current phase** | 4 — reading features (done, to check) |
+| **Next step** | The user reads a slide deck and a book chapter with the Phase 4 build (`cargo run --release -- file.pdf`) and decides the Phase 4 choices in §12. After their go-ahead: merge `phase-4-reading` into `main`, push, then Phase 5 in a fresh session. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
-| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
+| **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 3b merged) |
+| **Last updated** | 2026-10-29 (Phase 4 built) |
 
 ---
 
@@ -218,6 +218,27 @@ The "current page" (status bar, `J`/`K`) is the page at the viewport's
 vertical centre. `zoom.reset` (`=`) keeps the top centre in place; other
 zooms keep the viewport centre, Ctrl+wheel keeps the point under the mouse.
 
+**As implemented (Phase 4):** `marg-core/src/view.rs` lays pages out in
+rows: one page per row, two in Spread (`spread_first_page_alone` puts the
+first page in a row of its own; an odd last page is alone). Continuous
+stacks all rows; Single and Spread show one row, centred when it is
+smaller than the window, and scrolling stops at its edges (`j`/`k`,
+`Ctrl-d`/`Ctrl-u`, the wheel: no spill-over). Fit width fits the widest
+row (two pages and the gap in Spread), fit page the largest row. `J`/`K`
+move by row. **Space / Shift-Space** (`scroll.screen_down|up`, user's
+choice 2026-10-29, "matching Zathura"): in Single/Spread, scroll one
+window height, and at the bottom (top) of the row show the next row from
+its top (the previous one from its bottom); in Continuous they stay next
+/ previous page (Claude's reading of the choice; see §12). `Ctrl-l`
+(`view.layout_cycle`) cycles continuous → single → spread, `:layout
+continuous|single|spread` sets one, `view.spread_first_alone` toggles the
+cover option (no default key). Switching keeps the reading position (in
+a spread, the position is its left page). The layout is saved per file;
+a new file uses `default_layout_landscape` (fit page) when its first
+page is landscape, else `default_layout_portrait` (fit width). The
+status bar shows `12–13/34` for a spread. A caret moving to another page
+in Single/Spread shows that page.
+
 ### 2.4 Navigation
 
 - Counts work for motions and page jumps: `5j`, `3J`, `42G`.
@@ -235,6 +256,27 @@ zooms keep the viewport centre, Ctrl+wheel keeps the point under the mouse.
   filters (fuzzy), Enter jumps, Esc closes. If the PDF has no outline, show a
   status message.
 
+**As implemented (Phase 4):** jump list in `marg-core/src/jumps.rs`
+(vim-like: a new jump drops the forward history; the same position is
+not stored twice in a row; `[view] jump_history = 100`), per open file,
+not saved. Jumps: `gg`, `G`, `{n}G`, `:n`, Enter in search, `n`/`N`,
+outline, marks and links. Positions are the window's top-left document
+point. Marks: `m` / `'` wait for the next key; `a`–`z` set or go, any
+other key cancels; the pending `m`/`'` shows at the right of the status
+bar. Marks are saved in the state file at once (`marks` per file).
+Outline: `o` (`outline`, mode `OUTLINE`) asks the document thread
+(`Request::Outline`, read on first use and kept); the overlay covers the
+left `ui.outline_width` (0.4) of the view, entries indented by level
+with their page label on the right, the entry of the current page
+selected. Entries without a destination are dim. Destinations
+(`marg_core::outline::Dest`): page plus the PDF's left/top if given,
+shown at the window's top left. Links: `Request::Links(page)` for the
+visible pages; internal links jump, URIs with a scheme (`https:`,
+`mailto:`) ask "Open … ? y: yes  any other key: no" (mode `Confirm`),
+then start `xdg-open` (Windows: `rundll32 url.dll,FileProtocolHandler`,
+no shell) without waiting. A click (press and release within 4 px, no
+selection made) on a link follows it; the pointer is a hand over links.
+
 ### 2.5 Search
 
 - `/` opens incremental search in the command line. Smartcase: insensitive
@@ -247,6 +289,29 @@ zooms keep the viewport centre, Ctrl+wheel keeps the point under the mouse.
 - Hyphenated line breaks are joined when matching (MuPDF dehyphenation), and
   ligatures match their plain letters.
 - No hits: status message, position unchanged.
+
+**As implemented (Phase 4):** matching in `marg-core/src/search.rs` on
+the core text model, so it behaves like copying: line and block breaks
+are spaces, whitespace runs match any whitespace, a letter + `-` at a
+line end followed by a lowercase letter joins the word (as `y` does),
+ligatures (ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ) match their letters, soft hyphens are ignored;
+hits do not overlap. The document thread (`Request::Search`) extracts
+and searches one page per turn, after renders and urgent requests, from
+the current page to the end, then from the start; pages with hits come
+back as `Response::Searched`, then `SearchDone`. A new query replaces the
+running search. Prompt `/` (mode `Search`, own history): the search runs
+while typing and the view goes to the first hit at or after where `/`
+was pressed (a third from the top if it was not in view); Esc goes back
+there; Enter keeps the search and records the jump; Enter on an empty
+prompt repeats the last query. Hits on visible pages are drawn in
+`search_hit`, the current one in `search_current` (§6). `n`/`N` (with
+counts, wrapping) go from the current hit if it is in view, else from
+the view's top. The status bar part `search` shows `hit 3/27` (`+` while
+searching, `-` before a hit is picked), "searching", "no hits". "Not
+found: …" when a finished search has none. Esc in Normal mode (with no
+annotation selected) hides the hits; `n` then searches the last query
+again from the view. Cost: one text extraction per page and search (§2.2
+measured 0.7 ms median), streamed; no cache on the document thread.
 
 ### 2.6 Hints (keyboard targeting)
 
@@ -280,7 +345,7 @@ label are ignored; Backspace removes one; Esc cancels and restores the
 previous selection. While the second word of `F` is picked, the first is
 shown selected. The typed prefix appears at the right of the status bar.
 If the visible text is still loading, the message is "Text is still
-loading". `gl` comes in Phase 4.
+loading".
 
 **As implemented (Phase 3):** `ga` (`hint.annot`) labels every visible
 annotation (those whose boxes are on screen, in reading order) with the
@@ -288,6 +353,10 @@ annotation (those whose boxes are on screen, in reading order) with the
 one selects it (and leaves Caret/Visual). "Still reading the
 annotations" while a visible page is not listed yet, "No annotations in
 view" if there are none.
+
+**As implemented (Phase 4):** `gl` (`hint.links`) labels the visible
+links on their top-left corner (like `ga`), in reading order; picking
+one follows it. "Still reading the links" / "No links in view".
 
 ### 2.7 Caret and visual selection
 
@@ -637,6 +706,20 @@ Added 2026-10-28 at the user's request (Phases 4 and 5):
   tool or test, and a test fails when the committed cheat sheet no longer
   matches the defaults.
 
+**As implemented (Phase 4):** `marg-core/src/help.rs` builds the lines
+from the live keymaps and the registry's help texts; `marg/src/help.rs`
+draws them (mode `HELP`). `?` (`help`): the keys of the current keymap
+(Normal, Caret, Visual, or with an annotation selected), by topic
+(Moving, Selecting, Annotating, Files), one line per command with all
+its keys, in a centred panel. `:help` / `:h` (`help.page`): the whole
+window: Normal by topic, then what Caret, Visual and the selected
+annotation add, then fixed keys (hints, box mode, comment editor, lists,
+search prompt), `:` commands, the categories from the config, and every
+command name. Both use the list keys; `/` filters (every word of the
+query must appear in a line, ignoring case: fuzzy matching matched most
+long lines), keeping each match's heading. Esc (or `?` outside the
+filter) closes.
+
 ---
 
 ## 3. Controls & Interaction
@@ -761,6 +844,16 @@ have fixed keys (§2.8, §2.10). New modes in the status bar: `INSERT`,
 **As implemented (Phase 3b):** Normal `gr` (`view.recolor`) toggles dark
 pages.
 
+**As implemented (Phase 4):** new Normal keys `Ctrl-l`
+(`view.layout_cycle`), `Ctrl-o` / `Ctrl-i` (`jump.back|forward`), `m` /
+`'` (`mark.set|jump`), `o` (`outline`), `/` (`search`), `n` / `N`
+(`search.next|prev`), `gl` (`hint.links`), `?` (`help`); Space /
+Shift-Space now run `scroll.screen_down|up` (§2.3). Other new commands:
+`view.spread_first_alone`, `help.page`; `:layout <name>`, `:help`
+(`:h`). New modes: `OUTLINE`, `HELP`; the search prompt shows `/`, the
+link question replaces the left of the status bar. Outline and help use
+the fixed list keys.
+
 **Mouse**: wheel scrolls, `Ctrl`+wheel zooms around the cursor, drag selects
 text (or draws a box in Box mode), click selects an annotation or follows a
 link, double/triple-click selects a word/line, right-click on a selection or
@@ -873,6 +966,7 @@ keys, aliases, userscripts.
 | `hint_bg` / `hint_fg` / `hint_typed` / `hint_border` | `#FFD84D` / `#000000` / `#9A8020` / `#806810` | hint and grid labels |
 | `selection` | `#3D7EFF59` | text selection |
 | `caret` / `caret_fill` | `#E02020` / `#E0202028` | caret block |
+| `search_hit` / `search_current` | `#FF9F1A4D` / `#FF5F1A99` | search hits, the current hit (added in Phase 4) |
 | `grid_line` / `grid_cell` | `#3D7EFF5A` / `#3D7EFF3C` | box grid, picked cell |
 | `recolor_fg` / `recolor_bg` | `#D0D0D0` / `#1E1E1E` | what black and white become on recolored pages |
 
@@ -888,8 +982,8 @@ load falls back to the built-in one with an error message. Startup is
 measured with a large font against the 150 ms target.
 
 **Status bar** — `[statusbar]`: `left = ["mode", "file", "page", "zoom",
-"layout", "unsaved"]`, `right = ["keys"]` (typed hint label or pending
-key sequence; `search` joins in Phase 4), `separator = "  "`. Messages
+"layout", "unsaved"]`, `right = ["search", "keys"]` (search hits since
+Phase 4; typed hint label or pending key sequence), `separator = "  "`. Messages
 still replace the right side for `ui.message_secs`. Unknown parts are
 reported at load and skipped. Prompts (`:`, category prompt, Box mode
 help) replace the left side as now.
@@ -940,7 +1034,8 @@ handover.
   (release); egui builds the font lazily in the first frame, no
   measurable difference to the first page on Xvfb.
 - `[statusbar]`: parts `mode`, `file`, `page`, `zoom`, `layout`,
-  `unsaved`, `keys`; empty parts are left out with their separator.
+  `unsaved`, `keys` (and `search` since Phase 4, on the right by
+  default); empty parts are left out with their separator.
   Unknown names: an error message at start ("statusbar: unknown part …
   (known: …)"), the rest is used. Messages and the comment editor's hint
   still replace the right side.
@@ -1055,6 +1150,11 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
 "Theming").
 
+**As implemented (Phase 4):** `[view] jump_history = 100`; `[ui]
+outline_width = 0.4`; `[colors] search_hit`, `search_current`;
+`[statusbar] right` defaults to `["search", "keys"]`. The example themes
+set the new colors.
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -1069,8 +1169,10 @@ opened time, last known path. Recent files list: the 50 most recent.
 position is the document point at the window's top-left. Saved when a file
 opens, before `:e` switches files, and on exit; each save re-reads the file
 and changes only its own entry (several windows can share it). At most 1000
-files (`state_files_max`); the least recently opened are dropped. Marks
-come in Phase 4.
+files (`state_files_max`); the least recently opened are dropped.
+**As implemented (Phase 4):** the layout and marks (`[files."…".marks.a]`
+= page, x, y) are saved per file; older state files without marks load
+(empty).
 
 ### Developer tooling
 
@@ -1311,6 +1413,14 @@ Each phase ends with something the user can try, and a short check by them.
 | **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay, `:help` page. | The user reads a slide deck and a book chapter with it. |
 | **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, README with the cheat sheet (§2.12), tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
 
+**Phase 4 steps** (branch `phase-4-reading`, planned 2026-10-29 with the
+user, one commit each): 1 single and spread layouts (defaults rule,
+`Ctrl-l`, `:layout`, per-file layout, spread first page alone; Space
+scrolls a screen and turns the page at its edge, like Zathura — user's
+choice); 2 jump history and marks; 3 outline overlay; 4 search; 5 links
+(`gl`, click, external URLs after `y`, opened with `xdg-open` / `start`);
+6 help overlay `?` and `:help`; 7 docs and handover.
+
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
 building more.
@@ -1359,6 +1469,15 @@ building more.
   image areas from `Request::Images` boxes); `gr` as the key; theme files
   may not set `[statusbar]` (only colors and fonts); the two example
   themes.
+- **Phase 4 choices to confirm** (Claude's defaults, the user's call
+  after trying): Space in **Continuous** stays next page (Zathura scrolls
+  a screen there too; say if it should); the wheel does not turn pages
+  in Single/Spread (stops at the page edge, like `j`/`k`); a spread's
+  saved position is its left page; outline over the left 40% of the
+  view; search colors (orange); Esc in Normal hides the hits; `N` after
+  that searches forward from the view; the help filter matches words,
+  not fuzzy; `?` closes the help as well as Esc;
+  `view.spread_first_alone` has no default key.
 - **Phase 3 choices to confirm** (Claude's defaults, the user's call after
   trying): annotation list drawn over the pages instead of beside them;
   note icon above the caret character (or top left of the visible page);
@@ -1391,6 +1510,17 @@ building more.
   extra render workers only if needed.
 
 **Known issues**
+
+- Phase 4: every search extracts the text of every page again on the
+  document thread (no text cache there); a 700-page book takes about
+  as long as extracting its text once (~0.5–1 s at the §2.2 timings,
+  streamed, renders first). Not measured on a large real book yet.
+- Phase 4: opening external links on Windows (`rundll32
+  url.dll,FileProtocolHandler`) is untested; Linux was checked only up to
+  the confirmation (no browser on Xvfb).
+- Phase 4: link and outline destinations on rotated pages or pages with
+  an offset CropBox are untested (boxes are moved by the page bounds'
+  origin, like the text).
 
 - Phase 2: lines whose text is invisible (e.g. white header text on a
   colored band) still get line hints. Not filtered on purpose: the text
@@ -1474,6 +1604,29 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-29 — Phase 4: reading features
+- Done (branch `phase-4-reading`, not merged, not pushed): plan agreed
+  with the user (§11 "Phase 4 steps"), then one commit per step: single
+  and spread layouts; jump history and marks; outline overlay; search;
+  links (`gl`, click, external URLs after `y`); `?` and `:help`; docs.
+- Decisions: Space in Single/Spread scrolls a screen and turns the page
+  at its edge, like Zathura (user, 2026-10-29). Claude kept Space in
+  Continuous as next page (listed in §12).
+- Tried and failed: fuzzy (subsequence) filtering in the help page
+  matched most long lines; it matches words instead.
+- Checks: each step on Xvfb with screenshots (layouts, marks, outline,
+  search, `gl`, link click, help). Not checked: speed of search on a
+  large book (release, real machine), external links opening a browser,
+  Windows.
+- State: builds; 158 tests pass; clippy and fmt clean. Tests changed
+  with new defaults: the default `[statusbar] right` and the count of
+  default `g…` bindings (`gl`).
+- Next: the user tries the Phase 4 build on a slide deck and a book
+  chapter; then merge, push, Phase 5.
+- Watch out: `View` paged layouts keep the shown row in `View::row`;
+  `goto_page`/`put_doc_pos_at` switch it, `scroll_by` never does. Search
+  hits are kept sorted by page as they stream in (`SearchState`).
 
 ### 2026-10-28 — Phase 3b: theming
 - Done (branch `phase-3b-theme`, not merged): Phase 3 merged into `main`

@@ -6,8 +6,10 @@ use std::ops::Range;
 use eframe::egui::{self, Color32, Pos2, Rect, text::LayoutJob};
 use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
-use marg_core::config::{HintMode, HintsConfig};
+use marg_core::config::{HintMode, HintsConfig, Layout};
 use marg_core::hints::{HintInput, labels};
+use marg_core::outline::Link;
+use marg_core::search::Hit;
 use marg_core::text::{BBox, PageText};
 use marg_core::view::View;
 
@@ -32,6 +34,8 @@ pub enum Purpose {
     SelectEnd(TextPos, TextPos),
     /// Select an annotation: (page, object number) per target box.
     Annot(Vec<(usize, i32)>),
+    /// Follow a link, one per target box.
+    Link(Vec<Link>),
 }
 
 /// What a hint picked.
@@ -302,6 +306,10 @@ pub fn keep_visible(view: &mut View, caret: &Caret, texts: &[Option<PageText>]) 
     let Some(t) = texts.text(caret.pos.page) else {
         return;
     };
+    // Single/spread: show the caret's page first.
+    if view.layout() != Layout::Continuous && !view.visible_pages().contains(&caret.pos.page) {
+        view.goto_page(caret.pos.page);
+    }
     let (vw, vh) = view.viewport();
     let r = screen_rect(
         view,
@@ -326,6 +334,54 @@ pub fn keep_visible(view: &mut View, caret: &Caret, texts: &[Option<PageText>]) 
     };
     if dx != 0.0 || dy != 0.0 {
         view.scroll_by(dx, dy);
+    }
+}
+
+/// If `rect` (points on `page`) is not fully in view, scroll it to a
+/// third from the top (and into view horizontally).
+pub fn reveal(view: &mut View, page: usize, rect: BBox) {
+    let (vw, vh) = view.viewport();
+    let r = screen_rect(
+        view,
+        Rect::from_min_size(Pos2::ZERO, egui::vec2(vw, vh)),
+        page,
+        rect,
+    );
+    let shown = view.visible_pages().contains(&page);
+    if !shown || r.min.y < 0.0 || r.max.y > vh || r.max.x < 0.0 || r.min.x > vw {
+        let x = if shown { r.min.x.clamp(0.0, vw) } else { 0.0 };
+        let pos = marg_core::view::DocPos {
+            page,
+            x: rect.x0,
+            y: rect.y0,
+        };
+        view.put_doc_pos_at(pos, x, vh / 3.0);
+    }
+}
+
+/// Draw the search hits on the visible pages; `current` stands out.
+pub fn draw_hits(
+    painter: &egui::Painter,
+    th: &Theme,
+    view: &View,
+    area: Rect,
+    hits: &[Hit],
+    current: Option<usize>,
+) {
+    let visible = view.visible_pages();
+    let start = hits.partition_point(|h| h.page < *visible.start());
+    for (i, h) in hits.iter().enumerate().skip(start) {
+        if h.page > *visible.end() {
+            break;
+        }
+        let color = if Some(i) == current {
+            th.search_current
+        } else {
+            th.search_hit
+        };
+        for &b in &h.rects {
+            painter.rect_filled(screen_rect(view, area, h.page, b).expand(1.0), 1.0, color);
+        }
     }
 }
 

@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
 use marg_core::annot::{AnnotChange, AnnotInfo, AnnotKind, AnnotSpec};
+use marg_core::outline::{Dest, Link, LinkTarget, OutlineEntry};
 use marg_core::text::{BBox, Char, PageText};
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::{PdfAnnotationType, PdfDocument, PdfObject, PdfWriteOptions};
@@ -139,6 +140,35 @@ fn temp_path(path: &Path) -> PathBuf {
 fn open_pdf(path: &Path) -> Result<PdfDocument, String> {
     let s = path.to_str().ok_or("path is not valid UTF-8")?;
     PdfDocument::open(s).map_err(err)
+}
+
+/// A URI with a scheme (`https:`, `mailto:`), as opposed to `#page=3`.
+fn is_external(uri: &str) -> bool {
+    uri.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.len() > 1
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+    })
+}
+
+/// A resolved link destination (MuPDF page space: y down from the top).
+fn dest(d: mupdf::link::LinkDestination) -> Dest {
+    use mupdf::DestinationKind as K;
+    let (x, y) = match d.kind {
+        K::XYZ { left, top, .. } => (left, top),
+        K::FitH { top } | K::FitBH { top } => (None, top),
+        K::FitV { left } | K::FitBV { left } => (left, None),
+        K::FitR {
+            left, bottom, top, ..
+        } => (Some(left), Some(top.min(bottom))),
+        K::Fit | K::FitB => (None, None),
+    };
+    Dest {
+        page: d.loc.page_number as usize,
+        x,
+        y,
+    }
 }
 
 fn err(e: mupdf::Error) -> String {
@@ -431,6 +461,44 @@ impl Doc {
             })
             .collect();
         Ok(PageText::from_blocks(blocks))
+    }
+
+    /// The links on page `index`: internal ones with their destination,
+    /// others with their URI (if it has a scheme, like `https:`).
+    pub fn links(&self, index: usize) -> Result<Vec<Link>, String> {
+        let page = self.doc.load_page(index as i32).map_err(err)?;
+        let b = page.bounds().map_err(err)?;
+        let mut out = Vec::new();
+        for l in page.links().map_err(err)? {
+            let target = match l.dest {
+                Some(d) => LinkTarget::Page(dest(d)),
+                None if is_external(&l.uri) => LinkTarget::Uri(l.uri),
+                None => continue,
+            };
+            let r = l.bounds;
+            out.push(Link {
+                rect: BBox::new(r.x0 - b.x0, r.y0 - b.y0, r.x1 - b.x0, r.y1 - b.y0),
+                target,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The table of contents, flattened in document order.
+    pub fn outline(&self) -> Result<Vec<OutlineEntry>, String> {
+        fn walk(items: &[mupdf::Outline], level: usize, out: &mut Vec<OutlineEntry>) {
+            for o in items {
+                out.push(OutlineEntry {
+                    title: o.title.trim().to_string(),
+                    level,
+                    dest: o.dest.map(dest),
+                });
+                walk(&o.down, level + 1, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.doc.outlines().map_err(err)?, 0, &mut out);
+        Ok(out)
     }
 
     /// Where images are drawn on page `index`, in points. Separate from

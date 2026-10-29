@@ -19,6 +19,9 @@ pub struct FileState {
     pub zoom: f32,
     pub fit: Fit,
     pub layout: Layout,
+    /// Marks `a`–`z` (`m{a-z}`, `'{a-z}`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub marks: BTreeMap<char, DocPos>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -94,6 +97,7 @@ mod tests {
             zoom: 1.25,
             fit: Fit::Width,
             layout: Layout::Continuous,
+            marks: BTreeMap::new(),
         }
     }
 

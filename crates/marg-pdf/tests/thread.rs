@@ -329,3 +329,35 @@ fn highlight_create_and_delete_render() {
     assert!(again.is_err());
     assert_eq!(rev, 2);
 }
+
+#[test]
+fn search_streams_hits_from_the_start_page_and_wraps() {
+    let t = DocThread::spawn(|| ());
+    let (generation, _) = open(&t, fixture("text.pdf"));
+    t.send(Request::Search {
+        id: 7,
+        query: "page".into(),
+        from: 1,
+    });
+    let mut pages = Vec::new();
+    loop {
+        match t.recv_timeout(WAIT).expect("search response") {
+            Response::Searched {
+                generation: g,
+                id,
+                page,
+                hits,
+            } => {
+                assert_eq!((g, id), (generation, 7));
+                assert!(hits.iter().all(|h| h.page == page && !h.rects.is_empty()));
+                pages.push(page);
+            }
+            Response::SearchDone { id, .. } => {
+                assert_eq!(id, 7);
+                break;
+            }
+            _ => panic!("unexpected response"),
+        }
+    }
+    assert_eq!(pages, [1, 0]);
+}

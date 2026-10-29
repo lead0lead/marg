@@ -24,8 +24,8 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("Ctrl-u", "scroll.half_up"),
     ("J", "page.next"),
     ("K", "page.prev"),
-    ("Space", "page.next"),
-    ("Shift-Space", "page.prev"),
+    ("Space", "scroll.screen_down"),
+    ("Shift-Space", "scroll.screen_up"),
     ("PageDown", "page.next"),
     ("PageUp", "page.prev"),
     ("gg", "page.first"),
@@ -48,10 +48,21 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("[a", "annot.prev"),
     ("x", "annot.delete"),
     ("ga", "hint.annot"),
+    ("gl", "hint.links"),
     ("i", "annotate.note"),
     ("b", "annotate.box"),
     ("A", "annot.list"),
     ("gr", "view.recolor"),
+    ("Ctrl-l", "view.layout_cycle"),
+    ("Ctrl-o", "jump.back"),
+    ("Ctrl-i", "jump.forward"),
+    ("m", "mark.set"),
+    ("'", "mark.jump"),
+    ("o", "outline"),
+    ("/", "search"),
+    ("n", "search.next"),
+    ("N", "search.prev"),
+    ("?", "help"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.
@@ -460,10 +471,11 @@ mod tests {
         let user = BTreeMap::from([("g".to_string(), "zoom.in".to_string())]);
         let (map, warnings) = Keymap::normal(&user);
         // One warning per default binding that starts with g.
-        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert_eq!(warnings.len(), 4, "{warnings:?}");
         assert!(warnings[0].contains("\"gg\""));
         assert!(warnings[1].contains("\"ga\""));
-        assert!(warnings[2].contains("\"gr\""));
+        assert!(warnings[2].contains("\"gl\""));
+        assert!(warnings[3].contains("\"gr\""));
         let mut m = Matcher::default();
         assert_eq!(feed_str(&mut m, &map, "g"), [run(Command::ZoomIn, None)]);
     }

@@ -8,6 +8,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
+use marg_core::outline::{Link, OutlineEntry};
+use marg_core::search::{Hit, Query};
 use marg_core::text::{BBox, PageText};
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels, Recolor, SaveError, SaveReport};
@@ -101,6 +103,14 @@ pub enum Request {
     Annots { pages: Vec<usize>, urgent: bool },
     /// Where images are drawn on a page (for box snapping). Served at once.
     Images(usize),
+    /// The table of contents. Served at once.
+    Outline,
+    /// The links of a page. Served at once.
+    Links(usize),
+    /// Search every page, starting at page `from` and wrapping around,
+    /// after renders. Replaces the previous search; an empty query stops
+    /// it. Hits come back page by page, then `SearchDone`.
+    Search { id: u64, query: String, from: usize },
 }
 
 pub enum Response {
@@ -148,6 +158,27 @@ pub enum Response {
         generation: u64,
         page: usize,
         result: Result<Vec<BBox>, String>,
+    },
+    Outline {
+        generation: u64,
+        result: Result<Vec<OutlineEntry>, String>,
+    },
+    /// The hits of search `id` on one page (only pages with hits).
+    Searched {
+        generation: u64,
+        id: u64,
+        page: usize,
+        hits: Vec<Hit>,
+    },
+    Links {
+        generation: u64,
+        page: usize,
+        result: Result<Vec<Link>, String>,
+    },
+    /// Search `id` has looked at every page.
+    SearchDone {
+        generation: u64,
+        id: u64,
     },
 }
 
@@ -248,6 +279,8 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
     let mut text_queue: VecDeque<usize> = VecDeque::new();
     let mut annots_urgent: VecDeque<usize> = VecDeque::new();
     let mut annots_idle: VecDeque<usize> = VecDeque::new();
+    // The running search: its id, query and the pages still to search.
+    let mut search: Option<(u64, Query, VecDeque<usize>)> = None;
     // Annotation edits per page since the document was opened.
     let mut revs: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     // Rendered responses sent so far, and the keys of those the UI may not
@@ -261,6 +294,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
             && text_queue.is_empty()
             && annots_urgent.is_empty()
             && annots_idle.is_empty()
+            && search.is_none()
         {
             match rx.recv() {
                 Ok(r) => incoming.push(r),
@@ -285,6 +319,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                             annots_urgent.clear();
                             annots_idle.clear();
                             revs.clear();
+                            search = None;
                             generation += 1;
                             doc = Some((d, info.clone()));
                             Ok(info)
@@ -329,6 +364,37 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         result,
                     };
                     if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::Search { id, query, from } => {
+                    let count = doc.as_ref().map_or(0, |(_, info)| info.page_sizes.len());
+                    let from = from.min(count.saturating_sub(1));
+                    search =
+                        Query::new(&query).map(|q| (id, q, (from..count).chain(0..from).collect()));
+                }
+                Request::Links(page) => {
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => d.links(page),
+                    };
+                    let resp = Response::Links {
+                        generation,
+                        page,
+                        result,
+                    };
+                    if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::Outline => {
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => d.outline(),
+                    };
+                    if tx.send(Response::Outline { generation, result }).is_err() {
                         return;
                     }
                     wake();
@@ -408,6 +474,7 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     annots_urgent.clear();
                     annots_idle.clear();
                     revs.clear();
+                    search = None;
                     generation += 1;
                 }
                 Request::CheckDisk => {
@@ -438,6 +505,43 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                 return;
             }
             wake();
+            continue;
+        }
+        if annots_urgent.is_empty()
+            && queue.is_empty()
+            && let Some((id, query, pages)) = &mut search
+        {
+            let id = *id;
+            match (pages.pop_front(), &doc) {
+                (Some(page), Some((d, _))) => {
+                    let hits = match d.text(page) {
+                        Ok(t) => query.hits(page, &t),
+                        Err(e) => {
+                            log::error!("search: text of page {} failed: {e}", page + 1);
+                            Vec::new()
+                        }
+                    };
+                    if !hits.is_empty() {
+                        let resp = Response::Searched {
+                            generation,
+                            id,
+                            page,
+                            hits,
+                        };
+                        if tx.send(resp).is_err() {
+                            return;
+                        }
+                        wake();
+                    }
+                }
+                _ => {
+                    search = None;
+                    if tx.send(Response::SearchDone { generation, id }).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+            }
             continue;
         }
         let annot_page = annots_urgent.pop_front().or_else(|| {

@@ -12,22 +12,29 @@ use marg_core::annot::{
 };
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
-use marg_core::config::Config;
+use marg_core::config::{Config, Layout};
+use marg_core::help;
+use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
+use marg_core::outline::{Dest, Link, LinkTarget, OutlineEntry, link_at};
+use marg_core::search::Hit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
-use marg_core::view::{Fit, View};
+use marg_core::view::{DocPos, Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
+use crate::browser;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
+use crate::help::HelpView;
 use crate::input;
+use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
@@ -38,6 +45,16 @@ use marg_core::theme::{StatusPart, status_line};
 /// A successfully opened document.
 struct OpenDoc {
     info: DocInfo,
+    jumps: JumpList,
+    /// The table of contents, once read.
+    outline: Option<Vec<OutlineEntry>>,
+    /// Links of each page, once listed.
+    links: Vec<Option<Vec<Link>>>,
+    links_requested: HashSet<usize>,
+    /// The last search and its hits; `None` after Esc.
+    search: Option<SearchState>,
+    /// Marks `a`–`z`, saved in the state file.
+    marks: BTreeMap<char, DocPos>,
     /// Key in the state file.
     key: String,
     generation: u64,
@@ -143,11 +160,37 @@ impl OpenDoc {
         }
     }
 
-    /// Ask for the text of the visible pages that do not have it yet.
+    /// Ask for the text and links of the visible pages that do not have
+    /// them yet.
     fn request_visible_text(&mut self, doc: &DocThread) {
         for p in self.view.visible_pages() {
             self.request_text(doc, p);
+            if self.links[p].is_none() && self.links_requested.insert(p) {
+                doc.send(Request::Links(p));
+            }
         }
+    }
+}
+
+/// A search (`/`) and the hits found so far.
+struct SearchState {
+    id: u64,
+    query: String,
+    /// In page order, then reading order.
+    hits: Vec<Hit>,
+    /// Every page has been searched.
+    done: bool,
+    current: Option<usize>,
+    /// Go to the first hit at or after this position once it arrives.
+    seek: Option<DocPos>,
+}
+
+impl SearchState {
+    /// Index of the first hit at or after `pos`.
+    fn first_from(&self, pos: DocPos) -> Option<usize> {
+        self.hits
+            .iter()
+            .position(|h| h.page > pos.page || (h.page == pos.page && h.top().1 >= pos.y - 0.5))
     }
 }
 
@@ -180,12 +223,21 @@ enum Mode {
     Box,
     /// The annotation list is open.
     Annots,
+    /// The outline is open, or asked for.
+    Outline,
+    /// Asking whether to open an external link.
+    Confirm,
+    /// The help overlay or page is open.
+    Help,
+    /// Typing a search.
+    Search,
 }
 
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command => "NORMAL",
+            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm => "NORMAL",
+            Mode::Help => "HELP",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
@@ -193,6 +245,7 @@ impl Mode {
             Mode::Insert => "INSERT",
             Mode::Box => "BOX",
             Mode::Annots => "ANNOTATIONS",
+            Mode::Outline => "OUTLINE",
         }
     }
 }
@@ -225,8 +278,18 @@ pub struct MargApp {
     boxing: Option<BoxMode>,
     /// The annotation list (Annots mode).
     annot_list: Option<AnnotList>,
+    /// The outline overlay (Outline mode).
+    outline_list: Option<OutlineList>,
+    /// The help (Help mode), and whether it is the whole page.
+    help: Option<(HelpView, bool)>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
+    /// The external link waiting for `y` (Confirm mode).
+    pending_url: Option<String>,
+    /// A press on a link: where, and the link; a release there follows it.
+    link_press: Option<(egui::Pos2, Link)>,
+    /// `m` or `'` was pressed: the next key names the mark (true: set).
+    pending_mark: Option<bool>,
     /// Where a mouse drag started, while the primary button is down.
     drag_anchor: Option<TextPos>,
     /// Last primary press: time, position, click count (1–3).
@@ -247,6 +310,10 @@ pub struct MargApp {
     /// The pending open is a reload of the current file.
     reloading: bool,
     cmdline: LineEdit,
+    searchline: LineEdit,
+    /// Where the view was when the search prompt opened.
+    search_origin: Option<DocPos>,
+    next_search_id: u64,
     doc: DocThread,
     open: Option<OpenDoc>,
     /// Page to show once the pending document has opened (0-based).
@@ -360,7 +427,12 @@ impl MargApp {
             editor: None,
             boxing: None,
             annot_list: None,
+            outline_list: None,
+            help: None,
             selection_before_hints: None,
+            pending_mark: None,
+            pending_url: None,
+            link_press: None,
             drag_anchor: None,
             last_click: None,
             last_category: 1,
@@ -372,6 +444,9 @@ impl MargApp {
             reloading: false,
             author,
             cmdline: LineEdit::default(),
+            searchline: LineEdit::default(),
+            search_origin: None,
+            next_search_id: 0,
             doc,
             open: None,
             start_page: s.start_page,
@@ -542,6 +617,99 @@ impl MargApp {
                         }
                     }
                 }
+                Response::Searched {
+                    generation,
+                    id,
+                    page,
+                    hits,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    let Some(s) = open.search.as_mut().filter(|s| s.id == id) else {
+                        continue;
+                    };
+                    let at = s.hits.partition_point(|h| h.page < page);
+                    if let Some(c) = s.current.as_mut().filter(|c| **c >= at) {
+                        *c += hits.len();
+                    }
+                    let n = hits.len();
+                    s.hits.splice(at..at, hits);
+                    if let Some(from) = s.seek {
+                        // Pages come from `from` on, then wrap around.
+                        let found = if page < from.page {
+                            Some(at)
+                        } else {
+                            s.first_from(from).filter(|&i| i >= at && i < at + n)
+                        };
+                        if let Some(i) = found {
+                            s.seek = None;
+                            s.current = Some(i);
+                            let h = &s.hits[i];
+                            select::reveal(&mut open.view, h.page, h.rects[0]);
+                        }
+                    }
+                }
+                Response::SearchDone { generation, id } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    let Some(s) = open.search.as_mut().filter(|s| s.id == id) else {
+                        continue;
+                    };
+                    s.done = true;
+                    if let Some(from) = s.seek.take() {
+                        if s.hits.is_empty() {
+                            open.view.set_position(from);
+                            let msg = format!("Not found: {}", s.query);
+                            self.show(Level::Info, msg);
+                        } else {
+                            // Only hits before the start: wrap to the first.
+                            s.current = Some(0);
+                            let h = &s.hits[0];
+                            select::reveal(&mut open.view, h.page, h.rects[0]);
+                        }
+                    }
+                }
+                Response::Outline { generation, result } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(toc) => {
+                            open.outline = Some(toc);
+                            if self.mode == Mode::Outline {
+                                self.show_outline();
+                            }
+                        }
+                        Err(e) => {
+                            if self.mode == Mode::Outline {
+                                self.mode = Mode::Normal;
+                            }
+                            self.error(format!("Cannot read the outline: {e}"));
+                        }
+                    }
+                }
+                Response::Links {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(links) => open.links[page] = Some(links),
+                        Err(e) => {
+                            log::error!("links of page {} failed: {e}", page + 1);
+                            open.links[page] = Some(Vec::new());
+                        }
+                    }
+                }
                 Response::Images {
                     generation,
                     page,
@@ -678,10 +846,11 @@ impl MargApp {
             .map(|s| (s.width, s.height))
             .collect();
         // First page landscape: fit the page (slides); else fit the width.
-        let fit = if sizes[0].0 > sizes[0].1 {
-            Fit::Page
+        let cfg = &self.config.view;
+        let (layout, fit) = if sizes[0].0 > sizes[0].1 {
+            (cfg.default_layout_landscape, Fit::Page)
         } else {
-            Fit::Width
+            (cfg.default_layout_portrait, Fit::Width)
         };
         let viewport = self
             .open
@@ -691,7 +860,9 @@ impl MargApp {
         let key = file_key(info.id.as_deref(), &canonical.to_string_lossy());
         let saved = self.state.files.get(&key);
         let fit = saved.map_or(fit, |f| f.fit);
-        let mut view = View::new(sizes, &self.config.view, fit, viewport);
+        let layout = saved.map_or(layout, |f| f.layout);
+        let marks = saved.map(|f| f.marks.clone()).unwrap_or_default();
+        let mut view = View::new(sizes, &self.config.view, layout, fit, viewport);
         if let Some(saved) = saved {
             if saved.fit == Fit::None {
                 view.set_zoom_at(saved.zoom, (0.0, 0.0));
@@ -714,6 +885,10 @@ impl MargApp {
             key,
             generation,
             file_name,
+            jumps: JumpList::new(self.config.view.jump_history),
+            outline: None,
+            search: None,
+            marks,
             texts: vec![None; view.page_count()],
             text_requested: HashSet::new(),
             revs: vec![0; view.page_count()],
@@ -728,6 +903,8 @@ impl MargApp {
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
+            links: vec![None; view.page_count()],
+            links_requested: HashSet::new(),
             view,
         }
     }
@@ -763,6 +940,14 @@ impl MargApp {
                     }
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
+                _ if self.mode == Mode::Search => self.search_event(e),
+                _ if self.mode == Mode::Confirm => self.confirm_event(e),
+                _ if self.mode == Mode::Help => {
+                    if self.help.as_mut().is_none_or(|(h, _)| h.event(e)) {
+                        self.help = None;
+                        self.mode = self.return_mode;
+                    }
+                }
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
                 _ if self.mode == Mode::Category => self.category_event(e),
@@ -770,6 +955,7 @@ impl MargApp {
                 _ if self.mode == Mode::Insert => {}
                 _ if self.mode == Mode::Box => self.box_event(e),
                 _ if self.mode == Mode::Annots => self.annot_list_event(e),
+                _ if self.mode == Mode::Outline => self.outline_event(e),
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -786,6 +972,12 @@ impl MargApp {
             }
         }
         self.drag_scroll(ctx, area);
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+        if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual)
+            && hover.is_some_and(|p| area.contains(p) && self.link_at_screen(p).is_some())
+        {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         if self
             .matcher
             .expire(self.now_ms(), self.config.ui.sequence_timeout_ms)
@@ -842,7 +1034,8 @@ impl MargApp {
             position: open.view.position(),
             zoom: open.view.zoom(),
             fit: open.view.fit(),
-            layout: marg_core::config::Layout::Continuous,
+            layout: open.view.layout(),
+            marks: open.marks.clone(),
         };
         let max = self.config.ui.state_files_max;
         self.state.update(open.key.clone(), file.clone(), max);
@@ -855,6 +1048,10 @@ impl MargApp {
     fn normal_key(&mut self, ctx: &egui::Context, key: KeyPress) {
         let now = self.now_ms();
         let timeout = self.config.ui.sequence_timeout_ms;
+        if let Some(set) = self.pending_mark.take() {
+            self.mark_key(key, set);
+            return;
+        }
         let map = match self.mode {
             Mode::Caret => &self.caret_map,
             Mode::Visual => &self.visual_map,
@@ -866,12 +1063,85 @@ impl MargApp {
             Outcome::Unbound if key == KeyPress::named(Named::Esc) => {
                 if matches!(self.mode, Mode::Caret | Mode::Visual) {
                     self.leave_text_modes();
-                } else {
+                } else if self.selected_annot.is_some() {
                     self.selected_annot = None;
+                } else if let Some(open) = &mut self.open {
+                    // Hide the search hits; `n` searches again.
+                    open.search = None;
                 }
             }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
         }
+    }
+
+    /// The key after `m` (`set`) or `'`: a mark name `a`–`z`; anything
+    /// else cancels.
+    fn mark_key(&mut self, key: KeyPress, set: bool) {
+        let Some(open) = &mut self.open else { return };
+        let name = match key.code {
+            KeyCode::Char(c @ 'a'..='z') if !key.ctrl && !key.alt => c,
+            _ => return,
+        };
+        let here = open.view.position();
+        if set {
+            open.marks.insert(name, here);
+            self.save_state();
+            self.show(Level::Info, format!("Mark {name} set"));
+        } else if let Some(&to) = open.marks.get(&name) {
+            open.jumps.push(here);
+            open.view.set_position(to);
+        } else {
+            self.show(Level::Info, format!("No mark {name}"));
+        }
+    }
+
+    /// Open the outline overlay once the outline is read.
+    fn show_outline(&mut self) {
+        let Some(open) = &self.open else { return };
+        let toc = open.outline.clone().unwrap_or_default();
+        if toc.is_empty() {
+            self.mode = Mode::Normal;
+            self.show(Level::Info, "This PDF has no outline".into());
+            return;
+        }
+        self.outline_list = Some(OutlineList::new(toc, open.view.current_page()));
+    }
+
+    /// A key in the outline.
+    fn outline_event(&mut self, e: &Event) {
+        let Some(list) = &mut self.outline_list else {
+            // Still reading the outline: Esc gives up.
+            if input::key_press(e) == Some(KeyPress::named(Named::Esc)) {
+                self.mode = Mode::Normal;
+            }
+            return;
+        };
+        match list.event(e) {
+            outline::Action::None => {}
+            outline::Action::Close => {
+                self.outline_list = None;
+                self.mode = Mode::Normal;
+            }
+            outline::Action::Jump(dest) => {
+                self.outline_list = None;
+                self.mode = Mode::Normal;
+                self.jump_to(dest);
+            }
+        }
+    }
+
+    /// Go to a link or outline destination, as a jump.
+    fn jump_to(&mut self, dest: Dest) {
+        let Some(open) = &mut self.open else { return };
+        if dest.page >= open.view.page_count() {
+            return;
+        }
+        open.jumps.push(open.view.position());
+        open.view.set_position(DocPos {
+            page: dest.page,
+            x: dest.x.unwrap_or(0.0),
+            y: dest.y.unwrap_or(0.0),
+        });
     }
 
     /// Back to Normal mode: no caret, no selection.
@@ -1201,6 +1471,121 @@ impl MargApp {
         self.mode = Mode::Hint;
     }
 
+    /// `?`: the keys of the current mode; `:help` (`page`): everything.
+    fn show_help(&mut self, page: bool) {
+        let view = if page {
+            let names: Vec<String> = self
+                .config
+                .categories
+                .iter()
+                .map(|c| c.name.clone())
+                .collect();
+            let maps = help::Maps {
+                normal: &self.keymap,
+                caret: &self.caret_map,
+                visual: &self.visual_map,
+                annot: &self.annot_map,
+            };
+            HelpView::new("marg help".into(), help::page(&maps, &names))
+        } else {
+            let (title, map) = match self.mode {
+                Mode::Caret => ("Caret mode keys", &self.caret_map),
+                Mode::Visual => ("Visual mode keys", &self.visual_map),
+                Mode::Normal if self.selected_annot.is_some() => {
+                    ("Keys with an annotation selected", &self.annot_map)
+                }
+                _ => ("Normal mode keys", &self.keymap),
+            };
+            let mut lines = help::section("", map, None);
+            lines.push(help::HelpLine::Text(
+                ":help shows every mode, the : commands and more.".into(),
+            ));
+            HelpView::new(title.into(), lines)
+        };
+        if self.mode != Mode::Help {
+            self.return_mode = self.mode;
+        }
+        self.help = Some((view, page));
+        self.mode = Mode::Help;
+    }
+
+    /// `gl`: hints on the visible links.
+    fn link_hints(&mut self) {
+        let Some(open) = &self.open else { return };
+        let mut found: Vec<(usize, Link)> = Vec::new();
+        for page in open.view.visible_pages() {
+            let Some(list) = &open.links[page] else {
+                self.show(Level::Info, "Still reading the links".into());
+                return;
+            };
+            found.extend(
+                list.iter()
+                    .filter(|l| select::on_screen(&open.view, self.area, page, l.rect))
+                    .map(|l| (page, l.clone())),
+            );
+        }
+        if found.is_empty() {
+            self.show(Level::Info, "No links in view".into());
+            return;
+        }
+        found.sort_by(|(pa, a), (pb, b)| {
+            (pa, a.rect.y0, a.rect.x0)
+                .partial_cmp(&(pb, b.rect.y0, b.rect.x0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let boxes = found.iter().map(|(p, l)| (*p, l.rect)).collect();
+        let links = found.into_iter().map(|(_, l)| l).collect();
+        let h = Hinting::boxes(Purpose::Link(links), boxes, &self.config.hints);
+        if self.mode != Mode::Hint {
+            self.return_mode = self.mode;
+            self.selection_before_hints = self.selection;
+        }
+        self.hinting = Some(h);
+        self.mode = Mode::Hint;
+    }
+
+    /// Follow a link: jump to its destination, or ask before opening an
+    /// external one.
+    fn follow(&mut self, link: Link) {
+        match link.target {
+            LinkTarget::Page(dest) => self.jump_to(dest),
+            LinkTarget::Uri(url) => {
+                self.return_mode = self.mode;
+                self.pending_url = Some(url);
+                self.mode = Mode::Confirm;
+            }
+        }
+    }
+
+    /// Confirm mode: `y` opens the link, anything else does not.
+    fn confirm_event(&mut self, e: &Event) {
+        let Some(k) = input::key_press(e) else { return };
+        let Some(url) = self.pending_url.take() else {
+            self.mode = self.return_mode;
+            return;
+        };
+        self.mode = self.return_mode;
+        if k.code == KeyCode::Char('y') && !k.ctrl && !k.alt {
+            match browser::open(&url) {
+                Ok(()) => self.show(Level::Info, format!("Opened {url}")),
+                Err(e) => self.error(format!("Cannot open {url}: {e}")),
+            }
+        }
+    }
+
+    /// The link under a point of the window, if its page's links are known.
+    fn link_at_screen(&self, pos: egui::Pos2) -> Option<Link> {
+        let open = self.open.as_ref()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        // `doc_pos_at` clamps to the page: check the point is on it.
+        let r = open.view.page_rect_on_screen(d.page);
+        if rel.x < r.x || rel.x > r.right() || rel.y < r.y || rel.y > r.bottom() {
+            return None;
+        }
+        link_at(open.links[d.page].as_ref()?, d.x, d.y).cloned()
+    }
+
     fn cancel_hints(&mut self) {
         self.hinting = None;
         self.mode = self.return_mode;
@@ -1246,6 +1631,12 @@ impl MargApp {
                 self.select_annot(a.as_ref());
                 return;
             }
+            (Picked::Box(i), Purpose::Link(links)) => {
+                self.mode = self.return_mode;
+                self.selection = self.selection_before_hints.take();
+                self.follow(links[i].clone());
+                return;
+            }
             (Picked::Word(page, word), _) => (page, word),
             (Picked::Box(_), _) => return,
         };
@@ -1267,7 +1658,7 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
-            Purpose::Annot(_) => {}
+            Purpose::Annot(_) | Purpose::Link(_) => {}
         }
     }
 
@@ -1345,6 +1736,7 @@ impl MargApp {
                     _ => 1,
                 };
                 self.last_click = Some((now, pos, count));
+                self.link_press = self.link_at_screen(pos).map(|l| (pos, l));
                 if count == 1 {
                     // A click selects the annotation under it (or none).
                     let hit = self.annot_at_screen(pos);
@@ -1380,10 +1772,20 @@ impl MargApp {
                 }
             }
             Event::PointerButton {
+                pos,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 ..
-            } => self.drag_anchor = None,
+            } => {
+                self.drag_anchor = None;
+                // A click (not a drag) on a link follows it.
+                if let Some((at, link)) = self.link_press.take()
+                    && at.distance(pos) < 4.0
+                    && self.selection.is_none()
+                {
+                    self.follow(link);
+                }
+            }
             Event::PointerMoved(pos) => {
                 let Some(anchor) = self.drag_anchor else {
                     return;
@@ -2206,6 +2608,160 @@ impl MargApp {
         }
     }
 
+    /// A key in the search prompt. The search runs as the query is typed;
+    /// Enter keeps it, Esc goes back to where the search started.
+    fn search_event(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => {
+                self.searchline.insert(t);
+                self.search_typed();
+            }
+            Event::Key { pressed: true, .. } => {
+                let Some(k) = input::key_press(e) else { return };
+                match k.code {
+                    KeyCode::Named(Named::Esc) => self.cancel_search(),
+                    KeyCode::Named(Named::Backspace) if self.searchline.is_empty() => {
+                        self.cancel_search()
+                    }
+                    KeyCode::Named(Named::Enter) => {
+                        self.mode = self.return_mode;
+                        let typed = self.searchline.submit();
+                        let (Some(open), Some(origin)) = (&mut self.open, self.search_origin)
+                        else {
+                            return;
+                        };
+                        if typed.trim().is_empty() {
+                            // Like vim: an empty search repeats the last one.
+                            let last = self.searchline.last().unwrap_or_default();
+                            if last.trim().is_empty() {
+                                open.search = None;
+                                return;
+                            }
+                            self.start_search(&last, origin);
+                        }
+                        if let Some(open) = &mut self.open {
+                            open.jumps.push(origin);
+                        }
+                    }
+                    KeyCode::Named(n) => {
+                        match n {
+                            Named::Backspace => self.searchline.backspace(),
+                            Named::Delete => self.searchline.delete(),
+                            Named::Left => self.searchline.left(),
+                            Named::Right => self.searchline.right(),
+                            Named::Home => self.searchline.home(),
+                            Named::End => self.searchline.end(),
+                            Named::Up => self.searchline.history_prev(),
+                            Named::Down => self.searchline.history_next(),
+                            _ => return,
+                        }
+                        self.search_typed();
+                    }
+                    KeyCode::Char(_) => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The search prompt changed: search for the new text.
+    fn search_typed(&mut self) {
+        let (Some(open), Some(origin)) = (&mut self.open, self.search_origin) else {
+            return;
+        };
+        let query = self.searchline.text().to_string();
+        if query.trim().is_empty() {
+            open.search = None;
+            self.doc.send(Request::Search {
+                id: 0,
+                query: String::new(),
+                from: 0,
+            });
+            open.view.set_position(origin);
+            return;
+        }
+        if open.search.as_ref().is_some_and(|s| s.query == query) {
+            return;
+        }
+        self.start_search(&query, origin);
+    }
+
+    /// Search for `query`; go to the first hit at or after `from`.
+    fn start_search(&mut self, query: &str, from: DocPos) {
+        let Some(open) = &mut self.open else { return };
+        self.next_search_id += 1;
+        let id = self.next_search_id;
+        self.doc.send(Request::Search {
+            id,
+            query: query.to_string(),
+            from: from.page,
+        });
+        open.search = Some(SearchState {
+            id,
+            query: query.to_string(),
+            hits: Vec::new(),
+            done: false,
+            current: None,
+            seek: Some(from),
+        });
+    }
+
+    fn cancel_search(&mut self) {
+        self.mode = self.return_mode;
+        if let (Some(open), Some(origin)) = (&mut self.open, self.search_origin) {
+            open.search = None;
+            open.view.set_position(origin);
+        }
+    }
+
+    /// `n` / `N`: the next or previous hit, from the current one if it is
+    /// in view, else from the view. After Esc, `n` searches again.
+    fn step_hit(&mut self, forward: bool, count: u32) {
+        let Some(open) = &mut self.open else { return };
+        let Some(s) = &mut open.search else {
+            match self.searchline.last().filter(|q| !q.trim().is_empty()) {
+                Some(q) => {
+                    let from = open.view.position();
+                    open.jumps.push(from);
+                    self.start_search(&q, from);
+                }
+                None => self.show(Level::Info, "No search".into()),
+            }
+            return;
+        };
+        if s.hits.is_empty() {
+            let msg = if s.done {
+                format!("Not found: {}", s.query)
+            } else {
+                "Still searching".into()
+            };
+            self.show(Level::Info, msg);
+            return;
+        }
+        let len = s.hits.len();
+        let visible = open.view.visible_pages();
+        let base = s.current.filter(|&c| visible.contains(&s.hits[c].page));
+        let n = count.max(1) as usize % len;
+        let i = match (base, forward) {
+            (Some(c), true) => (c + n) % len,
+            (Some(c), false) => (c + len - n) % len,
+            (None, true) => {
+                let pos = open.view.position();
+                (s.first_from(pos).unwrap_or(0) + n - 1) % len
+            }
+            (None, false) => {
+                let pos = open.view.position();
+                let first = s.first_from(pos).unwrap_or(len);
+                (first + len - n) % len
+            }
+        };
+        open.jumps.push(open.view.position());
+        s.current = Some(i);
+        s.seek = None;
+        let h = &s.hits[i];
+        select::reveal(&mut open.view, h.page, h.rects[0]);
+    }
+
     /// Tab completion of the path in `:e <path>`.
     fn complete(&mut self) {
         let Some(arg) = self.cmdline.text().strip_prefix("e ") else {
@@ -2314,6 +2870,14 @@ impl MargApp {
                 self.annot_hints();
                 return;
             }
+            Command::HintLinks => {
+                self.link_hints();
+                return;
+            }
+            Command::Help | Command::HelpPage => {
+                self.show_help(command == Command::HelpPage);
+                return;
+            }
             Command::Motion(m) => {
                 self.move_caret(m, n);
                 return;
@@ -2348,6 +2912,52 @@ impl MargApp {
             }
             Command::AnnotList => {
                 self.open_annot_list();
+                return;
+            }
+            Command::Search => {
+                let Some(open) = &self.open else { return };
+                self.search_origin = Some(open.view.position());
+                self.return_mode = self.mode;
+                self.mode = Mode::Search;
+                self.searchline.clear();
+                return;
+            }
+            Command::SearchNext | Command::SearchPrev => {
+                self.step_hit(command == Command::SearchNext, n);
+                return;
+            }
+            Command::Outline => {
+                let Some(read) = self.open.as_ref().map(|o| o.outline.is_some()) else {
+                    return;
+                };
+                self.leave_text_modes();
+                self.selected_annot = None;
+                self.mode = Mode::Outline;
+                if read {
+                    self.show_outline();
+                } else {
+                    self.doc.send(Request::Outline);
+                }
+                return;
+            }
+            Command::MarkSet | Command::MarkJump => {
+                if self.open.is_some() {
+                    self.pending_mark = Some(command == Command::MarkSet);
+                }
+                return;
+            }
+            Command::JumpBack | Command::JumpForward => {
+                let Some(open) = &mut self.open else { return };
+                let here = open.view.position();
+                let to = if command == Command::JumpBack {
+                    open.jumps.back(here)
+                } else {
+                    open.jumps.forward(here)
+                };
+                match to {
+                    Some(to) => open.view.set_position(to),
+                    None => self.show(Level::Info, "No more jumps".into()),
+                }
                 return;
             }
             Command::Recolor => {
@@ -2391,6 +3001,13 @@ impl MargApp {
         let cfg = &self.config.view;
         let step = cfg.scroll_step_px * n as f32;
         let page_of = |c: u32| c as usize - 1;
+        let from = v.position();
+        if matches!(
+            command,
+            Command::PageFirst | Command::PageLast | Command::PageGoto(_)
+        ) {
+            open.jumps.push(from);
+        }
         match command {
             Command::ScrollDown => v.scroll_by(0.0, step),
             Command::ScrollUp => v.scroll_by(0.0, -step),
@@ -2400,6 +3017,15 @@ impl MargApp {
             Command::HalfPageUp => v.scroll_viewports(-0.5 * n as f32),
             Command::PageNext => v.page_step(n as isize),
             Command::PagePrev => v.page_step(-(n as isize)),
+            Command::ScreenDown => (0..n).for_each(|_| v.screen_step(true)),
+            Command::ScreenUp => (0..n).for_each(|_| v.screen_step(false)),
+            Command::SetLayout(l) => v.set_layout(l),
+            Command::LayoutCycle => v.set_layout(match v.layout() {
+                Layout::Continuous => Layout::Single,
+                Layout::Single => Layout::Spread,
+                Layout::Spread => Layout::Continuous,
+            }),
+            Command::SpreadFirstAlone => v.set_first_page_alone(!v.first_page_alone()),
             Command::PageFirst => v.goto_page(count.map_or(0, page_of)),
             Command::PageLast => v.goto_page(count.map_or(usize::MAX, page_of)),
             Command::PageGoto(p) => v.goto_page(p.saturating_sub(1)),
@@ -2420,6 +3046,9 @@ impl MargApp {
             Command::HintCaret
             | Command::HintSelect
             | Command::HintAnnot
+            | Command::HintLinks
+            | Command::Help
+            | Command::HelpPage
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
@@ -2443,6 +3072,14 @@ impl MargApp {
             | Command::BoxMode
             | Command::AnnotList
             | Command::Recolor
+            | Command::JumpBack
+            | Command::JumpForward
+            | Command::MarkSet
+            | Command::MarkJump
+            | Command::Outline
+            | Command::Search
+            | Command::SearchNext
+            | Command::SearchPrev
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2546,8 +3183,20 @@ impl MargApp {
         let open = self.open.as_ref().filter(|_| self.mode != Mode::Recent);
         match (part, open) {
             (StatusPart::Mode, _) => self.mode.label().into(),
+            (StatusPart::Search, Some(open)) => match &open.search {
+                None => String::new(),
+                Some(s) if s.hits.is_empty() => if s.done { "no hits" } else { "searching" }.into(),
+                Some(s) => format!(
+                    "hit {}/{}{}",
+                    s.current.map_or("-".into(), |c| (c + 1).to_string()),
+                    s.hits.len(),
+                    if s.done { "" } else { "+" }
+                ),
+            },
             (StatusPart::Keys, _) => {
-                if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                if let Some(set) = self.pending_mark {
+                    if set { "m" } else { "'" }.into()
+                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
                     h.typed().into()
                 } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
                     b.typed().into()
@@ -2561,17 +3210,30 @@ impl MargApp {
             (StatusPart::File, Some(open)) => open.file_name.clone(),
             (StatusPart::Page, Some(open)) => {
                 let v = &open.view;
-                let page = v.current_page();
+                let pages = v.current_pages();
                 let count = v.page_count();
-                match &open.info.labels {
-                    Some(labels) if labels[page] != (page + 1).to_string() => {
-                        format!("{} ({}/{count})", labels[page], page + 1)
+                let span = |f: &dyn Fn(usize) -> String| {
+                    let last = pages.end - 1;
+                    if last > pages.start {
+                        format!("{}–{}", f(pages.start), f(last))
+                    } else {
+                        f(pages.start)
                     }
-                    _ => format!("{}/{count}", page + 1),
+                };
+                let number = span(&|p| (p + 1).to_string());
+                match &open.info.labels {
+                    Some(labels) if pages.clone().any(|p| labels[p] != (p + 1).to_string()) => {
+                        format!("{} ({number}/{count})", span(&|p| labels[p].clone()))
+                    }
+                    _ => format!("{number}/{count}"),
                 }
             }
             (StatusPart::Zoom, Some(open)) => format!("{:.0}%", open.view.zoom() * 100.0),
-            (StatusPart::Layout, Some(_)) => "continuous".into(),
+            (StatusPart::Layout, Some(open)) => match open.view.layout() {
+                Layout::Continuous => "continuous".into(),
+                Layout::Single => "single".into(),
+                Layout::Spread => "spread".into(),
+            },
             (StatusPart::Unsaved, Some(open)) => {
                 if open.unsaved() {
                     "●".into()
@@ -2591,19 +3253,29 @@ impl MargApp {
         let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
-            if self.mode == Mode::Command {
-                let line = self.cmdline.text();
+            if let Some((prompt, edit)) = match self.mode {
+                Mode::Command => Some((':', &self.cmdline)),
+                Mode::Search => Some(('/', &self.searchline)),
+                _ => None,
+            } {
+                let line = edit.text();
                 let at = line
                     .char_indices()
-                    .nth(self.cmdline.cursor())
+                    .nth(edit.cursor())
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
-                ui.label(text(&format!(":{before}▏{after}"), th.statusbar_fg));
+                ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
                 } else if self.mode == Mode::Box {
                     self.box_prompt()
+                } else if let Some(url) = self
+                    .pending_url
+                    .as_ref()
+                    .filter(|_| self.mode == Mode::Confirm)
+                {
+                    format!("Open {url} ?  y: yes  any other key: no")
                 } else {
                     self.status_left()
                 };
@@ -2708,6 +3380,41 @@ impl eframe::App for MargApp {
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
+        if let Some((h, page)) = self.help.as_mut().filter(|_| self.mode == Mode::Help) {
+            // The page fills the view; the overlay sits in the middle.
+            let rect = if *page {
+                area
+            } else {
+                egui::Rect::from_center_size(
+                    area.center(),
+                    egui::vec2((area.width() * 0.7).min(760.0), area.height() * 0.85),
+                )
+            };
+            egui::Area::new(egui::Id::unique("marg-help"))
+                .fixed_pos(rect.min)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    ui.set_min_size(rect.size());
+                    ui.set_max_size(rect.size());
+                    h.draw(ui, &th);
+                });
+        }
+        if let Some(list) = self
+            .outline_list
+            .as_mut()
+            .filter(|_| self.mode == Mode::Outline)
+        {
+            let labels = self.open.as_ref().and_then(|o| o.info.labels.clone());
+            let width = screen.width() * self.config.ui.outline_width;
+            egui::Area::new(egui::Id::unique("marg-outline"))
+                .fixed_pos(area.min)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    ui.set_min_size(egui::vec2(width, area.height()));
+                    ui.set_max_size(egui::vec2(width, area.height()));
+                    list.draw(ui, &th, labels.as_deref());
+                });
+        }
         if self.mode == Mode::Annots {
             self.refresh_annot_list();
             let names: Vec<String> = self
@@ -2771,6 +3478,9 @@ impl eframe::App for MargApp {
                     if p.rev.is_none() || stale.contains(&p.spec.page) {
                         select::draw_provisional(&painter, &open.view, area, &p.spec);
                     }
+                }
+                if let Some(s) = &open.search {
+                    select::draw_hits(&painter, &th, &open.view, area, &s.hits, s.current);
                 }
                 if let Some(sel) = &self.selection {
                     select::draw_selection(&painter, &th, &open.view, area, sel, &open.texts);
