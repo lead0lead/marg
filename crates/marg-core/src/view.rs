@@ -448,6 +448,17 @@ impl View {
         self.relayout_keeping(|v| v.first_alone = alone);
     }
 
+    /// New gap and zoom limits (`:set`, config reload), keeping the
+    /// reading position.
+    pub fn set_spacing(&mut self, cfg: &ViewConfig) {
+        self.relayout_keeping(|v| {
+            v.gap = cfg.page_gap_px;
+            v.zoom_min = cfg.zoom_min;
+            v.zoom_max = cfg.zoom_max;
+            v.zoom = v.zoom.clamp(v.zoom_min, v.zoom_max);
+        });
+    }
+
     fn relayout_keeping(&mut self, change: impl FnOnce(&mut Self)) {
         let pos = self.position();
         change(self);

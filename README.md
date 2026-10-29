@@ -248,6 +248,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `:42` | go to page 42 |
 | `:help` | the help page |
 | `:config` | write a commented default config, if there is none |
+| `:set name=value, :set name` | change a setting for this session (e.g. :set zoom_step=1.2); show it |
 | `:unlock` | annotate this file although its permissions forbid it |
 | `:version, :debug` | version; debug overlay |
 | `:&lt;command name&gt;` | run any command by name, e.g. :zoom.in |

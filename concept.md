@@ -841,7 +841,7 @@ remappable (§8).
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
-| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set key=value` (not built, §12), `:debug` | |
+| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set name=value`, `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -1251,7 +1251,21 @@ keymaps, status bar parts, colors, fonts, author and dark pages
 reloaded", or the first problem). Settings read when a file opens
 (`[view]` layout, gap, zoom limits, `spread_first_page_alone`,
 `jump_history`, `undo_steps`) apply to the next file; `[render]
-cache_mb` on the next start. `:set` is not built (see §12).
+cache_mb` on the next start.
+
+**As implemented (Phase 5, `:set`; added 2026-10-29 at the user's
+request):** `:set name=value` (`:se`, `config.set`) changes one setting
+for the session; `:set name` shows it ("view.zoom_step = 1.1"). Names
+are dotted, or the last part alone when unique (`:set zoom_step=1.2`).
+The value is TOML, else a string (`words`, `#000000`); the whole config
+is checked by deserializing it (`Config::set`/`get` in core), so a bad
+value changes nothing and the error names the setting. Not for `keys.*`,
+`[[category]]` and `theme` ("change it in the config file"). The app
+applies a change like a reload (`apply_config`: keymaps, status bar,
+colors, fonts, author, dark pages) and also gives the open view the new
+gap and zoom limits (`View::set_spacing`); `:set` values are kept in
+`session_sets` and applied again on top of the file after every
+reload.
 
 ### State file
 
@@ -1559,10 +1573,6 @@ building more.
 - Two-stage hints are a design proposal; the `words` mode exists as an
   alternative. Confirm at the decision milestone.
 - `spread_first_page_alone` default (`false`).
-- **`:set key=value`** (Phase 5): §3 and §8 list it, but the Phase 3b
-  choice "A" left runtime settings out (option B had `:set`). Not built;
-  config auto-reload covers most of it (edit the file, marg applies it).
-  Build it, or drop it from §3/§8?
 - **`:config` writes every setting commented out** (Phase 5, Claude's
   choice): untouched settings follow later default changes. The other
   way, active values, pins today's defaults.
@@ -1761,6 +1771,7 @@ Format:
   checked: the release workflow (runs only when pushed), Windows,
   RC4 or real-world encrypted PDFs, a restricted publisher PDF.
 - State: builds; 174 tests pass; clippy and fmt clean.
+- Added after the handover, at the user's request: `:set` (§8).
 - Next: the user tries Phase 5; polish from their list; merge, push;
   bump `Cargo.toml` to 1.0.0 and tag `v1.0.0` when the user asks (the
   workflow refuses a tag that does not match the version).

@@ -37,6 +37,9 @@ pub enum Command {
     Open(String),
     /// Write the commented default config, if there is no config file.
     WriteConfig,
+    /// `:set name=value` changes a setting for this session; `:set name`
+    /// shows it.
+    Set(String),
     /// Allow annotating the open file although its permissions forbid it,
     /// until it is closed.
     Unlock,
@@ -408,6 +411,7 @@ impl Command {
             Command::PageGoto(_) => "page.goto",
             Command::Open(_) => "file.open",
             Command::Export(_) => "file.export",
+            Command::Set(_) => "config.set",
             Command::SetLayout(_) => "view.layout",
             c => REGISTRY
                 .iter()
@@ -469,6 +473,13 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
         "help" | "h" => no_arg(Command::HelpPage),
         "config" => no_arg(Command::WriteConfig),
         "unlock" => no_arg(Command::Unlock),
+        "set" | "se" => {
+            if rest.is_empty() {
+                Err("usage: set name=value, or set name to show it".into())
+            } else {
+                Ok(Command::Set(rest.to_string()))
+            }
+        }
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -546,6 +557,11 @@ mod tests {
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
         assert_eq!(parse_ex("config"), Ok(Command::WriteConfig));
         assert_eq!(parse_ex("unlock"), Ok(Command::Unlock));
+        assert_eq!(
+            parse_ex("set zoom_step = 1.2"),
+            Ok(Command::Set("zoom_step = 1.2".into()))
+        );
+        assert!(parse_ex("set").is_err());
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());

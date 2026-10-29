@@ -216,6 +216,10 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 "write a commented default config, if there is none",
             ),
             (
+                ":set name=value, :set name",
+                "change a setting for this session (e.g. :set zoom_step=1.2); show it",
+            ),
+            (
                 ":unlock",
                 "annotate this file although its permissions forbid it",
             ),

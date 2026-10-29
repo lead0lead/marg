@@ -363,6 +363,9 @@ pub struct MargApp {
     /// The config and theme files as last read, and when to look again.
     config_stamp: startup::Stamp,
     next_config_check: Instant,
+    /// `:set` changes of this session, re-applied after a config reload:
+    /// (full name, value).
+    session_sets: Vec<(String, String)>,
     /// The pending open is a reload of the current file.
     reloading: bool,
     cmdline: LineEdit,
@@ -500,6 +503,7 @@ impl MargApp {
             next_disk_check: Instant::now(),
             config_stamp: Vec::new(),
             next_config_check: Instant::now(),
+            session_sets: Vec::new(),
             reloading: false,
             author,
             cmdline: LineEdit::default(),
@@ -2967,6 +2971,10 @@ impl MargApp {
                 self.unlock();
                 return;
             }
+            Command::Set(arg) => {
+                self.set_setting(ctx, &arg);
+                return;
+            }
             Command::Export(path) => {
                 self.start_export(path.as_deref());
                 return;
@@ -3166,6 +3174,7 @@ impl MargApp {
             | Command::Export(_)
             | Command::WriteConfig
             | Command::Unlock
+            | Command::Set(_)
             | Command::Version
             | Command::DebugToggle => {}
             Command::HintCaret
@@ -3519,7 +3528,7 @@ impl MargApp {
         };
         let result = startup::read_config(&path);
         // The theme may have changed with the config.
-        let (config, mut problems) = match result {
+        let (mut config, mut problems) = match result {
             Ok(c) => c,
             Err(e) => {
                 self.config_stamp = startup::stamp(&self.config_files());
@@ -3527,12 +3536,78 @@ impl MargApp {
                 return;
             }
         };
+        for (name, value) in &self.session_sets {
+            match config.set(name, value) {
+                Ok((c, _)) => config = c,
+                Err(e) => problems.push(format!(":set {e}")),
+            }
+        }
         let old = std::mem::replace(&mut self.config, config);
         self.config_stamp = startup::stamp(&self.config_files());
+        let warnings = self.apply_config(ctx, &old, &mut problems);
+        for p in &problems {
+            log::error!("{p}");
+        }
+        for w in &warnings {
+            log::warn!("{w}");
+        }
+        log::info!("config reloaded");
+        if let Some(p) = problems.first() {
+            self.show(Level::Error, p.clone());
+        } else if let Some(w) = warnings.first() {
+            self.show(Level::Warn, w.clone());
+        } else {
+            self.show(Level::Info, "Config reloaded".into());
+        }
+    }
+
+    /// `:set name=value` (for this session) or `:set name` (show it).
+    fn set_setting(&mut self, ctx: &egui::Context, arg: &str) {
+        let Some((name, value)) = arg.split_once('=') else {
+            match self.config.get(arg) {
+                Ok((name, value)) => self.show(Level::Info, format!("{name} = {value}")),
+                Err(e) => self.error(e),
+            }
+            return;
+        };
+        let (config, name) = match self.config.set(name, value.trim()) {
+            Ok(c) => c,
+            Err(e) => {
+                self.error(e);
+                return;
+            }
+        };
+        let value = value.trim().to_string();
+        self.session_sets.retain(|(n, _)| *n != name);
+        self.session_sets.push((name.clone(), value));
+        let old = std::mem::replace(&mut self.config, config);
+        let mut problems = Vec::new();
+        let warnings = self.apply_config(ctx, &old, &mut problems);
+        let shown = self
+            .config
+            .get(&name)
+            .map_or_else(|_| name.clone(), |(n, v)| format!("{n} = {v}"));
+        if let Some(p) = problems.first().or(warnings.first()) {
+            self.error(p.clone());
+        } else {
+            self.show(Level::Info, format!("{shown} (this session)"));
+        }
+    }
+
+    /// Bring everything made from the config up to date after it changed
+    /// from `old`. Returns keymap warnings; adds other problems.
+    fn apply_config(
+        &mut self,
+        ctx: &egui::Context,
+        old: &Config,
+        problems: &mut Vec<String>,
+    ) -> Vec<String> {
         let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&self.config);
         (self.keymap, self.caret_map, self.visual_map, self.annot_map) =
             (keymap, caret_map, visual_map, annot_map);
-        self.matcher.reset();
+        if self.config.keys != old.keys {
+            self.matcher.reset();
+        }
         let (left, right, w) = self.config.statusbar.parts();
         problems.extend(w);
         self.status_parts = (left, right);
@@ -3551,20 +3626,14 @@ impl MargApp {
         {
             self.set_recolor(true);
         }
-        for p in &problems {
-            log::error!("{p}");
+        let (new, was) = (&self.config.view, &old.view);
+        if (new.page_gap_px, new.zoom_min, new.zoom_max)
+            != (was.page_gap_px, was.zoom_min, was.zoom_max)
+            && let Some(open) = &mut self.open
+        {
+            open.view.set_spacing(new);
         }
-        for w in &warnings {
-            log::warn!("{w}");
-        }
-        log::info!("config reloaded");
-        if let Some(p) = problems.first() {
-            self.show(Level::Error, p.clone());
-        } else if let Some(w) = warnings.first() {
-            self.show(Level::Warn, w.clone());
-        } else {
-            self.show(Level::Info, "Config reloaded".into());
-        }
+        warnings
     }
 
     /// Ask the document thread to save, then do `after` if it worked.
