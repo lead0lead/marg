@@ -13,6 +13,7 @@ use marg_core::annot::{
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::{Config, Layout};
+use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
@@ -20,7 +21,7 @@ use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
 use marg_core::undo::UndoStack;
-use marg_core::view::{Fit, View};
+use marg_core::view::{DocPos, Fit, View};
 use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, SaveError, Scale};
 
 use crate::annotlist::{self, AnnotList};
@@ -38,6 +39,9 @@ use marg_core::theme::{StatusPart, status_line};
 /// A successfully opened document.
 struct OpenDoc {
     info: DocInfo,
+    jumps: JumpList,
+    /// Marks `a`–`z`, saved in the state file.
+    marks: BTreeMap<char, DocPos>,
     /// Key in the state file.
     key: String,
     generation: u64,
@@ -227,6 +231,8 @@ pub struct MargApp {
     annot_list: Option<AnnotList>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
+    /// `m` or `'` was pressed: the next key names the mark (true: set).
+    pending_mark: Option<bool>,
     /// Where a mouse drag started, while the primary button is down.
     drag_anchor: Option<TextPos>,
     /// Last primary press: time, position, click count (1–3).
@@ -361,6 +367,7 @@ impl MargApp {
             boxing: None,
             annot_list: None,
             selection_before_hints: None,
+            pending_mark: None,
             drag_anchor: None,
             last_click: None,
             last_category: 1,
@@ -693,6 +700,7 @@ impl MargApp {
         let saved = self.state.files.get(&key);
         let fit = saved.map_or(fit, |f| f.fit);
         let layout = saved.map_or(layout, |f| f.layout);
+        let marks = saved.map(|f| f.marks.clone()).unwrap_or_default();
         let mut view = View::new(sizes, &self.config.view, layout, fit, viewport);
         if let Some(saved) = saved {
             if saved.fit == Fit::None {
@@ -716,6 +724,8 @@ impl MargApp {
             key,
             generation,
             file_name,
+            jumps: JumpList::new(self.config.view.jump_history),
+            marks,
             texts: vec![None; view.page_count()],
             text_requested: HashSet::new(),
             revs: vec![0; view.page_count()],
@@ -845,6 +855,7 @@ impl MargApp {
             zoom: open.view.zoom(),
             fit: open.view.fit(),
             layout: open.view.layout(),
+            marks: open.marks.clone(),
         };
         let max = self.config.ui.state_files_max;
         self.state.update(open.key.clone(), file.clone(), max);
@@ -857,6 +868,10 @@ impl MargApp {
     fn normal_key(&mut self, ctx: &egui::Context, key: KeyPress) {
         let now = self.now_ms();
         let timeout = self.config.ui.sequence_timeout_ms;
+        if let Some(set) = self.pending_mark.take() {
+            self.mark_key(key, set);
+            return;
+        }
         let map = match self.mode {
             Mode::Caret => &self.caret_map,
             Mode::Visual => &self.visual_map,
@@ -873,6 +888,27 @@ impl MargApp {
                 }
             }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
+        }
+    }
+
+    /// The key after `m` (`set`) or `'`: a mark name `a`–`z`; anything
+    /// else cancels.
+    fn mark_key(&mut self, key: KeyPress, set: bool) {
+        let Some(open) = &mut self.open else { return };
+        let name = match key.code {
+            KeyCode::Char(c @ 'a'..='z') if !key.ctrl && !key.alt => c,
+            _ => return,
+        };
+        let here = open.view.position();
+        if set {
+            open.marks.insert(name, here);
+            self.save_state();
+            self.show(Level::Info, format!("Mark {name} set"));
+        } else if let Some(&to) = open.marks.get(&name) {
+            open.jumps.push(here);
+            open.view.set_position(to);
+        } else {
+            self.show(Level::Info, format!("No mark {name}"));
         }
     }
 
@@ -2352,6 +2388,26 @@ impl MargApp {
                 self.open_annot_list();
                 return;
             }
+            Command::MarkSet | Command::MarkJump => {
+                if self.open.is_some() {
+                    self.pending_mark = Some(command == Command::MarkSet);
+                }
+                return;
+            }
+            Command::JumpBack | Command::JumpForward => {
+                let Some(open) = &mut self.open else { return };
+                let here = open.view.position();
+                let to = if command == Command::JumpBack {
+                    open.jumps.back(here)
+                } else {
+                    open.jumps.forward(here)
+                };
+                match to {
+                    Some(to) => open.view.set_position(to),
+                    None => self.show(Level::Info, "No more jumps".into()),
+                }
+                return;
+            }
             Command::Recolor => {
                 self.set_recolor(!self.recolor);
                 let msg = if self.recolor {
@@ -2393,6 +2449,13 @@ impl MargApp {
         let cfg = &self.config.view;
         let step = cfg.scroll_step_px * n as f32;
         let page_of = |c: u32| c as usize - 1;
+        let from = v.position();
+        if matches!(
+            command,
+            Command::PageFirst | Command::PageLast | Command::PageGoto(_)
+        ) {
+            open.jumps.push(from);
+        }
         match command {
             Command::ScrollDown => v.scroll_by(0.0, step),
             Command::ScrollUp => v.scroll_by(0.0, -step),
@@ -2454,6 +2517,10 @@ impl MargApp {
             | Command::BoxMode
             | Command::AnnotList
             | Command::Recolor
+            | Command::JumpBack
+            | Command::JumpForward
+            | Command::MarkSet
+            | Command::MarkJump
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2558,7 +2625,9 @@ impl MargApp {
         match (part, open) {
             (StatusPart::Mode, _) => self.mode.label().into(),
             (StatusPart::Keys, _) => {
-                if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
+                if let Some(set) = self.pending_mark {
+                    if set { "m" } else { "'" }.into()
+                } else if let Some(h) = self.hinting.as_ref().filter(|h| !h.typed().is_empty()) {
                     h.typed().into()
                 } else if let Some(b) = self.boxing.as_ref().filter(|b| !b.typed().is_empty()) {
                     b.typed().into()

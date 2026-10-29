@@ -105,6 +105,14 @@ pub enum Command {
     LayoutCycle,
     /// Spread layout: show the first page alone (a book's cover), or not.
     SpreadFirstAlone,
+    /// Back to the position before the last jump.
+    JumpBack,
+    /// Undo a `JumpBack`.
+    JumpForward,
+    /// Set the mark named by the next key (`a`–`z`).
+    MarkSet,
+    /// Go to the mark named by the next key.
+    MarkJump,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -310,6 +318,10 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("annot.list", Command::AnnotList, "annotation list"),
     ("view.recolor", Command::Recolor, "dark pages on/off"),
     ("view.layout_cycle", Command::LayoutCycle, "next layout"),
+    ("jump.back", Command::JumpBack, "jump back"),
+    ("jump.forward", Command::JumpForward, "jump forward"),
+    ("mark.set", Command::MarkSet, "set mark a-z"),
+    ("mark.jump", Command::MarkJump, "go to mark a-z"),
     (
         "view.spread_first_alone",
         Command::SpreadFirstAlone,

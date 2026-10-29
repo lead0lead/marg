@@ -67,11 +67,21 @@ mod tests {
             zoom: 1.0,
             fit: Fit::Width,
             layout: Layout::Continuous,
+            marks: [(
+                'a',
+                DocPos {
+                    page: 3,
+                    x: 0.0,
+                    y: 50.0,
+                },
+            )]
+            .into(),
         };
         save_entry(&path, "id:aa", entry("/a.pdf"), 10).unwrap();
         save_entry(&path, "id:bb", entry("/b.pdf"), 10).unwrap();
         let state = load(&path).unwrap();
         assert_eq!(state.files.len(), 2);
+        assert_eq!(state.files["id:aa"].marks[&'a'].page, 3);
         fs::remove_dir_all(&dir).unwrap();
     }
 }

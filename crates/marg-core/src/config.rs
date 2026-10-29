@@ -178,6 +178,8 @@ pub struct ViewConfig {
     pub zoom_max: f32,
     pub scroll_smooth: bool,
     pub spread_first_page_alone: bool,
+    /// Positions kept in the jump history (`Ctrl-o` / `Ctrl-i`).
+    pub jump_history: usize,
     /// Dark pages: page content in `recolor_fg` on `recolor_bg`
     /// (`[colors]`); `view.recolor` toggles it.
     pub recolor: bool,
@@ -195,6 +197,7 @@ impl Default for ViewConfig {
             zoom_max: 8.0,
             scroll_smooth: false,
             spread_first_page_alone: false,
+            jump_history: 100,
             recolor: false,
         }
     }

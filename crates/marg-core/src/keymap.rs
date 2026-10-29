@@ -53,6 +53,10 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("A", "annot.list"),
     ("gr", "view.recolor"),
     ("Ctrl-l", "view.layout_cycle"),
+    ("Ctrl-o", "jump.back"),
+    ("Ctrl-i", "jump.forward"),
+    ("m", "mark.set"),
+    ("'", "mark.jump"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.
