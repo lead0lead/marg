@@ -86,6 +86,7 @@ impl AnnotList {
         let at = |e: &Entry| (e.page, e.xref);
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => {
                 let Some(k) = input::key_press(e) else {
                     return Action::None;

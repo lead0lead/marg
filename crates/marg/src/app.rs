@@ -2729,6 +2729,7 @@ impl MargApp {
     fn cmdline_event(&mut self, ctx: &egui::Context, e: &Event) {
         match e {
             Event::Text(t) => self.cmdline.insert(t),
+            Event::Paste(t) => self.cmdline.paste(t),
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {
@@ -2766,6 +2767,10 @@ impl MargApp {
         match e {
             Event::Text(t) => {
                 self.searchline.insert(t);
+                self.search_typed();
+            }
+            Event::Paste(t) => {
+                self.searchline.paste(t);
                 self.search_typed();
             }
             Event::Key { pressed: true, .. } => {
@@ -3483,6 +3488,7 @@ impl MargApp {
     fn password_event(&mut self, e: &Event) {
         match e {
             Event::Text(t) => self.passline.insert(t),
+            Event::Paste(t) => self.passline.paste(t),
             Event::Key { pressed: true, .. } => {
                 let Some(k) = input::key_press(e) else { return };
                 match k.code {

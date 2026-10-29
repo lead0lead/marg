@@ -55,6 +55,13 @@ impl LineEdit {
         self.cursor += s.chars().count();
     }
 
+    /// Insert pasted text on one line: line breaks at the ends are
+    /// dropped, the ones inside become spaces.
+    pub fn paste(&mut self, s: &str) {
+        let s = s.trim_matches(['\r', '\n']);
+        self.insert(&s.replace("\r\n", " ").replace(['\r', '\n'], " "));
+    }
+
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
@@ -155,6 +162,18 @@ pub fn common_prefix<S: AsRef<str>>(candidates: &[S]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_stays_on_one_line() {
+        let mut l = LineEdit::default();
+        l.insert("e ");
+        l.paste("~/papers/a.pdf\n");
+        assert_eq!(l.text(), "e ~/papers/a.pdf");
+        l.clear();
+        l.paste("two\r\nlines\nhere\r\n");
+        assert_eq!(l.text(), "two lines here");
+        assert_eq!(l.cursor(), 14);
+    }
 
     #[test]
     fn edits_at_cursor() {

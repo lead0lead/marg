@@ -45,6 +45,7 @@ impl HelpView {
     pub fn event(&mut self, e: &Event) -> bool {
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => match input::key_press(e) {
                 Some(k) if k.code == KeyCode::Char('?') && !self.nav.filtering() => return true,
                 Some(k) => self.nav.key(k, self.half_page),

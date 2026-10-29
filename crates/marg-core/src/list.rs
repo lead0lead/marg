@@ -70,6 +70,15 @@ impl ListNav {
         ListAction::FilterChanged
     }
 
+    /// Pasted text, while filtering.
+    pub fn paste(&mut self, t: &str) -> ListAction {
+        if !self.filtering {
+            return ListAction::None;
+        }
+        self.filter.paste(t);
+        ListAction::FilterChanged
+    }
+
     /// A key press. `half_page`: rows moved by `Ctrl-d`/`Ctrl-u`.
     pub fn key(&mut self, k: KeyPress, half_page: usize) -> ListAction {
         if self.filtering {

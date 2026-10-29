@@ -62,6 +62,7 @@ impl RecentList {
     pub fn event(&mut self, e: &Event) -> Action {
         let action = match e {
             Event::Text(t) if self.nav.filtering() => self.nav.text(t),
+            Event::Paste(t) if self.nav.filtering() => self.nav.paste(t),
             _ => match input::key_press(e) {
                 Some(k) => self.nav.key(k, self.half_page),
                 None => return Action::None,
