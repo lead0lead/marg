@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt), 5 (read-only files) and 6 (cheat sheet, README) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt), 5 (read-only files), 6 (cheat sheet, README) and 7 (release workflow) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 7: release builds in CI (ask the user about the Windows CRT first, §12) (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 8: polish from the user's list, docs, handover (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 6) |
+| **Last updated** | 2026-10-29 (Phase 5 step 7) |
 
 ---
 
@@ -1390,7 +1390,9 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   Windows built with the MSVC toolchain and the **dynamic** CRT: `mupdf-sys`
   builds MuPDF's own `platform/win32/mupdf.sln`, whose projects use `/MD`
   (Release) and `/MDd` (Debug), so `+crt-static` would mismatch. The `.exe`
-  currently needs the MSVC runtime (see open questions).
+  needs the MSVC runtime: decided by the user 2026-10-29 (Phase 5) to
+  ship it that way and say so in the README, instead of patching MuPDF's
+  vcxproj files for a static CRT or bundling the runtime DLLs.
 
 ### Folder structure
 
@@ -1448,7 +1450,18 @@ test files), so their licence is clear.
   every push. The user develops mainly on one OS; CI keeps the other one from
   breaking silently.
 - **Releases**: when the user asks, tag `vX.Y.Z` on `main`; CI attaches the
-  Linux binary and the portable Windows `.exe` to a GitHub release. Locally
+  Linux binary and the portable Windows `.exe` to a GitHub release.
+  **As implemented (Phase 5):** `.github/workflows/release.yml`: on a
+  `v*` tag, Linux and Windows run the tests, build `--profile dist -p
+  marg` and upload `marg-linux-x86_64` and `marg-windows-x86_64.exe`; a
+  last job creates the release with `gh release create` and generated
+  notes. The tag must equal `v` + the workspace version in `Cargo.toml`
+  (bump it in a commit before tagging). Windows warns (not fails) if
+  `LNK4098` shows up in the release build. "Run workflow" by hand builds
+  the artifacts without a release. The Linux binary links the glibc of
+  `ubuntu-latest`. Checked locally: `cargo build --profile dist -p
+  marg` works (30 MB binary, ~11 min from clean, mostly MuPDF); the
+  workflow itself runs only once pushed. Locally
   the user runs `cargo run --release -- file.pdf`.
 - Unit-test pure logic in `marg-core`. Round-trip-test annotations in
   `marg-pdf` (create → save → reopen → verify). Check behaviour and speed
@@ -1554,12 +1567,6 @@ building more.
   choice): untouched settings follow later default changes. The other
   way, active values, pins today's defaults.
 - Exact grid size and step sizes in box mode.
-- **Portable Windows `.exe` (Phase 5)**: MuPDF's Windows build (via
-  `mupdf-sys` → `mupdf.sln`) uses the dynamic CRT, so static CRT is off and
-  the `.exe` needs the MSVC runtime. `CFLAGS` won't change this (MSBuild, not
-  `cc`). Options: patch `RuntimeLibrary` to `MultiThreaded` in MuPDF's
-  vcxproj files (patching MuPDF: ask the user first), or ship with the
-  runtime requirement / app-local runtime DLLs.
 
 - **List keys** (§3, "Lists"): built as decided on 2026-10-28; the user
   will re-evaluate after using it. List keys are not remappable yet.
