@@ -1340,6 +1340,7 @@ render.
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
 | Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
+| Windows `.exe` icon | `winresource` (build dependency, Windows builds only, default features off) | Embeds `crates/marg/assets/marg.ico` and the version from `Cargo.toml` in the `.exe`. Only new crate besides it: `version_check`. Chosen over `embed-resource` (four more crates and a `.rc` file). Added 2026-10-29 with the user's approval |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
 Licence note: MuPDF is AGPL-3.0. That is fine for a private personal tool;

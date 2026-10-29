@@ -13,3 +13,6 @@ log.workspace = true
 directories.workspace = true
 simplelog.workspace = true
 skrifa.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

@@ -20,6 +20,8 @@ directories = "6"
 simplelog = { version = "0.12", default-features = false }
 # Same version and a subset of the features egui uses: only checks font files.
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
+# Windows only: embeds the icon and version details in the .exe.
+winresource = { version = "0.1.34", default-features = false }
 
 # Local release builds (`cargo run --release`): fully optimized, but quick
 # to rebuild. LTO and a single codegen unit made every change take ~80 s
