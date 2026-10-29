@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt), 5 (read-only files), 6 (cheat sheet, README) and 7 (release workflow) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 built on branch `phase-5-release` (not merged, not pushed): Markdown export, `:config`, config errors and reload, password prompt, read-only files, cheat sheet and README, release workflow. Handed to the user to try. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 8: polish from the user's list, docs, handover (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | The user tries the Phase 5 build and collects a polish list; then polish, merge, push, bump the version to 1.0.0 and tag `v1.0.0` (when the user asks). The Phase 4 and 5 choices in §12 are open. | (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 7) |
+| **Last updated** | 2026-10-29 (Phase 5 handover) |
 
 ---
 
@@ -841,7 +841,7 @@ remappable (§8).
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
-| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:set key=value`, `:debug` | |
+| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set key=value` (not built, §12), `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -1591,6 +1591,15 @@ building more.
   image areas from `Request::Images` boxes); `gr` as the key; theme files
   may not set `[statusbar]` (only colors and fonts); the two example
   themes.
+- **Phase 5 choices to confirm** (Claude's defaults, the user's call
+  after trying): `:export md` paths relative to the working directory
+  (like `:e`), a folder gets `<stem>.notes.md`, the date is UTC;
+  `:unlock` lasts until the file is closed and is not remembered for
+  the next time; read-only shows `[RO]` after the file name (no own
+  status bar part); after a config reload, `[view]` settings apply to
+  the next opened file and `cache_mb` to the next start; config
+  messages name the file only; the cheat sheet is the help page as
+  tables (about 200 lines, not one printed page).
 - **Phase 4 choices to confirm** (Claude's defaults, the user's call
   after trying): Space in **Continuous** stays next page (Zathura scrolls
   a screen there too; say if it should); the wheel does not turn pages
@@ -1726,6 +1735,40 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-29 — Phase 5: export & release
+- Done (branch `phase-5-release`, not merged, not pushed): plan agreed
+  with the user (§11 "Phase 5 steps"), then one commit per step:
+  `:export md`; `:config`; unknown settings and config reload; password
+  prompt; read-only files and `:unlock`; README and generated cheat
+  sheet; release workflow. No polish list yet (the user collects it
+  while testing).
+- Decisions: files whose permissions forbid annotations open read-only,
+  with `[annotation] ignore_permissions` for all files and a command for
+  the open file (user, 2026-10-29; Claude named it `:unlock`). Windows
+  `.exe` ships needing the MSVC runtime (user, 2026-10-29). Claude:
+  `:config` writes settings commented out (§12).
+- Tried and failed: nothing lasting. The `mupdf` crate's
+  `permissions()` reports everything allowed for real files (`/P` has
+  undefined high bits; `from_bits` fails, falls back to all), so `/P`
+  is read directly.
+- Checks: unit and round-trip tests (encrypted files made by MuPDF:
+  open, incremental and full save keep the encryption; restricted and
+  write-protected files); Xvfb with screenshots (export, `:config`,
+  reload with good/unknown/broken config, password prompt, wrong
+  password, `:e!` without asking again, Esc to the recent list,
+  read-only, `:unlock`, save). Local `--profile dist` build. Not
+  checked: the release workflow (runs only when pushed), Windows,
+  RC4 or real-world encrypted PDFs, a restricted publisher PDF.
+- State: builds; 174 tests pass; clippy and fmt clean.
+- Next: the user tries Phase 5; polish from their list; merge, push;
+  bump `Cargo.toml` to 1.0.0 and tag `v1.0.0` when the user asks (the
+  workflow refuses a tag that does not match the version).
+- Watch out: `MARG_BLESS=1 cargo test -p marg-core cheat` after
+  changing default keys or help texts, or the cheat sheet test fails.
+  A new config setting must go into `default_config.toml` too (test).
+  `Request::Open` now carries the password; the UI keeps the one that
+  worked in `OpenDoc.password` (`opening` tracks the pending open).
 
 ### 2026-10-29 — Phase 4: reading features
 - Done (branch `phase-4-reading`, not merged, not pushed): plan agreed
