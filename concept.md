@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export) and 2 (`:config`) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`) and 3 (config errors, auto-reload) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 3: config errors and auto-reload (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 4: password prompt (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 2) |
+| **Last updated** | 2026-10-29 (Phase 5 step 3) |
 
 ---
 
@@ -1186,6 +1186,25 @@ has exactly the keys of `Config` (so a new setting must be added to the
 file), and every bound command has a help text. Messages show paths
 with `~` for the home folder.
 
+**As implemented (Phase 5, errors and reload):** unknown settings
+(`config::unknown_settings`: every dotted key not in `Config`; the
+`keys.*` tables count as one each) are reported for the config and the
+theme file ("config.toml: unknown setting view.zom_step"); the rest is
+used. Keymap problems (unknown commands, unparsable keys, conflicts)
+were already reported since Phase 1. TOML errors are put on one line
+for the status bar ("config.toml: line 4, column 6: unclosed table,
+expected `]`"); messages about a file's contents name the file only,
+read errors the whole path. **Reload:** every `ui.file_check_secs` the
+UI thread compares the modification time and size of the config and
+its theme file (two `stat`s); on a change it reads both again. A broken
+config keeps the current one ("Config not reloaded: …"); otherwise the
+keymaps, status bar parts, colors, fonts, author and dark pages
+(`[view] recolor`, `recolor_fg/bg`) change at once ("Config
+reloaded", or the first problem). Settings read when a file opens
+(`[view]` layout, gap, zoom limits, `spread_first_page_alone`,
+`jump_history`, `undo_steps`) apply to the next file; `[render]
+cache_mb` on the next start. `:set` is not built (see §12).
+
 ### State file
 
 Keyed by the PDF's permanent document ID (first element of the trailer `/ID`
@@ -1479,6 +1498,13 @@ building more.
 - Two-stage hints are a design proposal; the `words` mode exists as an
   alternative. Confirm at the decision milestone.
 - `spread_first_page_alone` default (`false`).
+- **`:set key=value`** (Phase 5): §3 and §8 list it, but the Phase 3b
+  choice "A" left runtime settings out (option B had `:set`). Not built;
+  config auto-reload covers most of it (edit the file, marg applies it).
+  Build it, or drop it from §3/§8?
+- **`:config` writes every setting commented out** (Phase 5, Claude's
+  choice): untouched settings follow later default changes. The other
+  way, active values, pins today's defaults.
 - Exact grid size and step sizes in box mode.
 - **Portable Windows `.exe` (Phase 5)**: MuPDF's Windows build (via
   `mupdf-sys` → `mupdf.sln`) uses the dynamic CRT, so static CRT is off and
@@ -1596,7 +1622,6 @@ building more.
   document thread.
 - Windows AltGr handling and Linux Alt bindings are untested on real
   keyboards (no Alt bindings exist by default).
-- Unknown config keys are ignored silently (reported from Phase 5).
 - Under Xvfb each simulated wheel click arrives twice. Cause (confirmed
   2026-10-28): winit 0.30 X11 turns buttons 4–7 into a wheel event on both
   press and release, ignoring the state. Real mice have XI2 scroll

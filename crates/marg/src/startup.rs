@@ -1,10 +1,10 @@
 //! Logging and config loading at startup.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use log::LevelFilter;
-use marg_core::config::Config;
+use marg_core::config::{Config, unknown_settings};
 use simplelog::{CombinedLogger, SharedLogger, SimpleLogger, WriteLogger};
 
 use crate::complete;
@@ -60,43 +60,97 @@ pub fn init_logging(paths: Option<&Paths>) {
     }
 }
 
-/// Load the config file. A missing file means defaults; an unreadable or
-/// invalid one means defaults plus an error message for the status bar.
-pub fn load_config(paths: Option<&Paths>) -> (Config, Option<String>) {
+/// Load the config file at startup. A missing file means defaults; an
+/// unreadable or invalid one means defaults plus an error. Also returns
+/// the other problems (`read_config`).
+pub fn load_config(paths: Option<&Paths>) -> (Config, Vec<String>) {
     let Some(path) = paths.map(|p| &p.config_file) else {
-        return (Config::default(), None);
+        return (Config::default(), Vec::new());
     };
+    match read_config(path) {
+        Ok(c) => c,
+        Err(e) => (Config::default(), vec![e]),
+    }
+}
+
+/// Read the config file and its theme. `Err`: the config cannot be read or
+/// parsed (with the line number). `Ok`: the config (defaults if the file
+/// is missing) and its problems: a missing or broken theme (the config is
+/// used without it), unknown settings.
+pub fn read_config(path: &Path) -> Result<(Config, Vec<String>), String> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
-        Err(e) => return (Config::default(), Some(format!("config: {e}"))),
-    };
-    let config = match Config::from_toml(&text) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("config {}: {e}", path.display());
-            return (Config::default(), Some(msg));
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Config::default(), Vec::new()));
         }
+        Err(e) => return Err(format!("config {}: {e}", complete::tilde(path))),
     };
-    if config.theme.trim().is_empty() {
-        return (config, None);
-    }
-    // Relative to the config folder.
-    let theme_path = path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(complete::expand_tilde(config.theme.trim()));
+    let config = Config::from_toml(&text).map_err(|e| format!("{}: {e}", file_name(path)))?;
+    let unknown = |file: &Path, text: &str| -> Vec<String> {
+        unknown_settings(text)
+            .into_iter()
+            .map(|k| format!("{}: unknown setting {k}", file_name(file)))
+            .collect()
+    };
+    let mut problems = unknown(path, &text);
+    let Some(theme_path) = theme_file(path, &config) else {
+        return Ok((config, problems));
+    };
     let theme = match fs::read_to_string(&theme_path) {
         Ok(t) => t,
-        Err(e) => return (config, Some(format!("theme {}: {e}", theme_path.display()))),
+        Err(e) => {
+            problems.insert(0, format!("theme {}: {e}", complete::tilde(&theme_path)));
+            return Ok((config, problems));
+        }
     };
     match Config::with_theme(&text, &theme) {
-        Ok(c) => (c, None),
+        Ok(c) => {
+            problems.extend(unknown(&theme_path, &theme));
+            Ok((c, problems))
+        }
         Err((in_theme, e)) => {
             let file = if in_theme { &theme_path } else { path };
-            (config, Some(format!("theme {}: {e}", file.display())))
+            problems.insert(0, format!("{}: {e}", file_name(file)));
+            Ok((config, problems))
         }
     }
+}
+
+/// When each file was last changed, and its size (`None`: missing), to
+/// notice changes.
+pub type Stamp = Vec<Option<(std::time::SystemTime, u64)>>;
+
+pub fn stamp(files: &[PathBuf]) -> Stamp {
+    files
+        .iter()
+        .map(|f| {
+            let m = fs::metadata(f).ok()?;
+            Some((m.modified().ok()?, m.len()))
+        })
+        .collect()
+}
+
+/// The file name alone: messages about a file's contents lead with it, so
+/// the problem fits in the status bar.
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into(),
+    )
+}
+
+/// The theme file named by `config`, relative to the config folder.
+pub fn theme_file(config_path: &Path, config: &Config) -> Option<PathBuf> {
+    let theme = config.theme.trim();
+    if theme.is_empty() {
+        return None;
+    }
+    Some(
+        config_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(complete::expand_tilde(theme)),
+    )
 }
 
 #[cfg(test)]
@@ -128,15 +182,37 @@ mod tests {
         )
         .unwrap();
         let (c, err) = load_config(Some(&paths(&dir)));
-        assert_eq!(err, None);
+        assert!(err.is_empty(), "{err:?}");
         assert_eq!(c.colors.caret.to_string(), "#010101");
         assert_eq!(c.colors.background.to_string(), "#030303");
 
         // A missing theme: the config alone, and an error.
         fs::remove_file(dir.join("themes/t.toml")).unwrap();
         let (c, err) = load_config(Some(&paths(&dir)));
-        assert!(err.is_some_and(|e| e.contains("t.toml")));
+        assert!(err.len() == 1 && err[0].contains("t.toml"), "{err:?}");
         assert_eq!(c.colors.caret.to_string(), "#010101");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn broken_config_is_an_error_and_unknown_settings_are_problems() {
+        let dir = std::env::temp_dir().join(format!("marg-conf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        assert_eq!(read_config(&path), Ok((Config::default(), Vec::new())));
+        fs::write(&path, "[view]\nzom_step = 1.2\n").unwrap();
+        let (c, problems) = read_config(&path).unwrap();
+        assert_eq!(c, Config::default());
+        assert!(
+            problems.len() == 1 && problems[0].ends_with("unknown setting view.zom_step"),
+            "{problems:?}"
+        );
+        fs::write(&path, "[view]\n\nzoom_step = \"x\"\n").unwrap();
+        let e = read_config(&path).unwrap_err();
+        assert!(e.contains("line 3"), "{e}");
+        let (c, err) = load_config(Some(&paths(&dir)));
+        assert_eq!((c, err.len()), (Config::default(), 1));
         let _ = fs::remove_dir_all(&dir);
     }
 }

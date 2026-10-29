@@ -38,6 +38,7 @@ use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
+use crate::startup;
 use crate::statefile;
 use crate::theme::Theme;
 use marg_core::theme::{StatusPart, status_line};
@@ -320,6 +321,9 @@ pub struct MargApp {
     discard: bool,
     /// When to ask whether the file changed on disk next.
     next_disk_check: Instant,
+    /// The config and theme files as last read, and when to look again.
+    config_stamp: startup::Stamp,
+    next_config_check: Instant,
     /// The pending open is a reload of the current file.
     reloading: bool,
     cmdline: LineEdit,
@@ -391,13 +395,7 @@ impl MargApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
-        let (keymap, mut warnings) = Keymap::build(KeyMode::Normal, &s.config.keys);
-        let (caret_map, w) = Keymap::build(KeyMode::Caret, &s.config.keys);
-        warnings.extend(w);
-        let (visual_map, w) = Keymap::build(KeyMode::Visual, &s.config.keys);
-        warnings.extend(w);
-        let (annot_map, w) = Keymap::build(KeyMode::Annot, &s.config.keys);
-        warnings.extend(w);
+        let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&s.config);
         for w in &warnings {
             log::warn!("{w}");
         }
@@ -456,6 +454,8 @@ impl MargApp {
             after_save: AfterSave::Nothing,
             discard: false,
             next_disk_check: Instant::now(),
+            config_stamp: Vec::new(),
+            next_config_check: Instant::now(),
             reloading: false,
             author,
             cmdline: LineEdit::default(),
@@ -483,6 +483,7 @@ impl MargApp {
             }),
         };
         app.set_recolor(app.config.view.recolor);
+        app.config_stamp = startup::stamp(&app.config_files());
         if let Some(t) = &app.timing {
             t.log("window created");
         }
@@ -3314,6 +3315,89 @@ impl MargApp {
         ctx.request_repaint_after(self.next_disk_check - now);
     }
 
+    /// The files the config comes from: the config and its theme.
+    fn config_files(&self) -> Vec<PathBuf> {
+        let Some(path) = &self.config_path else {
+            return Vec::new();
+        };
+        let mut files = vec![path.clone()];
+        files.extend(startup::theme_file(path, &self.config));
+        files
+    }
+
+    /// Every `ui.file_check_secs`: reload the config if it or its theme
+    /// changed.
+    fn check_config(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        if now >= self.next_config_check {
+            self.next_config_check =
+                now + Duration::from_secs_f32(self.config.ui.file_check_secs.max(0.1));
+            let stamp = startup::stamp(&self.config_files());
+            if stamp != self.config_stamp {
+                self.reload_config(ctx);
+            }
+        }
+        ctx.request_repaint_after(self.next_config_check - now);
+    }
+
+    /// Read the config again. A broken file keeps the current config.
+    /// Settings used when a file opens (`[view]` layout and size values,
+    /// `jump_history`, `undo_steps`) apply to the next file; `cache_mb` on
+    /// the next start.
+    fn reload_config(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.config_path.clone() else {
+            return;
+        };
+        let result = startup::read_config(&path);
+        // The theme may have changed with the config.
+        let (config, mut problems) = match result {
+            Ok(c) => c,
+            Err(e) => {
+                self.config_stamp = startup::stamp(&self.config_files());
+                self.error(format!("Config not reloaded: {e}"));
+                return;
+            }
+        };
+        let old = std::mem::replace(&mut self.config, config);
+        self.config_stamp = startup::stamp(&self.config_files());
+        let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&self.config);
+        (self.keymap, self.caret_map, self.visual_map, self.annot_map) =
+            (keymap, caret_map, visual_map, annot_map);
+        self.matcher.reset();
+        let (left, right, w) = self.config.statusbar.parts();
+        problems.extend(w);
+        self.status_parts = (left, right);
+        if self.config.fonts != old.fonts {
+            // From the built-in fonts, also if the new file fails.
+            ctx.set_fonts(egui::FontDefinitions::default());
+            problems.extend(crate::theme::install_fonts(ctx, &self.config.fonts));
+        }
+        self.theme = Theme::new(&self.config.colors, &self.config.fonts);
+        self.author = annotation_author(&self.config.annotation.author);
+        if self.config.view.recolor != old.view.recolor {
+            self.set_recolor(self.config.view.recolor);
+        } else if self.recolor
+            && (self.config.colors.recolor_fg, self.config.colors.recolor_bg)
+                != (old.colors.recolor_fg, old.colors.recolor_bg)
+        {
+            self.set_recolor(true);
+        }
+        for p in &problems {
+            log::error!("{p}");
+        }
+        for w in &warnings {
+            log::warn!("{w}");
+        }
+        log::info!("config reloaded");
+        if let Some(p) = problems.first() {
+            self.show(Level::Error, p.clone());
+        } else if let Some(w) = warnings.first() {
+            self.show(Level::Warn, w.clone());
+        } else {
+            self.show(Level::Info, "Config reloaded".into());
+        }
+    }
+
     /// Ask the document thread to save, then do `after` if it worked.
     fn save(&mut self, force: bool, after: AfterSave) {
         let Some(open) = &mut self.open else { return };
@@ -3512,6 +3596,7 @@ impl eframe::App for MargApp {
         }
         self.autosave(&ctx);
         self.check_disk(&ctx);
+        self.check_config(&ctx);
         if self
             .message
             .as_ref()
@@ -3794,6 +3879,24 @@ fn annot_kind(subtype: &str) -> Option<AnnotKind> {
 }
 
 /// The annotation author: the configured one, else the OS user name.
+/// The Normal, Caret, Visual and Annot keymaps, and warnings about the
+/// `[keys.*]` tables.
+fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
+    let mut warnings = Vec::new();
+    let maps = [
+        KeyMode::Normal,
+        KeyMode::Caret,
+        KeyMode::Visual,
+        KeyMode::Annot,
+    ]
+    .map(|m| {
+        let (map, w) = Keymap::build(m, &config.keys);
+        warnings.extend(w);
+        map
+    });
+    (maps, warnings)
+}
+
 fn annotation_author(configured: &str) -> String {
     if !configured.trim().is_empty() {
         return configured.trim().to_string();

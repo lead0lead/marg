@@ -74,10 +74,7 @@ fn main() -> eframe::Result {
     };
     let paths = paths::Paths::resolve();
     startup::init_logging(paths.as_ref());
-    let (config, config_error) = startup::load_config(paths.as_ref());
-    if let Some(e) = &config_error {
-        log::error!("{e}");
-    }
+    let (config, config_errors) = startup::load_config(paths.as_ref());
     // Open the file while the window is being created.
     let repaint: Arc<OnceLock<egui::Context>> = Arc::default();
     let wake = repaint.clone();
@@ -118,7 +115,7 @@ fn main() -> eframe::Result {
                     start_page: args.page.map(|p| p - 1),
                     state_path: paths.as_ref().map(|p| p.state_file.clone()),
                     config_path: paths.as_ref().map(|p| p.config_file.clone()),
-                    errors: config_error.into_iter().collect(),
+                    errors: config_errors,
                     timing_start: timing.then_some(start),
                 },
             )))

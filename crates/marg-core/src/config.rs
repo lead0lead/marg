@@ -3,7 +3,7 @@
 //! Every tuning value lives here, so the defaults are defined in one place.
 //! A missing config file or a missing key means the default below.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -285,7 +285,7 @@ impl Config {
     /// Parse a config file. Missing keys take their defaults. The error
     /// message includes the line number.
     pub fn from_toml(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        toml::from_str(text).map_err(|e| one_line(&e))
     }
 
     /// Parse a config file on top of a theme file: the theme's values are
@@ -293,9 +293,9 @@ impl Config {
     /// (`Err((in_theme, message))`), with the line number.
     pub fn with_theme(text: &str, theme: &str) -> Result<Self, (bool, String)> {
         let own = Self::from_toml(text).map_err(|e| (false, e))?;
-        toml::from_str::<ThemeFile>(theme).map_err(|e| (true, e.to_string()))?;
-        let mut merged: toml::Table = toml::from_str(text).map_err(|e| (false, e.to_string()))?;
-        let theme: toml::Table = toml::from_str(theme).map_err(|e| (true, e.to_string()))?;
+        toml::from_str::<ThemeFile>(theme).map_err(|e| (true, one_line(&e)))?;
+        let mut merged: toml::Table = toml::from_str(text).map_err(|e| (false, one_line(&e)))?;
+        let theme: toml::Table = toml::from_str(theme).map_err(|e| (true, one_line(&e)))?;
         for (section, values) in theme {
             let (Some(entry), toml::Value::Table(values)) = (
                 merged
@@ -310,11 +310,73 @@ impl Config {
                 entry.entry(k).or_insert(v);
             }
         }
-        let merged = Self::deserialize(merged).map_err(|e| (true, e.to_string()))?;
+        let merged = Self::deserialize(merged).map_err(|e| (true, one_line(&e)))?;
         Ok(Self {
             theme: own.theme,
             ..merged
         })
+    }
+}
+
+/// A TOML error on one line, for the status bar: its position, then the
+/// reason, without the quoted source lines.
+fn one_line(e: &impl std::fmt::Display) -> String {
+    let text = e.to_string();
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let first = lines.next().unwrap_or_default();
+    let first = first.strip_prefix("TOML parse error at ").unwrap_or(first);
+    // The quoted source: "|", "4 | [view", "|      ^".
+    let rest: Vec<&str> = lines
+        .filter(|l| {
+            !l.starts_with('|')
+                && !l
+                    .split_once(" |")
+                    .is_some_and(|(n, _)| n.trim().parse::<u32>().is_ok())
+        })
+        .collect();
+    if rest.is_empty() {
+        first.to_string()
+    } else {
+        format!("{first}: {}", rest.join(": "))
+    }
+}
+
+/// Settings in a config or theme file that marg does not know (dotted,
+/// such as `view.zom_step`); serde would ignore them silently. Empty if
+/// the text does not parse (that error is reported by the parse).
+pub fn unknown_settings(text: &str) -> Vec<String> {
+    let Ok(table) = toml::from_str::<toml::Table>(text) else {
+        return Vec::new();
+    };
+    let mut known = BTreeSet::new();
+    if let Ok(t) = toml::Table::try_from(Config::default()) {
+        setting_paths(&t, "", &mut known);
+    }
+    let mut written = BTreeSet::new();
+    setting_paths(&table, "", &mut written);
+    written.difference(&known).cloned().collect()
+}
+
+/// Every setting in `t`, dotted. The `keys.*` tables count as one
+/// setting each (their keys are key sequences); arrays of tables (such as
+/// `category`) by their tables' keys.
+fn setting_paths(t: &toml::Table, prefix: &str, out: &mut BTreeSet<String>) {
+    for (k, v) in t {
+        let p = format!("{prefix}{k}");
+        match v {
+            toml::Value::Table(_) if prefix == "keys." => {
+                out.insert(p);
+            }
+            toml::Value::Table(t) => setting_paths(t, &format!("{p}."), out),
+            toml::Value::Array(a) if !a.is_empty() && a.iter().all(|v| v.is_table()) => {
+                for t in a.iter().filter_map(|v| v.as_table()) {
+                    setting_paths(t, &format!("{p}."), out);
+                }
+            }
+            _ => {
+                out.insert(p);
+            }
+        }
     }
 }
 
@@ -428,8 +490,31 @@ mod tests {
     }
 
     #[test]
+    fn unknown_settings_are_found() {
+        let text = "zoom = 2\n[view]\nzom_step = 1.2\nzoom_step = 1.2\n\
+                    [keys.normal]\n\"j\" = \"scroll.up\"\n[keys.insert]\n\"x\" = \"undo\"\n\
+                    [[category]]\nname = \"A\"\ncolour = \"#FF0000\"\n\
+                    [colors]\nbackgrund = \"#000000\"\n[fonts]\nsize = 14.0\n";
+        assert_eq!(
+            unknown_settings(text),
+            [
+                "category.colour",
+                "colors.backgrund",
+                "keys.insert",
+                "view.zom_step",
+                "zoom"
+            ]
+        );
+        assert!(unknown_settings("").is_empty());
+        assert!(unknown_settings("[view\n").is_empty(), "a parse error");
+    }
+
+    #[test]
     fn error_mentions_line() {
         let e = Config::from_toml("[view]\n\nzoom_step = \"x\"\n").unwrap_err();
         assert!(e.contains("line 3"), "{e}");
+        let e = Config::from_toml("[colors]\n\n[view\n").unwrap_err();
+        assert!(!e.contains('\n') && !e.contains('|'), "one line: {e}");
+        assert!(e.contains("line 3") && e.contains("unclosed table"), "{e}");
     }
 }
