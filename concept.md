@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29 (Phase 4 at the user's request, "merge and push"). Phase 5 not started. |
-| **Current phase** | 5 — export & release, next |
-| **Next step** | Start Phase 5 in a fresh session, on branch `phase-5-release`: plan the steps (§11: Markdown export, `:config`, config reload and errors, password prompt, read-only, README + cheat sheet, release builds, polish), then one commit per step. The Phase 4 choices in §12 are still open for the user. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: step 1 (Markdown export) done. |
+| **Current phase** | 5 — export & release |
+| **Next step** | Phase 5 step 2: `:config` (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 4 merged) |
+| **Last updated** | 2026-10-29 (Phase 5 step 1) |
 
 ---
 
@@ -687,6 +687,22 @@ Comment on the box.
   1-based page index.
 - Standalone notes appear as **[Note]** entries with their comment.
 
+**As implemented (Phase 5):** `:export md [path]` (`Command::Export`,
+`file.export`); text in `marg-core/src/export.rs` from the annotation
+list's rows (`annotlist::entries`), so the marked text is the same as
+there and in `y`. The path: `<stem>.notes.md` next to the PDF; a given
+path (`~` expanded, relative to the working directory like `:e`), or
+that name inside it if it is a folder. Before writing, every page's
+annotations are listed again (idle queue; edits are applied as they
+arrive, so this includes every edit sent before) and the text of the
+annotated pages is read; "Exporting…" until then, then "Exported N
+annotations to <name>" (a warning if pages could not be read). Title
+and section names are put on one line; quoted text is joined into one
+line; comments are written as typed (trimmed). Highlights, underlines,
+squiggly and strike-out are quotes; boxes, notes and other types are
+**[Box]**, **[Note]**, **[<Subtype>]**. The date is UTC. Written on the
+UI thread (small file).
+
 ### 2.12 Help overlay
 
 `?` shows the bindings active in the current mode, generated from the live
@@ -777,7 +793,7 @@ remappable (§8).
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
-| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md`, `:layout …`, `:set key=value`, `:debug` | |
+| Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:set key=value`, `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -1420,6 +1436,16 @@ scrolls a screen and turns the page at its edge, like Zathura — user's
 choice); 2 jump history and marks; 3 outline overlay; 4 search; 5 links
 (`gl`, click, external URLs after `y`, opened with `xdg-open` / `start`);
 6 help overlay `?` and `:help`; 7 docs and handover.
+
+**Phase 5 steps** (branch `phase-5-release`, planned 2026-10-29 with the
+user, one commit each): 1 Markdown export (`:export md [path]`); 2
+`:config` (commented default config); 3 config errors (unknown keys,
+keymap conflicts) and auto-reload; 4 password prompt; 5 read-only files;
+6 cheat sheet (generated, checked by a test) and README; 7 release
+builds in CI on `v*` tags; 8 polish from the user's list (none yet; it
+grows as they test), docs and handover. To ask at their step: `:set`
+(Phase 1 put it in Phase 5, the Phase 3b choice ruled out runtime
+settings), the Windows CRT (§12), the Phase 4 choices.
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before

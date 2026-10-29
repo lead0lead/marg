@@ -35,6 +35,8 @@ pub enum Command {
     Quit,
     QuitForce,
     Open(String),
+    /// `:export md [path]`: write the annotations as Markdown.
+    Export(Option<String>),
     Version,
     DebugToggle,
     /// Hints on words; the picked word gets the caret.
@@ -368,6 +370,7 @@ impl Command {
         match self {
             Command::PageGoto(_) => "page.goto",
             Command::Open(_) => "file.open",
+            Command::Export(_) => "file.export",
             Command::SetLayout(_) => "view.layout",
             c => REGISTRY
                 .iter()
@@ -385,7 +388,7 @@ impl fmt::Display for Command {
 
 /// Parse a `:` command line (without the colon).
 ///
-/// `q`, `q!`, `e <path>`, `layout <name>`, `version`, `debug`, a page
+/// `q`, `q!`, `e <path>`, `export md [path]`, `layout <name>`, `version`, `debug`, a page
 /// number, or any registered command name (`zoom.in`).
 pub fn parse_ex(line: &str) -> Result<Command, String> {
     let line = line.trim();
@@ -415,6 +418,11 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
                 Ok(Command::Open(rest.to_string()))
             }
         }
+        "export" => match rest.split_once(char::is_whitespace) {
+            None if rest == "md" => Ok(Command::Export(None)),
+            Some(("md", path)) => Ok(Command::Export(Some(path.trim().to_string()))),
+            _ => Err("usage: export md [path]".into()),
+        },
         "layout" => match rest {
             "continuous" => Ok(Command::SetLayout(Layout::Continuous)),
             "single" => Ok(Command::SetLayout(Layout::Single)),
@@ -468,6 +476,13 @@ mod tests {
             Ok(Command::SetLayout(Layout::Spread))
         );
         assert!(parse_ex("layout").is_err());
+        assert_eq!(parse_ex("export md"), Ok(Command::Export(None)));
+        assert_eq!(
+            parse_ex("export md ~/notes/a b.md"),
+            Ok(Command::Export(Some("~/notes/a b.md".into())))
+        );
+        assert!(parse_ex("export").is_err());
+        assert!(parse_ex("export html").is_err());
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());

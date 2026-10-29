@@ -91,6 +91,19 @@ struct OpenDoc {
     pending: HashMap<u64, AfterCreate>,
     /// Where images are on each page, once asked for (box snapping).
     images: Vec<Option<Vec<BBox>>>,
+    /// Pages whose annotations or text could not be read.
+    annots_failed: HashSet<usize>,
+    text_failed: HashSet<usize>,
+    /// `:export md`, waiting for annotations and text.
+    export: Option<PendingExport>,
+}
+
+/// A Markdown export waiting for the annotations of every page and the
+/// text of the annotated ones.
+struct PendingExport {
+    path: PathBuf,
+    /// Pages not listed again yet (so that recent edits are included).
+    relist: HashSet<usize>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -807,6 +820,9 @@ impl MargApp {
                     if generation != open.generation {
                         continue;
                     }
+                    if let Some(x) = &mut open.export {
+                        x.relist.remove(&page);
+                    }
                     match result {
                         Ok(list) => {
                             if self.selected_annot.is_some_and(|(p, x)| {
@@ -815,9 +831,11 @@ impl MargApp {
                                 self.selected_annot = None;
                             }
                             open.annots[page] = Some(list);
+                            open.annots_failed.remove(&page);
                         }
                         Err(e) => {
-                            log::error!("annotations of page {} failed: {e}", page + 1)
+                            log::error!("annotations of page {} failed: {e}", page + 1);
+                            open.annots_failed.insert(page);
                         }
                     }
                 }
@@ -832,7 +850,10 @@ impl MargApp {
                     }
                     match result {
                         Ok(text) => open.texts[page] = Some(text),
-                        Err(e) => log::error!("text of page {} failed: {e}", page + 1),
+                        Err(e) => {
+                            log::error!("text of page {} failed: {e}", page + 1);
+                            open.text_failed.insert(page);
+                        }
                     }
                 }
             }
@@ -903,6 +924,9 @@ impl MargApp {
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
+            annots_failed: HashSet::new(),
+            text_failed: HashSet::new(),
+            export: None,
             links: vec![None; view.page_count()],
             links_requested: HashSet::new(),
             view,
@@ -2849,6 +2873,10 @@ impl MargApp {
                 self.open_path(&path);
                 return;
             }
+            Command::Export(path) => {
+                self.start_export(path.as_deref());
+                return;
+            }
             Command::Version => {
                 let v = self.version.clone();
                 self.show(Level::Info, v);
@@ -3041,6 +3069,7 @@ impl MargApp {
             | Command::Quit
             | Command::QuitForce
             | Command::Open(_)
+            | Command::Export(_)
             | Command::Version
             | Command::DebugToggle => {}
             Command::HintCaret
@@ -3098,6 +3127,109 @@ impl MargApp {
             self.save(false, AfterSave::Open(path));
         } else {
             self.doc.send(Request::Open(path));
+        }
+    }
+
+    /// `:export md [path]`: list the annotations again, then write the file once everything is read
+    /// (`poll_export`). `path` may be a folder.
+    fn start_export(&mut self, path: Option<&str>) {
+        let Some(open) = &mut self.open else {
+            self.error("No file open".into());
+            return;
+        };
+        let pdf = &open.info.path;
+        let default_name = || {
+            let stem = pdf.file_stem().unwrap_or_default().to_string_lossy();
+            format!("{stem}.notes.md")
+        };
+        let path = match path {
+            None => pdf.with_file_name(default_name()),
+            Some(p) => {
+                let p = complete::expand_tilde(p);
+                if p.is_dir() {
+                    p.join(default_name())
+                } else {
+                    p
+                }
+            }
+        };
+        // Edits are applied as they arrive and listings answered later, so
+        // listing every page again includes every edit sent so far. Idle:
+        // renders go first.
+        let pages: Vec<usize> = (0..open.annots.len()).collect();
+        let relist = pages.iter().copied().collect();
+        self.doc.send(Request::Annots {
+            pages,
+            urgent: false,
+        });
+        open.export = Some(PendingExport { path, relist });
+        self.show(Level::Info, "Exporting…".into());
+        self.poll_export();
+    }
+
+    /// Write the pending export once the annotations of every page and the
+    /// text of every annotated page are read (or failed).
+    fn poll_export(&mut self) {
+        let Some(open) = &mut self.open else { return };
+        let Some(x) = &open.export else { return };
+        if !x.relist.is_empty() {
+            return;
+        }
+        let annotated: Vec<usize> = (0..open.annots.len())
+            .filter(|&p| open.annots[p].as_ref().is_some_and(|a| !a.is_empty()))
+            .collect();
+        let mut waiting = false;
+        for &p in &annotated {
+            if open.texts[p].is_none() && !open.text_failed.contains(&p) {
+                open.request_text(&self.doc, p);
+                waiting = true;
+            }
+        }
+        if waiting {
+            return;
+        }
+        let Some(x) = open.export.take() else { return };
+        let all: Vec<AnnotInfo> = open.annots.iter().flatten().flatten().cloned().collect();
+        let cats: Vec<_> = self
+            .config
+            .categories
+            .iter()
+            .map(|c| (c.name.as_str(), parse_color(&c.color)))
+            .collect();
+        let entries = marg_core::annotlist::entries(&all, &open.texts, &cats);
+        let names: Vec<&str> = cats.iter().map(|c| c.0).collect();
+        let md = marg_core::export::markdown(
+            &marg_core::export::Export {
+                file_name: &open.file_name,
+                title: open.info.title.as_deref(),
+                date: &marg_core::export::date(statefile::now_secs()),
+                labels: open.info.labels.as_deref(),
+                categories: &names,
+            },
+            &entries,
+        );
+        let unread = annotated
+            .iter()
+            .filter(|p| open.text_failed.contains(p))
+            .count()
+            + open.annots_failed.len();
+        let shown = x.path.file_name().map_or_else(
+            || x.path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        );
+        match std::fs::write(&x.path, md) {
+            Ok(()) if unread > 0 => self.show(
+                Level::Warn,
+                format!(
+                    "Exported {} annotations to {shown}; {unread} pages could not be read",
+                    entries.len()
+                ),
+            ),
+            Ok(()) => self.show(
+                Level::Info,
+                format!("Exported {} annotations to {shown}", entries.len()),
+            ),
+            Err(e) => self.error(format!("Export failed: {}: {e}", x.path.display())),
         }
     }
 
@@ -3335,6 +3467,7 @@ impl eframe::App for MargApp {
         let th = self.theme.clone();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
+        self.poll_export();
         // Closing the window saves first, like `q`.
         if ctx.input(|i| i.viewport().close_requested())
             && !self.discard

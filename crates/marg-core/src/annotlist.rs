@@ -13,6 +13,8 @@ pub struct Entry {
     /// Index into the categories; `None`: Uncategorised.
     pub category: Option<usize>,
     pub color: Option<[u8; 3]>,
+    /// `text` is marked text (a highlight or similar), not a placeholder.
+    pub marked: bool,
     /// The marked text (empty while the page's text is loading), or a
     /// placeholder such as "[Box]" for annotations without text.
     pub text: String,
@@ -35,8 +37,12 @@ pub fn entries(
     sorted
         .into_iter()
         .map(|a| {
+            let marked = matches!(
+                a.kind.as_str(),
+                "Highlight" | "Underline" | "Squiggly" | "StrikeOut"
+            );
             let text = match a.kind.as_str() {
-                "Highlight" | "Underline" | "Squiggly" | "StrikeOut" => texts
+                _ if marked => texts
                     .get(a.page)
                     .and_then(|t| t.as_ref())
                     .map(|t| t.covered(a.boxes()))
@@ -50,6 +56,7 @@ pub fn entries(
                 xref: a.xref,
                 category: category_of(a, categories),
                 color: a.color,
+                marked,
                 text,
                 comment: a.contents.clone().unwrap_or_default(),
             }
@@ -148,6 +155,7 @@ mod tests {
             xref: 0,
             category,
             color: None,
+            marked: true,
             text: text.into(),
             comment: comment.into(),
         };

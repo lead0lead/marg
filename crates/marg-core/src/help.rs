@@ -204,6 +204,10 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ),
             (":close, :bd", "close the file, show the recent files"),
             (":layout continuous|single|spread", "set the layout"),
+            (
+                ":export md [path]",
+                "write the annotations as Markdown (default: <file>.notes.md)",
+            ),
             (":42", "go to page 42"),
             (":help", "this page"),
             (":version, :debug", "version; debug overlay"),
