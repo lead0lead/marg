@@ -24,6 +24,10 @@ mod theme;
 
 const GIT_HASH: &str = env!("MARG_GIT_HASH");
 
+/// Window icon (X11 and Windows; Wayland takes it from `marg.desktop`
+/// through the app id). Rendered from `assets/marg.svg`.
+const ICON_PNG: &[u8] = include_bytes!("../assets/marg-256.png");
+
 const USAGE: &str = "usage: marg [<file.pdf> [--page N]]";
 
 struct Args {
@@ -97,10 +101,15 @@ fn main() -> eframe::Result {
         .as_deref()
         .and_then(|p| p.file_name())
         .map_or("marg".into(), |n| format!("{} — marg", n.to_string_lossy()));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_app_id("marg");
+    match eframe::icon_data::from_png_bytes(ICON_PNG) {
+        Ok(icon) => viewport = viewport.with_icon(icon),
+        Err(e) => log::warn!("window icon: {e}"),
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_app_id("marg"),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -124,4 +133,13 @@ fn main() -> eframe::Result {
             )))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn icon_decodes() {
+        let icon = eframe::icon_data::from_png_bytes(super::ICON_PNG).unwrap();
+        assert_eq!((icon.width, icon.height), (256, 256));
+    }
 }
