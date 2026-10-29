@@ -57,6 +57,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("Ctrl-i", "jump.forward"),
     ("m", "mark.set"),
     ("'", "mark.jump"),
+    ("o", "outline"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.

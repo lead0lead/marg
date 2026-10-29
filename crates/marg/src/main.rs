@@ -11,6 +11,7 @@ mod boxmode;
 mod comment;
 mod complete;
 mod input;
+mod outline;
 mod pages;
 mod paths;
 mod recent;

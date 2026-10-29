@@ -113,6 +113,8 @@ pub enum Command {
     MarkSet,
     /// Go to the mark named by the next key.
     MarkJump,
+    /// Show the table of contents.
+    Outline,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -322,6 +324,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("jump.forward", Command::JumpForward, "jump forward"),
     ("mark.set", Command::MarkSet, "set mark a-z"),
     ("mark.jump", Command::MarkJump, "go to mark a-z"),
+    ("outline", Command::Outline, "table of contents"),
     (
         "view.spread_first_alone",
         Command::SpreadFirstAlone,

@@ -8,6 +8,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
+use marg_core::outline::OutlineEntry;
 use marg_core::text::{BBox, PageText};
 
 use crate::document::{Doc, DocInfo, PixelRect, Pixels, Recolor, SaveError, SaveReport};
@@ -101,6 +102,8 @@ pub enum Request {
     Annots { pages: Vec<usize>, urgent: bool },
     /// Where images are drawn on a page (for box snapping). Served at once.
     Images(usize),
+    /// The table of contents. Served at once.
+    Outline,
 }
 
 pub enum Response {
@@ -148,6 +151,10 @@ pub enum Response {
         generation: u64,
         page: usize,
         result: Result<Vec<BBox>, String>,
+    },
+    Outline {
+        generation: u64,
+        result: Result<Vec<OutlineEntry>, String>,
     },
 }
 
@@ -329,6 +336,16 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                         result,
                     };
                     if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
+                }
+                Request::Outline => {
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => d.outline(),
+                    };
+                    if tx.send(Response::Outline { generation, result }).is_err() {
                         return;
                     }
                     wake();

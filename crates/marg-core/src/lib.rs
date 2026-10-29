@@ -14,6 +14,7 @@ pub mod keys;
 pub mod lineedit;
 pub mod list;
 pub mod lru;
+pub mod outline;
 pub mod state;
 pub mod stats;
 pub mod text;

@@ -17,6 +17,7 @@ use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
+use marg_core::outline::{Dest, OutlineEntry};
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
@@ -29,6 +30,7 @@ use crate::boxmode::BoxMode;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
 use crate::input;
+use crate::outline::{self, OutlineList};
 use crate::pages::PageCache;
 use crate::recent::{self, RecentList};
 use crate::select::{self, Caret, Hinting, Picked, Purpose};
@@ -40,6 +42,8 @@ use marg_core::theme::{StatusPart, status_line};
 struct OpenDoc {
     info: DocInfo,
     jumps: JumpList,
+    /// The table of contents, once read.
+    outline: Option<Vec<OutlineEntry>>,
     /// Marks `a`–`z`, saved in the state file.
     marks: BTreeMap<char, DocPos>,
     /// Key in the state file.
@@ -184,6 +188,8 @@ enum Mode {
     Box,
     /// The annotation list is open.
     Annots,
+    /// The outline is open, or asked for.
+    Outline,
 }
 
 impl Mode {
@@ -197,6 +203,7 @@ impl Mode {
             Mode::Insert => "INSERT",
             Mode::Box => "BOX",
             Mode::Annots => "ANNOTATIONS",
+            Mode::Outline => "OUTLINE",
         }
     }
 }
@@ -229,6 +236,8 @@ pub struct MargApp {
     boxing: Option<BoxMode>,
     /// The annotation list (Annots mode).
     annot_list: Option<AnnotList>,
+    /// The outline overlay (Outline mode).
+    outline_list: Option<OutlineList>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
     /// `m` or `'` was pressed: the next key names the mark (true: set).
@@ -366,6 +375,7 @@ impl MargApp {
             editor: None,
             boxing: None,
             annot_list: None,
+            outline_list: None,
             selection_before_hints: None,
             pending_mark: None,
             drag_anchor: None,
@@ -549,6 +559,26 @@ impl MargApp {
                         }
                     }
                 }
+                Response::Outline { generation, result } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(toc) => {
+                            open.outline = Some(toc);
+                            if self.mode == Mode::Outline {
+                                self.show_outline();
+                            }
+                        }
+                        Err(e) => {
+                            if self.mode == Mode::Outline {
+                                self.mode = Mode::Normal;
+                            }
+                            self.error(format!("Cannot read the outline: {e}"));
+                        }
+                    }
+                }
                 Response::Images {
                     generation,
                     page,
@@ -725,6 +755,7 @@ impl MargApp {
             generation,
             file_name,
             jumps: JumpList::new(self.config.view.jump_history),
+            outline: None,
             marks,
             texts: vec![None; view.page_count()],
             text_requested: HashSet::new(),
@@ -782,6 +813,7 @@ impl MargApp {
                 _ if self.mode == Mode::Insert => {}
                 _ if self.mode == Mode::Box => self.box_event(e),
                 _ if self.mode == Mode::Annots => self.annot_list_event(e),
+                _ if self.mode == Mode::Outline => self.outline_event(e),
                 Event::PointerButton { .. } | Event::PointerMoved(_)
                     if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual) =>
                 {
@@ -910,6 +942,55 @@ impl MargApp {
         } else {
             self.show(Level::Info, format!("No mark {name}"));
         }
+    }
+
+    /// Open the outline overlay once the outline is read.
+    fn show_outline(&mut self) {
+        let Some(open) = &self.open else { return };
+        let toc = open.outline.clone().unwrap_or_default();
+        if toc.is_empty() {
+            self.mode = Mode::Normal;
+            self.show(Level::Info, "This PDF has no outline".into());
+            return;
+        }
+        self.outline_list = Some(OutlineList::new(toc, open.view.current_page()));
+    }
+
+    /// A key in the outline.
+    fn outline_event(&mut self, e: &Event) {
+        let Some(list) = &mut self.outline_list else {
+            // Still reading the outline: Esc gives up.
+            if input::key_press(e) == Some(KeyPress::named(Named::Esc)) {
+                self.mode = Mode::Normal;
+            }
+            return;
+        };
+        match list.event(e) {
+            outline::Action::None => {}
+            outline::Action::Close => {
+                self.outline_list = None;
+                self.mode = Mode::Normal;
+            }
+            outline::Action::Jump(dest) => {
+                self.outline_list = None;
+                self.mode = Mode::Normal;
+                self.jump_to(dest);
+            }
+        }
+    }
+
+    /// Go to a link or outline destination, as a jump.
+    fn jump_to(&mut self, dest: Dest) {
+        let Some(open) = &mut self.open else { return };
+        if dest.page >= open.view.page_count() {
+            return;
+        }
+        open.jumps.push(open.view.position());
+        open.view.set_position(DocPos {
+            page: dest.page,
+            x: dest.x.unwrap_or(0.0),
+            y: dest.y.unwrap_or(0.0),
+        });
     }
 
     /// Back to Normal mode: no caret, no selection.
@@ -2388,6 +2469,20 @@ impl MargApp {
                 self.open_annot_list();
                 return;
             }
+            Command::Outline => {
+                let Some(read) = self.open.as_ref().map(|o| o.outline.is_some()) else {
+                    return;
+                };
+                self.leave_text_modes();
+                self.selected_annot = None;
+                self.mode = Mode::Outline;
+                if read {
+                    self.show_outline();
+                } else {
+                    self.doc.send(Request::Outline);
+                }
+                return;
+            }
             Command::MarkSet | Command::MarkJump => {
                 if self.open.is_some() {
                     self.pending_mark = Some(command == Command::MarkSet);
@@ -2521,6 +2616,7 @@ impl MargApp {
             | Command::JumpForward
             | Command::MarkSet
             | Command::MarkJump
+            | Command::Outline
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2801,6 +2897,22 @@ impl eframe::App for MargApp {
                     .inner_margin(egui::Margin::symmetric(6, 0)),
             )
             .show(ui, |ui| self.status_bar(ui));
+        if let Some(list) = self
+            .outline_list
+            .as_mut()
+            .filter(|_| self.mode == Mode::Outline)
+        {
+            let labels = self.open.as_ref().and_then(|o| o.info.labels.clone());
+            let width = screen.width() * self.config.ui.outline_width;
+            egui::Area::new(egui::Id::unique("marg-outline"))
+                .fixed_pos(area.min)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    ui.set_min_size(egui::vec2(width, area.height()));
+                    ui.set_max_size(egui::vec2(width, area.height()));
+                    list.draw(ui, &th, labels.as_deref());
+                });
+        }
         if self.mode == Mode::Annots {
             self.refresh_annot_list();
             let names: Vec<String> = self
