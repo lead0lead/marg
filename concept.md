@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 built on branch `phase-5-release` (not merged, not pushed): Markdown export, `:config`, config errors and reload, password prompt, read-only files, cheat sheet and README, release workflow. Handed to the user to try. |
+| **Status** | Phases 0–5 merged into `main` (Phase 5 on 2026-10-29); version 1.0.0. Release: trial run of the release workflow, then tag `v1.0.0` (user, 2026-10-29: "go ahead, with the trial run first"). |
 | **Current phase** | 5 — export & release |
-| **Next step** | The user tries the Phase 5 build and collects a polish list; then polish, merge, push, bump the version to 1.0.0 and tag `v1.0.0` (when the user asks). The Phase 4 and 5 choices in §12 are open. | (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Check the release workflow run; if green, tag `v1.0.0` and push the tag. After the release: the user uses marg daily and collects a polish list; the Phase 4 and 5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 handover) |
+| **Last updated** | 2026-10-29 (Phase 5 merged, 1.0.0) |
 
 ---
 
