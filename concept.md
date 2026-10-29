@@ -1411,6 +1411,19 @@ Threading: MuPDF's context is thread-local and `Document`/`Page` are not
   ship it that way and say so in the README, instead of patching MuPDF's
   vcxproj files for a static CRT or bundling the runtime DLLs.
 
+**Binary size (Phase 5, measured 2026-10-29, Linux):** release 37.4 MB,
+`dist` 30.6 MB (26.1 MB stripped). Most of it is Rust code, led by
+`wgpu`/`naga` (eframe's default renderer). A trial with eframe's `glow`
+(OpenGL) renderer, without `accesskit` and system fonts, gave 22.9 MB
+(18.0 MB stripped), startup the same within noise on Xvfb; it needs only
+`on_exit(&mut self, _gl: Option<&glow::Context>)`. **Rejected by the
+user** (Claude agreeing): size does not matter for this tool, wgpu's
+Vulkan/DX12/Metal fallbacks are safer on untested drivers (and a future
+macOS build), and symbol names in backtraces help diagnose crashes, so
+`strip` stays off too. For comparison (Arch, installed): Zathura 1.9 MB
+plus GTK4 54 MB, GLib 38 MB and a PDF backend (Poppler ~10 MB or libmupdf
+56 MB); Okular 19.5 MB plus Qt and KDE Frameworks.
+
 ### Folder structure
 
 ```
@@ -1778,7 +1791,10 @@ Format:
   checked: the release workflow (runs only when pushed), Windows,
   RC4 or real-world encrypted PDFs, a restricted publisher PDF.
 - State: builds; 174 tests pass; clippy and fmt clean.
-- Added after the handover, at the user's request: `:set` (§8).
+- Added after the handover, at the user's request: `:set` (§8);
+  fixed known issues: the reading position is saved every
+  `state_save_secs`, long comments end in "…" in tooltips. Binary size
+  options measured and rejected (§9 "Binary size").
 - Next: the user tries Phase 5; polish from their list; merge, push;
   bump `Cargo.toml` to 1.0.0 and tag `v1.0.0` when the user asks (the
   workflow refuses a tag that does not match the version).
