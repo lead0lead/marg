@@ -8,6 +8,7 @@ use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
 use marg_core::config::{HintMode, HintsConfig, Layout};
 use marg_core::hints::{HintInput, labels};
+use marg_core::outline::Link;
 use marg_core::search::Hit;
 use marg_core::text::{BBox, PageText};
 use marg_core::view::View;
@@ -33,6 +34,8 @@ pub enum Purpose {
     SelectEnd(TextPos, TextPos),
     /// Select an annotation: (page, object number) per target box.
     Annot(Vec<(usize, i32)>),
+    /// Follow a link, one per target box.
+    Link(Vec<Link>),
 }
 
 /// What a hint picked.

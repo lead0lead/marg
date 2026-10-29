@@ -17,7 +17,7 @@ use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
-use marg_core::outline::{Dest, OutlineEntry};
+use marg_core::outline::{Dest, Link, LinkTarget, OutlineEntry, link_at};
 use marg_core::search::Hit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
@@ -28,6 +28,7 @@ use marg_pdf::{DocInfo, DocThread, Edit, Recolor, RenderKey, Request, Response, 
 
 use crate::annotlist::{self, AnnotList};
 use crate::boxmode::BoxMode;
+use crate::browser;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
 use crate::input;
@@ -45,6 +46,9 @@ struct OpenDoc {
     jumps: JumpList,
     /// The table of contents, once read.
     outline: Option<Vec<OutlineEntry>>,
+    /// Links of each page, once listed.
+    links: Vec<Option<Vec<Link>>>,
+    links_requested: HashSet<usize>,
     /// The last search and its hits; `None` after Esc.
     search: Option<SearchState>,
     /// Marks `a`–`z`, saved in the state file.
@@ -154,10 +158,14 @@ impl OpenDoc {
         }
     }
 
-    /// Ask for the text of the visible pages that do not have it yet.
+    /// Ask for the text and links of the visible pages that do not have
+    /// them yet.
     fn request_visible_text(&mut self, doc: &DocThread) {
         for p in self.view.visible_pages() {
             self.request_text(doc, p);
+            if self.links[p].is_none() && self.links_requested.insert(p) {
+                doc.send(Request::Links(p));
+            }
         }
     }
 }
@@ -215,6 +223,8 @@ enum Mode {
     Annots,
     /// The outline is open, or asked for.
     Outline,
+    /// Asking whether to open an external link.
+    Confirm,
     /// Typing a search.
     Search,
 }
@@ -222,7 +232,7 @@ enum Mode {
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command | Mode::Search => "NORMAL",
+            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm => "NORMAL",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
@@ -267,6 +277,10 @@ pub struct MargApp {
     outline_list: Option<OutlineList>,
     /// The selection before hints started, restored if they are cancelled.
     selection_before_hints: Option<Selection>,
+    /// The external link waiting for `y` (Confirm mode).
+    pending_url: Option<String>,
+    /// A press on a link: where, and the link; a release there follows it.
+    link_press: Option<(egui::Pos2, Link)>,
     /// `m` or `'` was pressed: the next key names the mark (true: set).
     pending_mark: Option<bool>,
     /// Where a mouse drag started, while the primary button is down.
@@ -409,6 +423,8 @@ impl MargApp {
             outline_list: None,
             selection_before_hints: None,
             pending_mark: None,
+            pending_url: None,
+            link_press: None,
             drag_anchor: None,
             last_click: None,
             last_category: 1,
@@ -669,6 +685,23 @@ impl MargApp {
                         }
                     }
                 }
+                Response::Links {
+                    generation,
+                    page,
+                    result,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(links) => open.links[page] = Some(links),
+                        Err(e) => {
+                            log::error!("links of page {} failed: {e}", page + 1);
+                            open.links[page] = Some(Vec::new());
+                        }
+                    }
+                }
                 Response::Images {
                     generation,
                     page,
@@ -862,6 +895,8 @@ impl MargApp {
             annots: vec![None; view.page_count()],
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
+            links: vec![None; view.page_count()],
+            links_requested: HashSet::new(),
             view,
         }
     }
@@ -898,6 +933,7 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Search => self.search_event(e),
+                _ if self.mode == Mode::Confirm => self.confirm_event(e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
                 _ if self.mode == Mode::Category => self.category_event(e),
@@ -922,6 +958,12 @@ impl MargApp {
             }
         }
         self.drag_scroll(ctx, area);
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+        if matches!(self.mode, Mode::Normal | Mode::Caret | Mode::Visual)
+            && hover.is_some_and(|p| area.contains(p) && self.link_at_screen(p).is_some())
+        {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         if self
             .matcher
             .expire(self.now_ms(), self.config.ui.sequence_timeout_ms)
@@ -1415,6 +1457,83 @@ impl MargApp {
         self.mode = Mode::Hint;
     }
 
+    /// `gl`: hints on the visible links.
+    fn link_hints(&mut self) {
+        let Some(open) = &self.open else { return };
+        let mut found: Vec<(usize, Link)> = Vec::new();
+        for page in open.view.visible_pages() {
+            let Some(list) = &open.links[page] else {
+                self.show(Level::Info, "Still reading the links".into());
+                return;
+            };
+            found.extend(
+                list.iter()
+                    .filter(|l| select::on_screen(&open.view, self.area, page, l.rect))
+                    .map(|l| (page, l.clone())),
+            );
+        }
+        if found.is_empty() {
+            self.show(Level::Info, "No links in view".into());
+            return;
+        }
+        found.sort_by(|(pa, a), (pb, b)| {
+            (pa, a.rect.y0, a.rect.x0)
+                .partial_cmp(&(pb, b.rect.y0, b.rect.x0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let boxes = found.iter().map(|(p, l)| (*p, l.rect)).collect();
+        let links = found.into_iter().map(|(_, l)| l).collect();
+        let h = Hinting::boxes(Purpose::Link(links), boxes, &self.config.hints);
+        if self.mode != Mode::Hint {
+            self.return_mode = self.mode;
+            self.selection_before_hints = self.selection;
+        }
+        self.hinting = Some(h);
+        self.mode = Mode::Hint;
+    }
+
+    /// Follow a link: jump to its destination, or ask before opening an
+    /// external one.
+    fn follow(&mut self, link: Link) {
+        match link.target {
+            LinkTarget::Page(dest) => self.jump_to(dest),
+            LinkTarget::Uri(url) => {
+                self.return_mode = self.mode;
+                self.pending_url = Some(url);
+                self.mode = Mode::Confirm;
+            }
+        }
+    }
+
+    /// Confirm mode: `y` opens the link, anything else does not.
+    fn confirm_event(&mut self, e: &Event) {
+        let Some(k) = input::key_press(e) else { return };
+        let Some(url) = self.pending_url.take() else {
+            self.mode = self.return_mode;
+            return;
+        };
+        self.mode = self.return_mode;
+        if k.code == KeyCode::Char('y') && !k.ctrl && !k.alt {
+            match browser::open(&url) {
+                Ok(()) => self.show(Level::Info, format!("Opened {url}")),
+                Err(e) => self.error(format!("Cannot open {url}: {e}")),
+            }
+        }
+    }
+
+    /// The link under a point of the window, if its page's links are known.
+    fn link_at_screen(&self, pos: egui::Pos2) -> Option<Link> {
+        let open = self.open.as_ref()?;
+        let rel = pos - self.area.min;
+        let d = open.view.doc_pos_at(rel.x, rel.y);
+        // `doc_pos_at` clamps to the page: check the point is on it.
+        let r = open.view.page_rect_on_screen(d.page);
+        if rel.x < r.x || rel.x > r.right() || rel.y < r.y || rel.y > r.bottom() {
+            return None;
+        }
+        link_at(open.links[d.page].as_ref()?, d.x, d.y).cloned()
+    }
+
     fn cancel_hints(&mut self) {
         self.hinting = None;
         self.mode = self.return_mode;
@@ -1460,6 +1579,12 @@ impl MargApp {
                 self.select_annot(a.as_ref());
                 return;
             }
+            (Picked::Box(i), Purpose::Link(links)) => {
+                self.mode = self.return_mode;
+                self.selection = self.selection_before_hints.take();
+                self.follow(links[i].clone());
+                return;
+            }
             (Picked::Word(page, word), _) => (page, word),
             (Picked::Box(_), _) => return,
         };
@@ -1481,7 +1606,7 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
-            Purpose::Annot(_) => {}
+            Purpose::Annot(_) | Purpose::Link(_) => {}
         }
     }
 
@@ -1559,6 +1684,7 @@ impl MargApp {
                     _ => 1,
                 };
                 self.last_click = Some((now, pos, count));
+                self.link_press = self.link_at_screen(pos).map(|l| (pos, l));
                 if count == 1 {
                     // A click selects the annotation under it (or none).
                     let hit = self.annot_at_screen(pos);
@@ -1594,10 +1720,20 @@ impl MargApp {
                 }
             }
             Event::PointerButton {
+                pos,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 ..
-            } => self.drag_anchor = None,
+            } => {
+                self.drag_anchor = None;
+                // A click (not a drag) on a link follows it.
+                if let Some((at, link)) = self.link_press.take()
+                    && at.distance(pos) < 4.0
+                    && self.selection.is_none()
+                {
+                    self.follow(link);
+                }
+            }
             Event::PointerMoved(pos) => {
                 let Some(anchor) = self.drag_anchor else {
                     return;
@@ -2682,6 +2818,10 @@ impl MargApp {
                 self.annot_hints();
                 return;
             }
+            Command::HintLinks => {
+                self.link_hints();
+                return;
+            }
             Command::Motion(m) => {
                 self.move_caret(m, n);
                 return;
@@ -2850,6 +2990,7 @@ impl MargApp {
             Command::HintCaret
             | Command::HintSelect
             | Command::HintAnnot
+            | Command::HintLinks
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
@@ -3071,6 +3212,12 @@ impl MargApp {
                     self.category_prompt()
                 } else if self.mode == Mode::Box {
                     self.box_prompt()
+                } else if let Some(url) = self
+                    .pending_url
+                    .as_ref()
+                    .filter(|_| self.mode == Mode::Confirm)
+                {
+                    format!("Open {url} ?  y: yes  any other key: no")
                 } else {
                     self.status_left()
                 };

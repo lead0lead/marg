@@ -43,6 +43,8 @@ pub enum Command {
     HintSelect,
     /// Hints on the visible annotations; selects the picked one.
     HintAnnot,
+    /// Hints on the visible links; follows the picked one.
+    HintLinks,
     /// Move the caret (Caret and Visual mode).
     Motion(Motion),
     /// Start a character-wise selection, or switch to it; in a
@@ -158,6 +160,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("hint.caret", Command::HintCaret, "hint: place caret"),
     ("hint.select", Command::HintSelect, "hint: select range"),
     ("hint.annot", Command::HintAnnot, "hint: select annotation"),
+    ("hint.links", Command::HintLinks, "hint: follow link"),
     (
         "caret.char_next",
         Command::Motion(Motion::CharNext),

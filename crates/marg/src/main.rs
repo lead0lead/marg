@@ -8,6 +8,7 @@ use eframe::egui;
 mod annotlist;
 mod app;
 mod boxmode;
+mod browser;
 mod comment;
 mod complete;
 mod input;

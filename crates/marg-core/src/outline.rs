@@ -1,4 +1,6 @@
-//! The table of contents and link targets.
+//! The table of contents, links and their targets.
+
+use crate::text::BBox;
 
 /// Where an outline entry or an internal link points: a page, and the
 /// point to show at the top left of the window if the PDF names one (in
@@ -17,6 +19,26 @@ pub struct OutlineEntry {
     pub level: usize,
     /// `None`: the entry points nowhere in this document.
     pub dest: Option<Dest>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinkTarget {
+    /// A place in this document.
+    Page(Dest),
+    /// A URI for another program (a web page, mail).
+    Uri(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Link {
+    /// Where it is on its page, in points.
+    pub rect: BBox,
+    pub target: LinkTarget,
+}
+
+/// The topmost link at a point of a page (the last one listed).
+pub fn link_at(links: &[Link], x: f32, y: f32) -> Option<&Link> {
+    links.iter().rev().find(|l| l.rect.contains(x, y))
 }
 
 /// The entry for page `page`: the last one, in document order, pointing
@@ -48,6 +70,30 @@ mod tests {
                 y: None,
             }),
         }
+    }
+
+    #[test]
+    fn finds_the_link_at_a_point() {
+        let to = |page| {
+            LinkTarget::Page(Dest {
+                page,
+                x: None,
+                y: None,
+            })
+        };
+        let links = [
+            Link {
+                rect: BBox::new(0.0, 0.0, 100.0, 20.0),
+                target: to(1),
+            },
+            Link {
+                rect: BBox::new(50.0, 0.0, 150.0, 20.0),
+                target: to(2),
+            },
+        ];
+        assert_eq!(link_at(&links, 10.0, 10.0).unwrap().target, to(1));
+        assert_eq!(link_at(&links, 60.0, 10.0).unwrap().target, to(2));
+        assert!(link_at(&links, 60.0, 30.0).is_none());
     }
 
     #[test]

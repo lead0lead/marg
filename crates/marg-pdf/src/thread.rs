@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use marg_core::annot::{AnnotChange, AnnotInfo, AnnotSpec};
-use marg_core::outline::OutlineEntry;
+use marg_core::outline::{Link, OutlineEntry};
 use marg_core::search::{Hit, Query};
 use marg_core::text::{BBox, PageText};
 
@@ -105,6 +105,8 @@ pub enum Request {
     Images(usize),
     /// The table of contents. Served at once.
     Outline,
+    /// The links of a page. Served at once.
+    Links(usize),
     /// Search every page, starting at page `from` and wrapping around,
     /// after renders. Replaces the previous search; an empty query stops
     /// it. Hits come back page by page, then `SearchDone`.
@@ -167,6 +169,11 @@ pub enum Response {
         id: u64,
         page: usize,
         hits: Vec<Hit>,
+    },
+    Links {
+        generation: u64,
+        page: usize,
+        result: Result<Vec<Link>, String>,
     },
     /// Search `id` has looked at every page.
     SearchDone {
@@ -366,6 +373,21 @@ fn run(rx: Receiver<Request>, tx: Sender<Response>, wake: impl Fn()) {
                     let from = from.min(count.saturating_sub(1));
                     search =
                         Query::new(&query).map(|q| (id, q, (from..count).chain(0..from).collect()));
+                }
+                Request::Links(page) => {
+                    let result = match &doc {
+                        None => Err("no document open".into()),
+                        Some((d, _)) => d.links(page),
+                    };
+                    let resp = Response::Links {
+                        generation,
+                        page,
+                        result,
+                    };
+                    if tx.send(resp).is_err() {
+                        return;
+                    }
+                    wake();
                 }
                 Request::Outline => {
                     let result = match &doc {
