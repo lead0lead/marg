@@ -1799,7 +1799,12 @@ Format:
   filters (`LineEdit::paste`, `ListNav::paste`); `:` from the recent files
   list (`Keymap::exact` is public now), with the list's hint and empty
   message mentioning it; key help, cheat sheet and README updated; no
-  console window on Windows (windows subsystem plus `AttachConsole`).
+  console window on Windows (windows subsystem plus `AttachConsole`);
+  commands that need a document say "No file open" without one
+  (`Command::needs_document`, checked at the top of `run`). Before, most
+  did nothing silently, and `:annotate.box` from the recent list left an
+  empty Normal mode without the list (found when the user asked what
+  happens to such commands there).
 - Decisions: the user reported the four items after using v1.0.0 and the
   icon test build. Paste joins line breaks into spaces (a copied path
   often ends with a newline). In the recent list only the `cmdline` key is
@@ -1809,10 +1814,11 @@ Format:
   file opens. Paste not tried (no clipboard tool installed); the Windows
   change was only type-checked (clippy for `x86_64-pc-windows-msvc` in a
   scratch crate; that target's std was added with rustup).
-- Next: the user tries the branch on Linux; a test `.exe` (Release
-  workflow by hand on the branch, temporary pre-release, as for the icon)
-  for the console change: double-click shows no console, and
-  `marg.exe --version` in PowerShell prints the version. Then merge.
+- Decisions (release): the user said to push the polish branch and "just
+  ship the exe directly", without a test pre-release or trying the branch
+  first. Released as 1.1.0 (new features: icons, paste), not 1.0.1.
+- Next: the user checks the 1.1.0 `.exe`: double-click shows no console,
+  and `marg.exe --version` in PowerShell prints the version.
 - Watch out: Windows-only code is not compiled by Linux CI checks; check it
   with `--target x86_64-pc-windows-msvc` in a scratch crate or on CI.
 
