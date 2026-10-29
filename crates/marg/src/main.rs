@@ -1,5 +1,8 @@
 //! marg: keyboard-driven PDF reader and annotator.
 
+// No console window next to marg on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
@@ -67,7 +70,25 @@ fn parse_args() -> Result<Args, String> {
     Ok(Args { path, page })
 }
 
+/// Started from a terminal on Windows: print `--version`, usage errors
+/// and the log there. A windows-subsystem program has no console of its
+/// own; without a parent console this does nothing.
+#[cfg(windows)]
+fn attach_console() {
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AttachConsole(process_id: u32) -> i32;
+    }
+    // SAFETY: takes a plain process id and fails harmlessly.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
 fn main() -> eframe::Result {
+    #[cfg(windows)]
+    attach_console();
     let start = std::time::Instant::now();
     let timing = std::env::var_os("MARG_TIMING").is_some_and(|v| v != "0");
     let args = match parse_args() {
