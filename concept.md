@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt) and 5 (read-only files) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt), 5 (read-only files) and 6 (cheat sheet, README) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 6: cheat sheet and README (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 7: release builds in CI (ask the user about the Windows CRT first, §12) (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 5) |
+| **Last updated** | 2026-10-29 (Phase 5 step 6) |
 
 ---
 
@@ -772,6 +772,17 @@ command name. Both use the list keys; `/` filters (every word of the
 query must appear in a line, ignoring case: fuzzy matching matched most
 long lines), keeping each match's heading. Esc (or `?` outside the
 filter) closes.
+
+**As implemented (Phase 5, cheat sheet):** `help::cheatsheet(level)`
+renders the help page of the default config (without the list of
+command names) as Markdown tables, with `1`–`5` rows merged ("1-5").
+`docs/cheatsheet.md` and the "Keys" section of `README.md` (between
+the `<!-- cheat sheet … -->` markers) hold it; the test
+`committed_cheat_sheets_match_the_defaults` fails when either differs,
+and `MARG_BLESS=1 cargo test -p marg-core cheat` rewrites both. The
+README covers install, use (with Zotero), saving, config paths and
+licence; it says the Windows `.exe` needs the MSVC runtime (to change
+if step 7 links it statically).
 
 ---
 

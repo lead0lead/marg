@@ -2,7 +2,8 @@
 //! live keymaps and the command registry, so remaps show up.
 
 use crate::command::{Command, REGISTRY};
-use crate::keymap::Keymap;
+use crate::config::{Config, KeysConfig};
+use crate::keymap::{KeyMode, Keymap};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HelpLine {
@@ -209,7 +210,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 "write the annotations as Markdown (default: <file>.notes.md)",
             ),
             (":42", "go to page 42"),
-            (":help", "this page"),
+            (":help", "the help page"),
             (
                 ":config",
                 "write a commented default config, if there is none",
@@ -219,7 +220,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 "annotate this file although its permissions forbid it",
             ),
             (":version, :debug", "version; debug overlay"),
-            (":<command name>", "run any command below, e.g. :zoom.in"),
+            (":<command name>", "run any command by name, e.g. :zoom.in"),
         ],
     ));
     out.push(HelpLine::Heading("Categories".into()));
@@ -241,6 +242,106 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             text: (*text).into(),
         });
     }
+    out
+}
+
+/// The cheat sheet (§2.12): the help page of the default config, without
+/// the list of command names, as Markdown with headings of `level`.
+pub fn cheatsheet(level: usize) -> String {
+    let keys = KeysConfig::default();
+    let [normal, caret, visual, annot] = [
+        KeyMode::Normal,
+        KeyMode::Caret,
+        KeyMode::Visual,
+        KeyMode::Annot,
+    ]
+    .map(|m| Keymap::build(m, &keys).0);
+    let maps = Maps {
+        normal: &normal,
+        caret: &caret,
+        visual: &visual,
+        annot: &annot,
+    };
+    let names: Vec<String> = Config::default()
+        .categories
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    let hashes = "#".repeat(level);
+    let cell = |s: &str| {
+        s.replace('|', "\\|")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let mut out = String::new();
+    let mut in_table = false;
+    for line in merge_digits(page(&maps, &names)) {
+        match line {
+            HelpLine::Heading(h) if h == "Command names" => break,
+            HelpLine::Heading(h) => {
+                out.push_str(&format!("\n{hashes} {h}\n\n| Keys | |\n|---|---|\n"));
+                in_table = true;
+            }
+            HelpLine::Binding { keys, text } => {
+                out.push_str(&format!("| `{}` | {} |\n", cell(&keys), cell(&text)));
+            }
+            HelpLine::Text(t) => {
+                if in_table {
+                    out.push('\n');
+                    in_table = false;
+                }
+                out.push_str(&format!("{t}\n"));
+            }
+        }
+    }
+    out
+}
+
+/// Consecutive bindings `1`…`n` whose texts end in the same digit, such
+/// as "highlight, category 1", as one line ("1-5", "highlight, category
+/// 1-5").
+fn merge_digits(lines: Vec<HelpLine>) -> Vec<HelpLine> {
+    let mut out: Vec<HelpLine> = Vec::new();
+    let mut run: Vec<(String, String)> = Vec::new();
+    let flush = |run: &mut Vec<(String, String)>, out: &mut Vec<HelpLine>| {
+        if run.len() > 1 {
+            let last = &run[run.len() - 1].0;
+            let text = run[0].1.trim_end_matches('1');
+            out.push(HelpLine::Binding {
+                keys: format!("1-{last}"),
+                text: format!("{text}1-{last}"),
+            });
+        } else {
+            out.extend(
+                run.drain(..)
+                    .map(|(keys, text)| HelpLine::Binding { keys, text }),
+            );
+        }
+        run.clear();
+    };
+    for line in lines {
+        if let HelpLine::Binding { keys, text } = &line {
+            let next = (run.len() + 1).to_string();
+            let same = run.first().is_none_or(|(_, t)| {
+                t.trim_end_matches('1') == text.trim_end_matches(next.as_str())
+            });
+            if *keys == next && text.ends_with(next.as_str()) && same {
+                run.push((keys.clone(), text.clone()));
+                continue;
+            }
+        }
+        flush(&mut run, &mut out);
+        // The line may start a new run.
+        if let HelpLine::Binding { keys, text } = &line
+            && keys == "1"
+            && text.ends_with('1')
+        {
+            run.push((keys.clone(), text.clone()));
+            continue;
+        }
+        out.push(line);
+    }
+    flush(&mut run, &mut out);
     out
 }
 
@@ -278,9 +379,8 @@ pub fn filter(lines: &[HelpLine], query: &str) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::KeysConfig;
-    use crate::keymap::KeyMode;
     use std::collections::BTreeMap;
+    use std::path::Path;
 
     fn maps(keys: &KeysConfig) -> [Keymap; 4] {
         [
@@ -331,6 +431,58 @@ mod tests {
         assert!(has(&caret, "w", "next word"));
         assert!(!has(&caret, "J, PageDown, Ctrl-n", "next page"));
         assert!(has(&page, "1", "Key point"));
+    }
+
+    const SHEET_START: &str = "<!-- cheat sheet: generated, MARG_BLESS=1 cargo test updates it -->";
+    const SHEET_END: &str = "<!-- end of cheat sheet -->";
+
+    /// `docs/cheatsheet.md` and the README's cheat sheet are the defaults'
+    /// (§2.12). `MARG_BLESS=1 cargo test -p marg-core cheat` rewrites
+    /// them.
+    #[test]
+    fn committed_cheat_sheets_match_the_defaults() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let doc_path = root.join("docs/cheatsheet.md");
+        let doc = format!(
+            "# marg cheat sheet\n\n{SHEET_START}\n\nThe default keys. `?` shows the keys of the \
+             current mode and `:help` everything, with your own bindings.\n{}{SHEET_END}\n",
+            cheatsheet(2)
+        );
+        let readme_path = root.join("README.md");
+        let readme = std::fs::read_to_string(&readme_path).unwrap();
+        let (Some(start), Some(end)) = (readme.find(SHEET_START), readme.find(SHEET_END)) else {
+            panic!("README.md has no cheat sheet markers");
+        };
+        let new_readme = format!(
+            "{}{SHEET_START}\n{}{}",
+            &readme[..start],
+            cheatsheet(3),
+            &readme[end..]
+        );
+        if std::env::var_os("MARG_BLESS").is_some() {
+            std::fs::write(&doc_path, &doc).unwrap();
+            std::fs::write(&readme_path, &new_readme).unwrap();
+            return;
+        }
+        let hint = "run MARG_BLESS=1 cargo test -p marg-core cheat to update";
+        assert_eq!(std::fs::read_to_string(&doc_path).ok(), Some(doc), "{hint}");
+        assert_eq!(readme, new_readme, "{hint}");
+    }
+
+    #[test]
+    fn cheat_sheet_tables() {
+        let s = cheatsheet(2);
+        assert!(s.contains("\n## Normal — moving\n\n| Keys | |\n|---|---|\n"));
+        assert!(s.contains("| `f` | hint: place caret |"));
+        assert!(
+            s.contains("`:layout continuous\\|single\\|spread`"),
+            "pipes escaped"
+        );
+        assert!(s.contains("| `1` | Key point |"), "names are not merged");
+        assert!(s.contains("| `1-5` | highlight, category 1-5 |"));
+        assert!(s.contains("| `1-5` | recolor: category 1-5 |"));
+        assert!(s.contains("&lt;file&gt;.notes.md"));
+        assert!(!s.contains("Command names"));
     }
 
     #[test]
