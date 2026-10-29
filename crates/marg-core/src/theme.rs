@@ -94,10 +94,12 @@ pub enum StatusPart {
     Unsaved,
     /// The typed part of a hint label, or a pending key sequence.
     Keys,
+    /// Search hits: `hit 3/27` (`+` while still searching).
+    Search,
 }
 
 impl StatusPart {
-    pub const ALL: [(&str, StatusPart); 7] = [
+    pub const ALL: [(&str, StatusPart); 8] = [
         ("mode", StatusPart::Mode),
         ("file", StatusPart::File),
         ("page", StatusPart::Page),
@@ -105,6 +107,7 @@ impl StatusPart {
         ("layout", StatusPart::Layout),
         ("unsaved", StatusPart::Unsaved),
         ("keys", StatusPart::Keys),
+        ("search", StatusPart::Search),
     ];
 
     pub fn from_name(name: &str) -> Option<Self> {
@@ -130,7 +133,7 @@ impl Default for StatusbarConfig {
         let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
         Self {
             left: names(&["mode", "file", "page", "zoom", "layout", "unsaved"]),
-            right: names(&["keys"]),
+            right: names(&["search", "keys"]),
             separator: "  ".into(),
         }
     }
@@ -200,6 +203,9 @@ pub struct ColorsConfig {
     pub selection: Rgba,
     pub caret: Rgba,
     pub caret_fill: Rgba,
+    /// Search hits on the page, and the current one.
+    pub search_hit: Rgba,
+    pub search_current: Rgba,
     /// Box mode grid, and the picked cell.
     pub grid_line: Rgba,
     pub grid_cell: Rgba,
@@ -230,6 +236,8 @@ impl Default for ColorsConfig {
             selection: Rgba::with_alpha(0x3D, 0x7E, 0xFF, 0x59),
             caret: Rgba::rgb(0xE0, 0x20, 0x20),
             caret_fill: Rgba::with_alpha(0xE0, 0x20, 0x20, 0x28),
+            search_hit: Rgba::with_alpha(0xFF, 0x9F, 0x1A, 0x4D),
+            search_current: Rgba::with_alpha(0xFF, 0x5F, 0x1A, 0x99),
             grid_line: Rgba::with_alpha(0x3D, 0x7E, 0xFF, 0x5A),
             grid_cell: Rgba::with_alpha(0x3D, 0x7E, 0xFF, 0x3C),
             recolor_fg: Rgba::rgb(0xD0, 0xD0, 0xD0),
@@ -269,7 +277,10 @@ mod tests {
         };
         assert_eq!(status_line(&left, &cfg.separator, text), "NORMAL | 3/9");
         let (left, right, w) = StatusbarConfig::default().parts();
-        assert_eq!((left.len(), right, w.len()), (6, vec![StatusPart::Keys], 0));
+        assert_eq!(
+            (left.len(), right, w.len()),
+            (6, vec![StatusPart::Search, StatusPart::Keys], 0)
+        );
     }
 
     #[test]

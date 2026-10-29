@@ -35,6 +35,8 @@ pub struct Theme {
     pub selection: Color32,
     pub caret: Color32,
     pub caret_fill: Color32,
+    pub search_hit: Color32,
+    pub search_current: Color32,
     pub grid_line: Color32,
     pub grid_cell: Color32,
     /// Hint and grid labels.
@@ -64,6 +66,8 @@ impl Theme {
             selection: c(k.selection),
             caret: c(k.caret),
             caret_fill: c(k.caret_fill),
+            search_hit: c(k.search_hit),
+            search_current: c(k.search_current),
             grid_line: c(k.grid_line),
             grid_cell: c(k.grid_cell),
         }

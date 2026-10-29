@@ -96,6 +96,11 @@ impl LineEdit {
         line
     }
 
+    /// The last line in the history.
+    pub fn last(&self) -> Option<String> {
+        self.history.last().cloned()
+    }
+
     pub fn history_prev(&mut self) {
         let i = match self.browsing {
             None if self.history.is_empty() => return,

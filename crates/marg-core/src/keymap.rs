@@ -58,6 +58,9 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("m", "mark.set"),
     ("'", "mark.jump"),
     ("o", "outline"),
+    ("/", "search"),
+    ("n", "search.next"),
+    ("N", "search.prev"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.

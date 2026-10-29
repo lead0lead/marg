@@ -18,6 +18,7 @@ use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
 use marg_core::outline::{Dest, OutlineEntry};
+use marg_core::search::Hit;
 use marg_core::state::{FileState, State, file_key};
 use marg_core::stats::Rolling;
 use marg_core::text::{BBox, PageText};
@@ -44,6 +45,8 @@ struct OpenDoc {
     jumps: JumpList,
     /// The table of contents, once read.
     outline: Option<Vec<OutlineEntry>>,
+    /// The last search and its hits; `None` after Esc.
+    search: Option<SearchState>,
     /// Marks `a`–`z`, saved in the state file.
     marks: BTreeMap<char, DocPos>,
     /// Key in the state file.
@@ -159,6 +162,28 @@ impl OpenDoc {
     }
 }
 
+/// A search (`/`) and the hits found so far.
+struct SearchState {
+    id: u64,
+    query: String,
+    /// In page order, then reading order.
+    hits: Vec<Hit>,
+    /// Every page has been searched.
+    done: bool,
+    current: Option<usize>,
+    /// Go to the first hit at or after this position once it arrives.
+    seek: Option<DocPos>,
+}
+
+impl SearchState {
+    /// Index of the first hit at or after `pos`.
+    fn first_from(&self, pos: DocPos) -> Option<usize> {
+        self.hits
+            .iter()
+            .position(|h| h.page > pos.page || (h.page == pos.page && h.top().1 >= pos.y - 0.5))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Level {
     Info,
@@ -190,12 +215,14 @@ enum Mode {
     Annots,
     /// The outline is open, or asked for.
     Outline,
+    /// Typing a search.
+    Search,
 }
 
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command => "NORMAL",
+            Mode::Normal | Mode::Command | Mode::Search => "NORMAL",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
             Mode::Caret => "CARET",
@@ -262,6 +289,10 @@ pub struct MargApp {
     /// The pending open is a reload of the current file.
     reloading: bool,
     cmdline: LineEdit,
+    searchline: LineEdit,
+    /// Where the view was when the search prompt opened.
+    search_origin: Option<DocPos>,
+    next_search_id: u64,
     doc: DocThread,
     open: Option<OpenDoc>,
     /// Page to show once the pending document has opened (0-based).
@@ -389,6 +420,9 @@ impl MargApp {
             reloading: false,
             author,
             cmdline: LineEdit::default(),
+            searchline: LineEdit::default(),
+            search_origin: None,
+            next_search_id: 0,
             doc,
             open: None,
             start_page: s.start_page,
@@ -556,6 +590,62 @@ impl MargApp {
                         Err(e) => {
                             open.provisional.retain(|p| p.tag != tag);
                             self.error(format!("Annotation failed: {e}"));
+                        }
+                    }
+                }
+                Response::Searched {
+                    generation,
+                    id,
+                    page,
+                    hits,
+                } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    let Some(s) = open.search.as_mut().filter(|s| s.id == id) else {
+                        continue;
+                    };
+                    let at = s.hits.partition_point(|h| h.page < page);
+                    if let Some(c) = s.current.as_mut().filter(|c| **c >= at) {
+                        *c += hits.len();
+                    }
+                    let n = hits.len();
+                    s.hits.splice(at..at, hits);
+                    if let Some(from) = s.seek {
+                        // Pages come from `from` on, then wrap around.
+                        let found = if page < from.page {
+                            Some(at)
+                        } else {
+                            s.first_from(from).filter(|&i| i >= at && i < at + n)
+                        };
+                        if let Some(i) = found {
+                            s.seek = None;
+                            s.current = Some(i);
+                            let h = &s.hits[i];
+                            select::reveal(&mut open.view, h.page, h.rects[0]);
+                        }
+                    }
+                }
+                Response::SearchDone { generation, id } => {
+                    let Some(open) = &mut self.open else { continue };
+                    if generation != open.generation {
+                        continue;
+                    }
+                    let Some(s) = open.search.as_mut().filter(|s| s.id == id) else {
+                        continue;
+                    };
+                    s.done = true;
+                    if let Some(from) = s.seek.take() {
+                        if s.hits.is_empty() {
+                            open.view.set_position(from);
+                            let msg = format!("Not found: {}", s.query);
+                            self.show(Level::Info, msg);
+                        } else {
+                            // Only hits before the start: wrap to the first.
+                            s.current = Some(0);
+                            let h = &s.hits[0];
+                            select::reveal(&mut open.view, h.page, h.rects[0]);
                         }
                     }
                 }
@@ -756,6 +846,7 @@ impl MargApp {
             file_name,
             jumps: JumpList::new(self.config.view.jump_history),
             outline: None,
+            search: None,
             marks,
             texts: vec![None; view.page_count()],
             text_requested: HashSet::new(),
@@ -806,6 +897,7 @@ impl MargApp {
                     }
                 }
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
+                _ if self.mode == Mode::Search => self.search_event(e),
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
                 _ if self.mode == Mode::Category => self.category_event(e),
@@ -915,8 +1007,11 @@ impl MargApp {
             Outcome::Unbound if key == KeyPress::named(Named::Esc) => {
                 if matches!(self.mode, Mode::Caret | Mode::Visual) {
                     self.leave_text_modes();
-                } else {
+                } else if self.selected_annot.is_some() {
                     self.selected_annot = None;
+                } else if let Some(open) = &mut self.open {
+                    // Hide the search hits; `n` searches again.
+                    open.search = None;
                 }
             }
             Outcome::Pending | Outcome::Unbound | Outcome::Cancelled => {}
@@ -2325,6 +2420,160 @@ impl MargApp {
         }
     }
 
+    /// A key in the search prompt. The search runs as the query is typed;
+    /// Enter keeps it, Esc goes back to where the search started.
+    fn search_event(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => {
+                self.searchline.insert(t);
+                self.search_typed();
+            }
+            Event::Key { pressed: true, .. } => {
+                let Some(k) = input::key_press(e) else { return };
+                match k.code {
+                    KeyCode::Named(Named::Esc) => self.cancel_search(),
+                    KeyCode::Named(Named::Backspace) if self.searchline.is_empty() => {
+                        self.cancel_search()
+                    }
+                    KeyCode::Named(Named::Enter) => {
+                        self.mode = self.return_mode;
+                        let typed = self.searchline.submit();
+                        let (Some(open), Some(origin)) = (&mut self.open, self.search_origin)
+                        else {
+                            return;
+                        };
+                        if typed.trim().is_empty() {
+                            // Like vim: an empty search repeats the last one.
+                            let last = self.searchline.last().unwrap_or_default();
+                            if last.trim().is_empty() {
+                                open.search = None;
+                                return;
+                            }
+                            self.start_search(&last, origin);
+                        }
+                        if let Some(open) = &mut self.open {
+                            open.jumps.push(origin);
+                        }
+                    }
+                    KeyCode::Named(n) => {
+                        match n {
+                            Named::Backspace => self.searchline.backspace(),
+                            Named::Delete => self.searchline.delete(),
+                            Named::Left => self.searchline.left(),
+                            Named::Right => self.searchline.right(),
+                            Named::Home => self.searchline.home(),
+                            Named::End => self.searchline.end(),
+                            Named::Up => self.searchline.history_prev(),
+                            Named::Down => self.searchline.history_next(),
+                            _ => return,
+                        }
+                        self.search_typed();
+                    }
+                    KeyCode::Char(_) => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The search prompt changed: search for the new text.
+    fn search_typed(&mut self) {
+        let (Some(open), Some(origin)) = (&mut self.open, self.search_origin) else {
+            return;
+        };
+        let query = self.searchline.text().to_string();
+        if query.trim().is_empty() {
+            open.search = None;
+            self.doc.send(Request::Search {
+                id: 0,
+                query: String::new(),
+                from: 0,
+            });
+            open.view.set_position(origin);
+            return;
+        }
+        if open.search.as_ref().is_some_and(|s| s.query == query) {
+            return;
+        }
+        self.start_search(&query, origin);
+    }
+
+    /// Search for `query`; go to the first hit at or after `from`.
+    fn start_search(&mut self, query: &str, from: DocPos) {
+        let Some(open) = &mut self.open else { return };
+        self.next_search_id += 1;
+        let id = self.next_search_id;
+        self.doc.send(Request::Search {
+            id,
+            query: query.to_string(),
+            from: from.page,
+        });
+        open.search = Some(SearchState {
+            id,
+            query: query.to_string(),
+            hits: Vec::new(),
+            done: false,
+            current: None,
+            seek: Some(from),
+        });
+    }
+
+    fn cancel_search(&mut self) {
+        self.mode = self.return_mode;
+        if let (Some(open), Some(origin)) = (&mut self.open, self.search_origin) {
+            open.search = None;
+            open.view.set_position(origin);
+        }
+    }
+
+    /// `n` / `N`: the next or previous hit, from the current one if it is
+    /// in view, else from the view. After Esc, `n` searches again.
+    fn step_hit(&mut self, forward: bool, count: u32) {
+        let Some(open) = &mut self.open else { return };
+        let Some(s) = &mut open.search else {
+            match self.searchline.last().filter(|q| !q.trim().is_empty()) {
+                Some(q) => {
+                    let from = open.view.position();
+                    open.jumps.push(from);
+                    self.start_search(&q, from);
+                }
+                None => self.show(Level::Info, "No search".into()),
+            }
+            return;
+        };
+        if s.hits.is_empty() {
+            let msg = if s.done {
+                format!("Not found: {}", s.query)
+            } else {
+                "Still searching".into()
+            };
+            self.show(Level::Info, msg);
+            return;
+        }
+        let len = s.hits.len();
+        let visible = open.view.visible_pages();
+        let base = s.current.filter(|&c| visible.contains(&s.hits[c].page));
+        let n = count.max(1) as usize % len;
+        let i = match (base, forward) {
+            (Some(c), true) => (c + n) % len,
+            (Some(c), false) => (c + len - n) % len,
+            (None, true) => {
+                let pos = open.view.position();
+                (s.first_from(pos).unwrap_or(0) + n - 1) % len
+            }
+            (None, false) => {
+                let pos = open.view.position();
+                let first = s.first_from(pos).unwrap_or(len);
+                (first + len - n) % len
+            }
+        };
+        open.jumps.push(open.view.position());
+        s.current = Some(i);
+        s.seek = None;
+        let h = &s.hits[i];
+        select::reveal(&mut open.view, h.page, h.rects[0]);
+    }
+
     /// Tab completion of the path in `:e <path>`.
     fn complete(&mut self) {
         let Some(arg) = self.cmdline.text().strip_prefix("e ") else {
@@ -2467,6 +2716,18 @@ impl MargApp {
             }
             Command::AnnotList => {
                 self.open_annot_list();
+                return;
+            }
+            Command::Search => {
+                let Some(open) = &self.open else { return };
+                self.search_origin = Some(open.view.position());
+                self.return_mode = self.mode;
+                self.mode = Mode::Search;
+                self.searchline.clear();
+                return;
+            }
+            Command::SearchNext | Command::SearchPrev => {
+                self.step_hit(command == Command::SearchNext, n);
                 return;
             }
             Command::Outline => {
@@ -2617,6 +2878,9 @@ impl MargApp {
             | Command::MarkSet
             | Command::MarkJump
             | Command::Outline
+            | Command::Search
+            | Command::SearchNext
+            | Command::SearchPrev
             | Command::Erase
             | Command::EraseWhole
             | Command::Undo
@@ -2720,6 +2984,16 @@ impl MargApp {
         let open = self.open.as_ref().filter(|_| self.mode != Mode::Recent);
         match (part, open) {
             (StatusPart::Mode, _) => self.mode.label().into(),
+            (StatusPart::Search, Some(open)) => match &open.search {
+                None => String::new(),
+                Some(s) if s.hits.is_empty() => if s.done { "no hits" } else { "searching" }.into(),
+                Some(s) => format!(
+                    "hit {}/{}{}",
+                    s.current.map_or("-".into(), |c| (c + 1).to_string()),
+                    s.hits.len(),
+                    if s.done { "" } else { "+" }
+                ),
+            },
             (StatusPart::Keys, _) => {
                 if let Some(set) = self.pending_mark {
                     if set { "m" } else { "'" }.into()
@@ -2780,14 +3054,18 @@ impl MargApp {
         let th = &self.theme;
         let text = |s: &str, c: Color32| egui::RichText::new(s).monospace().color(c);
         ui.horizontal_centered(|ui| {
-            if self.mode == Mode::Command {
-                let line = self.cmdline.text();
+            if let Some((prompt, edit)) = match self.mode {
+                Mode::Command => Some((':', &self.cmdline)),
+                Mode::Search => Some(('/', &self.searchline)),
+                _ => None,
+            } {
+                let line = edit.text();
                 let at = line
                     .char_indices()
-                    .nth(self.cmdline.cursor())
+                    .nth(edit.cursor())
                     .map_or(line.len(), |(i, _)| i);
                 let (before, after) = line.split_at(at);
-                ui.label(text(&format!(":{before}▏{after}"), th.statusbar_fg));
+                ui.label(text(&format!("{prompt}{before}▏{after}"), th.statusbar_fg));
             } else {
                 let left = if self.mode == Mode::Category {
                     self.category_prompt()
@@ -2976,6 +3254,9 @@ impl eframe::App for MargApp {
                     if p.rev.is_none() || stale.contains(&p.spec.page) {
                         select::draw_provisional(&painter, &open.view, area, &p.spec);
                     }
+                }
+                if let Some(s) = &open.search {
+                    select::draw_hits(&painter, &th, &open.view, area, &s.hits, s.current);
                 }
                 if let Some(sel) = &self.selection {
                     select::draw_selection(&painter, &th, &open.view, area, sel, &open.texts);
