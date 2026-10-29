@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.0.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.0.0): Linux binary and Windows `.exe`. Phases 0–5 merged into `main`. |
 | **Current phase** | none: all planned phases are done; the user uses marg daily |
-| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. App icon and window icon merged into `main` (not pushed). Branch `windows-exe-icon` (not merged, not pushed) embeds the icon in the Windows `.exe`; it needs a Windows CI run and a look at the `.exe` before merging. |
+| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. App icon, window icon and Windows `.exe` icon merged into `main` and pushed (not released yet: the next 1.0.x / 1.1.0 ships them). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.0.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Windows `.exe` icon on branch `windows-exe-icon`) |
+| **Last updated** | 2026-10-29 (app icons merged) |
 
 ---
 
@@ -1795,9 +1795,14 @@ Format:
 - State: builds; all tests pass; clippy and fmt clean. Under Xvfb the
   window has a 256×256 `_NET_WM_ICON`. The Windows-only code in `build.rs`
   is not compiled on Linux; its calls were type-checked in a scratch crate.
-- Next: push `windows-exe-icon` (ask the user first), let Windows CI
-  build it, the user checks the `.exe` icon in Explorer and the taskbar,
-  then merge. Not done: a `marg.desktop` in the repo.
+- Windows check: CI green; the Release workflow, run by hand on the
+  branch, built the `.exe`, which contains all 7 icon images and the
+  version details. It was shared as a temporary pre-release
+  (`windows-exe-icon-test`, deleted after the merge); the user confirmed
+  the icon on Windows. Branch merged into `main` and pushed.
+- Next: the user's polish list (console window on Windows, command
+  prompt cursor and paste, `:` from the recent files view). Not done: a
+  `marg.desktop` in the repo.
 - Watch out: on Wayland the window icon comes from the desktop file
   matched by app id `marg`, not from `with_icon`. The first commit on the
   branch (icon files only) was made before running the four checks; they
