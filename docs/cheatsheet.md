@@ -153,6 +153,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `/` | filter; Enter opens the best match |
 | `Enter` | open |
 | `Esc` | clear the filter, then close |
+| `recent files: :` | command line, e.g. :e path |
 | `annotations: 1-5, 0` | one category, all |
 | `annotations: e, x` | edit the comment, delete |
 
@@ -183,6 +184,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `:unlock` | annotate this file although its permissions forbid it |
 | `:version, :debug` | version; debug overlay |
 | `:&lt;command name&gt;` | run any command by name, e.g. :zoom.in |
+| `Ctrl-V` | paste (also in search, password and filters) |
 
 ## Categories
 

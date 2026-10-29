@@ -171,6 +171,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ("/", "filter; Enter opens the best match"),
             ("Enter", "open"),
             ("Esc", "clear the filter, then close"),
+            ("recent files: :", "command line, e.g. :e path"),
             ("annotations: 1-5, 0", "one category, all"),
             ("annotations: e, x", "edit the comment, delete"),
         ],
@@ -225,6 +226,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ),
             (":version, :debug", "version; debug overlay"),
             (":<command name>", "run any command by name, e.g. :zoom.in"),
+            ("Ctrl-V", "paste (also in search, password and filters)"),
         ],
     ));
     out.push(HelpLine::Heading("Categories".into()));
