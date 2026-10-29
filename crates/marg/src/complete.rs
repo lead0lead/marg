@@ -20,6 +20,15 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// `path` for messages, with the home directory as `~`.
+pub fn tilde(path: &std::path::Path) -> String {
+    let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
+    match home.and_then(|h| path.strip_prefix(h).ok().map(|r| r.to_path_buf())) {
+        Some(rest) => format!("~{MAIN_SEPARATOR}{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 pub struct Completion {
     /// The completed argument, as the user typed it (with `~` kept).
     pub text: String,

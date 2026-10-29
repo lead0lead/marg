@@ -210,6 +210,10 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ),
             (":42", "go to page 42"),
             (":help", "this page"),
+            (
+                ":config",
+                "write a commented default config, if there is none",
+            ),
             (":version, :debug", "version; debug overlay"),
             (":<command name>", "run any command below, e.g. :zoom.in"),
         ],

@@ -117,6 +117,7 @@ fn main() -> eframe::Result {
                     path: args.path,
                     start_page: args.page.map(|p| p - 1),
                     state_path: paths.as_ref().map(|p| p.state_file.clone()),
+                    config_path: paths.as_ref().map(|p| p.config_file.clone()),
                     errors: config_error.into_iter().collect(),
                     timing_start: timing.then_some(start),
                 },

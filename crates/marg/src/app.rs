@@ -337,6 +337,7 @@ pub struct MargApp {
     last_request: Vec<RenderKey>,
     message: Option<Message>,
     state_path: Option<PathBuf>,
+    config_path: Option<PathBuf>,
     state: State,
     recent: Option<RecentList>,
     debug: bool,
@@ -377,6 +378,7 @@ pub struct Startup {
     pub path: Option<PathBuf>,
     pub start_page: Option<usize>,
     pub state_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
     /// Problems found before the window existed (e.g. config errors).
     pub errors: Vec<String>,
     /// Process start, when `MARG_TIMING` is set.
@@ -467,6 +469,7 @@ impl MargApp {
             last_request: Vec::new(),
             message: None,
             state_path: s.state_path,
+            config_path: s.config_path,
             state,
             recent,
             debug: false,
@@ -2873,6 +2876,10 @@ impl MargApp {
                 self.open_path(&path);
                 return;
             }
+            Command::WriteConfig => {
+                self.write_config();
+                return;
+            }
             Command::Export(path) => {
                 self.start_export(path.as_deref());
                 return;
@@ -3070,6 +3077,7 @@ impl MargApp {
             | Command::QuitForce
             | Command::Open(_)
             | Command::Export(_)
+            | Command::WriteConfig
             | Command::Version
             | Command::DebugToggle => {}
             Command::HintCaret
@@ -3127,6 +3135,30 @@ impl MargApp {
             self.save(false, AfterSave::Open(path));
         } else {
             self.doc.send(Request::Open(path));
+        }
+    }
+
+    /// `:config`: write the commented default config, unless a config
+    /// file exists.
+    fn write_config(&mut self) {
+        let Some(path) = self.config_path.clone() else {
+            self.error("No config folder on this system".into());
+            return;
+        };
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let mut f = std::fs::File::create_new(&path)?;
+            std::io::Write::write_all(&mut f, marg_core::default_config::text().as_bytes())
+        };
+        match write() {
+            Ok(()) => self.show(Level::Info, format!("Wrote {}", complete::tilde(&path))),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => self.show(
+                Level::Info,
+                format!("{} exists; not changed", complete::tilde(&path)),
+            ),
+            Err(e) => self.error(format!("Cannot write {}: {e}", complete::tilde(&path))),
         }
     }
 

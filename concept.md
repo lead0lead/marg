@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: step 1 (Markdown export) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export) and 2 (`:config`) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 2: `:config` (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 3: config errors and auto-reload (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 1) |
+| **Last updated** | 2026-10-29 (Phase 5 step 2) |
 
 ---
 
@@ -809,7 +809,8 @@ character sequences (`gg`, `]a`) or space-separated keys (`g Ctrl-o`).
 `zoom.in|out|reset|fit_width|fit_page`, `cmdline`, `quit`, `quit.force`,
 `version`, `debug.toggle`. A digit is a count unless a binding starts with
 it. `:` commands: `q`, `q!`, `e <path>` (Tab completes directories and PDFs),
-`version`, `debug`, `<n>` (go to page n), or any command name. Up/Down
+`version`, `debug`, `<n>` (go to page n), or any command name
+(Phase 5 adds `export md [path]` and `config`). Up/Down
 browse the session's command history. Windows AltGr (Ctrl+Alt) characters
 are taken from the key event, since egui drops text while Ctrl is held.
 
@@ -1170,6 +1171,20 @@ false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
 outline_width = 0.4`; `[colors] search_hit`, `search_current`;
 `[statusbar] right` defaults to `["search", "keys"]`. The example themes
 set the new colors.
+
+**As implemented (Phase 5, `:config`):** `:config` (`config.write`)
+writes `marg-core/src/default_config.toml` plus the default key tables
+(generated from `keymap::DEFAULT_*`, each line with the command's help
+text) to the config path, creating the folder; an existing file is
+never changed ("… exists; not changed"). Every setting is **commented
+out** with its default (`#key = value`, explanations as `# text`), so
+untouched settings keep following marg's defaults when they change
+(Claude's choice; the alternative is writing them active). Tests: the
+file as written parses to the defaults; with every `#key`/`#[table]`
+line uncommented it parses to the defaults plus the default keymaps and
+has exactly the keys of `Config` (so a new setting must be added to the
+file), and every bound command has a help text. Messages show paths
+with `~` for the home folder.
 
 ### State file
 

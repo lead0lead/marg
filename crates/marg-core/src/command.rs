@@ -35,6 +35,8 @@ pub enum Command {
     Quit,
     QuitForce,
     Open(String),
+    /// Write the commented default config, if there is no config file.
+    WriteConfig,
     /// `:export md [path]`: write the annotations as Markdown.
     Export(Option<String>),
     Version,
@@ -346,6 +348,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("help", Command::Help, "keys of this mode"),
     ("help.page", Command::HelpPage, "help page"),
     (
+        "config.write",
+        Command::WriteConfig,
+        "write the default config file",
+    ),
+    (
         "view.spread_first_alone",
         Command::SpreadFirstAlone,
         "spread: first page alone on/off",
@@ -430,6 +437,7 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
             _ => Err("usage: layout continuous|single|spread".into()),
         },
         "help" | "h" => no_arg(Command::HelpPage),
+        "config" => no_arg(Command::WriteConfig),
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -484,6 +492,7 @@ mod tests {
         assert!(parse_ex("export").is_err());
         assert!(parse_ex("export html").is_err());
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
+        assert_eq!(parse_ex("config"), Ok(Command::WriteConfig));
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());
