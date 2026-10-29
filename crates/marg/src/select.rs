@@ -6,7 +6,7 @@ use std::ops::Range;
 use eframe::egui::{self, Color32, Pos2, Rect, text::LayoutJob};
 use marg_core::annot::{AnnotInfo, AnnotKind, AnnotSpec};
 use marg_core::caret::{Selection, TextPos, TextSource};
-use marg_core::config::{HintMode, HintsConfig};
+use marg_core::config::{HintMode, HintsConfig, Layout};
 use marg_core::hints::{HintInput, labels};
 use marg_core::text::{BBox, PageText};
 use marg_core::view::View;
@@ -302,6 +302,10 @@ pub fn keep_visible(view: &mut View, caret: &Caret, texts: &[Option<PageText>]) 
     let Some(t) = texts.text(caret.pos.page) else {
         return;
     };
+    // Single/spread: show the caret's page first.
+    if view.layout() != Layout::Continuous && !view.visible_pages().contains(&caret.pos.page) {
+        view.goto_page(caret.pos.page);
+    }
     let (vw, vh) = view.viewport();
     let r = screen_rect(
         view,

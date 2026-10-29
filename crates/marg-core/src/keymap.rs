@@ -24,8 +24,8 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("Ctrl-u", "scroll.half_up"),
     ("J", "page.next"),
     ("K", "page.prev"),
-    ("Space", "page.next"),
-    ("Shift-Space", "page.prev"),
+    ("Space", "scroll.screen_down"),
+    ("Shift-Space", "scroll.screen_up"),
     ("PageDown", "page.next"),
     ("PageUp", "page.prev"),
     ("gg", "page.first"),
@@ -52,6 +52,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("b", "annotate.box"),
     ("A", "annot.list"),
     ("gr", "view.recolor"),
+    ("Ctrl-l", "view.layout_cycle"),
 ];
 
 /// Default Caret-mode bindings, on top of the Normal ones.

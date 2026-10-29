@@ -3,6 +3,7 @@
 use std::fmt;
 
 use crate::caret::Motion;
+use crate::config::Layout;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -14,6 +15,10 @@ pub enum Command {
     HalfPageUp,
     PageNext,
     PagePrev,
+    /// One screen down; single/spread: at the bottom, the next page.
+    ScreenDown,
+    /// One screen up; single/spread: at the top, the previous page.
+    ScreenUp,
     /// With a count: go to that page.
     PageFirst,
     /// With a count: go to that page.
@@ -94,6 +99,12 @@ pub enum Command {
     AnnotList,
     /// Switch dark (recolored) pages on or off.
     Recolor,
+    /// `:layout continuous|single|spread`.
+    SetLayout(Layout),
+    /// Continuous → single → spread → continuous.
+    LayoutCycle,
+    /// Spread layout: show the first page alone (a book's cover), or not.
+    SpreadFirstAlone,
 }
 
 /// Commands that keys can be bound to, with their name and help text.
@@ -106,6 +117,16 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("scroll.half_up", Command::HalfPageUp, "half page up"),
     ("page.next", Command::PageNext, "next page"),
     ("page.prev", Command::PagePrev, "previous page"),
+    (
+        "scroll.screen_down",
+        Command::ScreenDown,
+        "screen down (single/spread: then next page)",
+    ),
+    (
+        "scroll.screen_up",
+        Command::ScreenUp,
+        "screen up (single/spread: then previous page)",
+    ),
     ("page.first", Command::PageFirst, "first page (or page n)"),
     ("page.last", Command::PageLast, "last page (or page n)"),
     ("zoom.in", Command::ZoomIn, "zoom in"),
@@ -288,6 +309,12 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("annotate.box", Command::BoxMode, "box mode"),
     ("annot.list", Command::AnnotList, "annotation list"),
     ("view.recolor", Command::Recolor, "dark pages on/off"),
+    ("view.layout_cycle", Command::LayoutCycle, "next layout"),
+    (
+        "view.spread_first_alone",
+        Command::SpreadFirstAlone,
+        "spread: first page alone on/off",
+    ),
     (
         "annot.toggle_type",
         Command::AnnotToggleType,
@@ -308,6 +335,7 @@ impl Command {
         match self {
             Command::PageGoto(_) => "page.goto",
             Command::Open(_) => "file.open",
+            Command::SetLayout(_) => "view.layout",
             c => REGISTRY
                 .iter()
                 .find(|(_, r, _)| r == c)
@@ -324,8 +352,8 @@ impl fmt::Display for Command {
 
 /// Parse a `:` command line (without the colon).
 ///
-/// `q`, `q!`, `e <path>`, `version`, `debug`, a page number, or any
-/// registered command name (`zoom.in`).
+/// `q`, `q!`, `e <path>`, `layout <name>`, `version`, `debug`, a page
+/// number, or any registered command name (`zoom.in`).
 pub fn parse_ex(line: &str) -> Result<Command, String> {
     let line = line.trim();
     let (word, rest) = match line.split_once(char::is_whitespace) {
@@ -354,6 +382,12 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
                 Ok(Command::Open(rest.to_string()))
             }
         }
+        "layout" => match rest {
+            "continuous" => Ok(Command::SetLayout(Layout::Continuous)),
+            "single" => Ok(Command::SetLayout(Layout::Single)),
+            "spread" => Ok(Command::SetLayout(Layout::Spread)),
+            _ => Err("usage: layout continuous|single|spread".into()),
+        },
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -395,6 +429,12 @@ mod tests {
         assert_eq!(parse_ex("bd"), Ok(Command::Close));
         assert_eq!(parse_ex("annotate.highlight(3)"), Ok(Command::Highlight(3)));
         assert_eq!(parse_ex("zoom.in"), Ok(Command::ZoomIn));
+        assert_eq!(
+            parse_ex("layout spread"),
+            Ok(Command::SetLayout(Layout::Spread))
+        );
+        assert!(parse_ex("layout").is_err());
+        assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());
         assert!(parse_ex("q now").is_err());

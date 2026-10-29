@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 3 and 3b merged into `main` and pushed on 2026-10-28 after the user's checks. Phase 4 not started. |
-| **Current phase** | 4 — reading features, next |
-| **Next step** | Start Phase 4 in a fresh session, on branch `phase-4-reading`: plan the steps (single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and following, help overlay, `:help` page; §11, §2.3–2.6, §2.12), then one commit per step. New overlays use the theme colors (§6 "Theming"). |
+| **Status** | Phase 4 in progress on branch `phase-4-reading` (not merged). Done: step 1 (single and spread layouts). |
+| **Current phase** | 4 — reading features |
+| **Next step** | Phase 4 step 2: jump history (`Ctrl-o`/`Ctrl-i`) and marks (`m`/`'`, saved per file). Then 3 outline, 4 search, 5 links, 6 help, 7 handover (plan in §11 "Phase 4 steps"). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous viewer with hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-28 (Phase 3b merged) |
+| **Last updated** | 2026-10-29 (Phase 4 step 1) |
 
 ---
 
@@ -1310,6 +1310,14 @@ Each phase ends with something the user can try, and a short check by them.
 | **3b. Theming** (added 2026-10-28, user's choice "A") | `[colors]` for every drawn color, `[fonts]` (user font file, sizes), configurable status bar parts, `theme = ` files, dark/recolored pages (§6 "Theming"). | The user rices marg with their own theme and reads with dark pages. |
 | **4. Reading features** | Single and spread layouts with the defaults rule, outline overlay, search, marks, jump history, link hints and link following, help overlay, `:help` page. | The user reads a slide deck and a book chapter with it. |
 | **5. Export & release** | Markdown export, `:config` default file, config auto-reload and error reporting, password prompt, read-only handling, README with the cheat sheet (§2.12), tagged release builds (Linux binary + portable Windows `.exe`), polish from the user's list. | `v1.0.0` is tagged and the user replaces Zathura/Zotero's reader with marg. |
+
+**Phase 4 steps** (branch `phase-4-reading`, planned 2026-10-29 with the
+user, one commit each): 1 single and spread layouts (defaults rule,
+`Ctrl-l`, `:layout`, per-file layout, spread first page alone; Space
+scrolls a screen and turns the page at its edge, like Zathura — user's
+choice); 2 jump history and marks; 3 outline overlay; 4 search; 5 links
+(`gl`, click, external URLs after `y`, opened with `xdg-open` / `start`);
+6 help overlay `?` and `:help`; 7 docs and handover.
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before

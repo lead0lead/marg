@@ -12,7 +12,7 @@ use marg_core::annot::{
 };
 use marg_core::caret::{self, Motion, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
-use marg_core::config::Config;
+use marg_core::config::{Config, Layout};
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
@@ -678,10 +678,11 @@ impl MargApp {
             .map(|s| (s.width, s.height))
             .collect();
         // First page landscape: fit the page (slides); else fit the width.
-        let fit = if sizes[0].0 > sizes[0].1 {
-            Fit::Page
+        let cfg = &self.config.view;
+        let (layout, fit) = if sizes[0].0 > sizes[0].1 {
+            (cfg.default_layout_landscape, Fit::Page)
         } else {
-            Fit::Width
+            (cfg.default_layout_portrait, Fit::Width)
         };
         let viewport = self
             .open
@@ -691,7 +692,8 @@ impl MargApp {
         let key = file_key(info.id.as_deref(), &canonical.to_string_lossy());
         let saved = self.state.files.get(&key);
         let fit = saved.map_or(fit, |f| f.fit);
-        let mut view = View::new(sizes, &self.config.view, fit, viewport);
+        let layout = saved.map_or(layout, |f| f.layout);
+        let mut view = View::new(sizes, &self.config.view, layout, fit, viewport);
         if let Some(saved) = saved {
             if saved.fit == Fit::None {
                 view.set_zoom_at(saved.zoom, (0.0, 0.0));
@@ -842,7 +844,7 @@ impl MargApp {
             position: open.view.position(),
             zoom: open.view.zoom(),
             fit: open.view.fit(),
-            layout: marg_core::config::Layout::Continuous,
+            layout: open.view.layout(),
         };
         let max = self.config.ui.state_files_max;
         self.state.update(open.key.clone(), file.clone(), max);
@@ -2400,6 +2402,15 @@ impl MargApp {
             Command::HalfPageUp => v.scroll_viewports(-0.5 * n as f32),
             Command::PageNext => v.page_step(n as isize),
             Command::PagePrev => v.page_step(-(n as isize)),
+            Command::ScreenDown => (0..n).for_each(|_| v.screen_step(true)),
+            Command::ScreenUp => (0..n).for_each(|_| v.screen_step(false)),
+            Command::SetLayout(l) => v.set_layout(l),
+            Command::LayoutCycle => v.set_layout(match v.layout() {
+                Layout::Continuous => Layout::Single,
+                Layout::Single => Layout::Spread,
+                Layout::Spread => Layout::Continuous,
+            }),
+            Command::SpreadFirstAlone => v.set_first_page_alone(!v.first_page_alone()),
             Command::PageFirst => v.goto_page(count.map_or(0, page_of)),
             Command::PageLast => v.goto_page(count.map_or(usize::MAX, page_of)),
             Command::PageGoto(p) => v.goto_page(p.saturating_sub(1)),
@@ -2561,17 +2572,30 @@ impl MargApp {
             (StatusPart::File, Some(open)) => open.file_name.clone(),
             (StatusPart::Page, Some(open)) => {
                 let v = &open.view;
-                let page = v.current_page();
+                let pages = v.current_pages();
                 let count = v.page_count();
-                match &open.info.labels {
-                    Some(labels) if labels[page] != (page + 1).to_string() => {
-                        format!("{} ({}/{count})", labels[page], page + 1)
+                let span = |f: &dyn Fn(usize) -> String| {
+                    let last = pages.end - 1;
+                    if last > pages.start {
+                        format!("{}–{}", f(pages.start), f(last))
+                    } else {
+                        f(pages.start)
                     }
-                    _ => format!("{}/{count}", page + 1),
+                };
+                let number = span(&|p| (p + 1).to_string());
+                match &open.info.labels {
+                    Some(labels) if pages.clone().any(|p| labels[p] != (p + 1).to_string()) => {
+                        format!("{} ({number}/{count})", span(&|p| labels[p].clone()))
+                    }
+                    _ => format!("{number}/{count}"),
                 }
             }
             (StatusPart::Zoom, Some(open)) => format!("{:.0}%", open.view.zoom() * 100.0),
-            (StatusPart::Layout, Some(_)) => "continuous".into(),
+            (StatusPart::Layout, Some(open)) => match open.view.layout() {
+                Layout::Continuous => "continuous".into(),
+                Layout::Single => "single".into(),
+                Layout::Spread => "spread".into(),
+            },
             (StatusPart::Unsaved, Some(open)) => {
                 if open.unsaved() {
                     "●".into()
