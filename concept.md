@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload) and 4 (password prompt) done. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29. Phase 5 in progress on branch `phase-5-release`: steps 1 (Markdown export), 2 (`:config`), 3 (config errors, auto-reload), 4 (password prompt) and 5 (read-only files) done. |
 | **Current phase** | 5 — export & release |
-| **Next step** | Phase 5 step 5: read-only files (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
+| **Next step** | Phase 5 step 6: cheat sheet and README (§11 "Phase 5 steps"). The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 5 step 4) |
+| **Last updated** | 2026-10-29 (Phase 5 step 5) |
 
 ---
 
@@ -160,6 +160,25 @@ clear text of a comment in the file, still needs the password). The
 `mupdf` crate cannot tell whether the user or the owner password
 worked. Opening that AES-256 file takes ~165 ms instead of ~6 ms
 (MuPDF's key derivation; release, Xvfb).
+
+**As implemented (Phase 5, read-only):** decided by the user
+2026-10-29: obey the permissions, with an override for all files and
+one for the open file. `DocInfo.can_annotate` is bit 6 of `/P` in the
+encryption dictionary (read directly: the `mupdf` crate's
+`permissions()` falls back to "everything" because `/P` always has
+undefined high bits; checked, it gives 3900 = all for a file that
+forbids annotations); `DocInfo.writable` is false when opening the file
+for appending is refused (a lock by another program does not count).
+Read-only files show "Read-only: the PDF forbids annotations; :unlock"
+(or "… no permission to write this file") on opening and when an edit
+is tried, and `[RO]` after the file name. Refused: every command with
+`Command::edits()` (highlights, underline, category prompt, comment,
+note, box mode, delete, recolor, type switch, comment edit, erase,
+undo, redo) and `e`/`x` in the annotation list; reading, copying and
+exporting work. `[annotation] ignore_permissions = true` annotates such
+files anyway (applies on config reload); `:unlock` (`file.unlock`) does
+it for the open file until it is closed (a reload keeps it; not saved
+in the state file). Neither helps a file marg may not write.
 
 ### 2.2 Rendering and caching
 

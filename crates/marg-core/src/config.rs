@@ -98,6 +98,9 @@ pub struct AnnotationConfig {
     pub autosave_secs: f32,
     /// Undo steps kept per session.
     pub undo_steps: usize,
+    /// Annotate files whose permissions forbid it (otherwise they open
+    /// read-only; `:unlock` allows it for one file).
+    pub ignore_permissions: bool,
 }
 
 impl Default for AnnotationConfig {
@@ -113,6 +116,7 @@ impl Default for AnnotationConfig {
             box_fine_step_pt: 1.0,
             autosave_secs: 2.0,
             undo_steps: 100,
+            ignore_permissions: false,
         }
     }
 }

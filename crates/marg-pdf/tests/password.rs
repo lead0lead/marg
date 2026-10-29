@@ -13,6 +13,10 @@ use mupdf::pdf::{Encryption, PdfDocument, PdfWriteOptions, Permission};
 /// `text.pdf` encrypted (AES-256) with user password "user" and owner
 /// password "owner", in a fresh folder.
 fn encrypted(tag: &str) -> PathBuf {
+    encrypted_with(tag, "user", Permission::all())
+}
+
+fn encrypted_with(tag: &str, user_password: &str, permissions: Permission) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("password-{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -20,9 +24,9 @@ fn encrypted(tag: &str) -> PathBuf {
     let doc = PdfDocument::open(src.to_str().unwrap()).unwrap();
     let mut opts = PdfWriteOptions::default();
     opts.set_encryption(Encryption::Aes256)
-        .set_user_password("user")
+        .set_user_password(user_password)
         .set_owner_password("owner")
-        .set_permissions(Permission::all());
+        .set_permissions(permissions);
     let path = dir.join("locked.pdf");
     doc.save_with_options(path.to_str().unwrap(), opts).unwrap();
     path
@@ -77,6 +81,7 @@ fn opens_only_with_a_password() {
     );
     let (_, info) = Doc::open_with_password(&path, Some("user")).unwrap();
     assert_eq!(info.page_sizes.len(), 2);
+    assert!(info.can_annotate && info.writable);
     assert!(Doc::open_with_password(&path, Some("owner")).is_ok());
     // A password is ignored for files that need none.
     let plain = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/text.pdf");
@@ -107,4 +112,29 @@ fn full_save_keeps_the_encryption_and_continues() {
     assert_eq!(doc.save(false), Ok(Some(SaveReport { full: false })));
     drop(doc);
     assert_encrypted_with(&path, 2);
+}
+
+#[test]
+fn permissions_without_annotations_are_read() {
+    // Like publishers' files: no password to open, only an owner password.
+    let path = encrypted_with("forbid", "", Permission::all() - Permission::ANNOTATE);
+    let (_, info) = Doc::open_with_password(&path, None).unwrap();
+    assert!(!info.can_annotate);
+    assert!(info.writable);
+    let path = encrypted_with("allow", "", Permission::PRINT | Permission::ANNOTATE);
+    let (_, info) = Doc::open_with_password(&path, None).unwrap();
+    assert!(info.can_annotate);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_write_protected_file_is_not_writable() {
+    use std::os::unix::fs::PermissionsExt;
+    let path = encrypted_with("readonly", "", Permission::all());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let (_, info) = Doc::open_with_password(&path, None).unwrap();
+    // root may write anyway.
+    let root = std::fs::OpenOptions::new().append(true).open(&path).is_ok();
+    assert_eq!(info.writable, root);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
 }

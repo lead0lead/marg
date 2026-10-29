@@ -89,6 +89,9 @@
 #autosave_secs = 2.0
 # Undo steps per session.
 #undo_steps = 100
+# Files whose permissions forbid annotations open read-only; true annotates
+# them anyway. :unlock does it for the open file only.
+#ignore_permissions = false
 
 # Highlight categories, keys 1-5 in order. The name is written to the
 # annotation's subject; the colors match Zotero's. Setting any [[category]]

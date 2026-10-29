@@ -96,6 +96,8 @@ struct OpenDoc {
     images: Vec<Option<Vec<BBox>>>,
     /// The password the file was opened with, for reloading it.
     password: Option<String>,
+    /// `:unlock`: annotate although the file's permissions forbid it.
+    unlocked: bool,
     /// Pages whose annotations or text could not be read.
     annots_failed: HashSet<usize>,
     text_failed: HashSet<usize>,
@@ -141,6 +143,35 @@ struct Created {
 impl OpenDoc {
     fn unsaved(&self) -> bool {
         self.edits > self.saved_edits
+    }
+
+    /// Why annotations cannot be changed, if they cannot.
+    fn read_only(&self, ignore_permissions: bool) -> Option<ReadOnly> {
+        if !self.info.writable {
+            Some(ReadOnly::NotWritable)
+        } else if !self.info.can_annotate && !ignore_permissions && !self.unlocked {
+            Some(ReadOnly::Forbidden)
+        } else {
+            None
+        }
+    }
+}
+
+/// Why a file is read-only.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReadOnly {
+    /// The PDF's permissions forbid annotations (`:unlock` allows them).
+    Forbidden,
+    /// marg may not write the file.
+    NotWritable,
+}
+
+impl ReadOnly {
+    fn message(self) -> &'static str {
+        match self {
+            ReadOnly::Forbidden => "Read-only: the PDF forbids annotations; :unlock",
+            ReadOnly::NotWritable => "Read-only: no permission to write this file",
+        }
     }
 }
 
@@ -553,7 +584,10 @@ impl MargApp {
                             t.log(&format!("document opened (open took {took:?})"));
                         }
                         self.save_state();
-                        if std::mem::take(&mut self.reloading) {
+                        let reloaded = std::mem::take(&mut self.reloading);
+                        // A reload keeps `:unlock`.
+                        let unlocked = reloaded && self.open.as_ref().is_some_and(|o| o.unlocked);
+                        if reloaded {
                             self.show(Level::Info, "Reloaded from disk".into());
                         }
                         self.after_save = AfterSave::Nothing;
@@ -566,6 +600,13 @@ impl MargApp {
                         self.hinting = None;
                         let mut doc = self.open_doc(info, generation);
                         doc.password = self.opening.take().and_then(|(_, pw)| pw);
+                        doc.unlocked = unlocked;
+                        if !reloaded
+                            && let Some(r) =
+                                doc.read_only(self.config.annotation.ignore_permissions)
+                        {
+                            self.show(Level::Warn, r.message().into());
+                        }
                         self.selected_annot = None;
                         self.doc.send(Request::Annots {
                             pages: (0..doc.view.page_count()).collect(),
@@ -962,6 +1003,7 @@ impl MargApp {
             pending: HashMap::new(),
             images: vec![None; view.page_count()],
             password: None,
+            unlocked: false,
             annots_failed: HashSet::new(),
             text_failed: HashSet::new(),
             export: None,
@@ -1466,6 +1508,8 @@ impl MargApp {
                     self.reveal_annot(&a);
                 }
             }
+            annotlist::Action::Edit { .. } | annotlist::Action::Delete { .. }
+                if self.refuse_edit() => {}
             annotlist::Action::Edit { page, xref } => {
                 self.annot_list = None;
                 self.mode = Mode::Normal;
@@ -2844,6 +2888,9 @@ impl MargApp {
 
     fn run(&mut self, ctx: &egui::Context, command: Command, count: Option<u32>) {
         let n = count.unwrap_or(1).max(1);
+        if command.edits() && self.refuse_edit() {
+            return;
+        }
         match command {
             Command::CommandLine => {
                 self.return_mode = self.mode;
@@ -2914,6 +2961,10 @@ impl MargApp {
             }
             Command::WriteConfig => {
                 self.write_config();
+                return;
+            }
+            Command::Unlock => {
+                self.unlock();
                 return;
             }
             Command::Export(path) => {
@@ -3114,6 +3165,7 @@ impl MargApp {
             | Command::Open(_)
             | Command::Export(_)
             | Command::WriteConfig
+            | Command::Unlock
             | Command::Version
             | Command::DebugToggle => {}
             Command::HintCaret
@@ -3171,6 +3223,40 @@ impl MargApp {
             self.save(false, AfterSave::Open(path));
         } else {
             self.send_open(path, None);
+        }
+    }
+
+    /// In a read-only file: say why, and true (the edit is not made).
+    fn refuse_edit(&mut self) -> bool {
+        let ignore = self.config.annotation.ignore_permissions;
+        match self.open.as_ref().and_then(|o| o.read_only(ignore)) {
+            Some(r) => {
+                self.show(Level::Warn, r.message().into());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `:unlock`: allow annotations in the open file until it is closed.
+    fn unlock(&mut self) {
+        let ignore = self.config.annotation.ignore_permissions;
+        let Some(open) = &mut self.open else {
+            self.error("No file open".into());
+            return;
+        };
+        match open.read_only(ignore) {
+            Some(ReadOnly::Forbidden) => {
+                open.unlocked = true;
+                self.show(
+                    Level::Info,
+                    "Annotations allowed in this file until it is closed".into(),
+                );
+            }
+            Some(ReadOnly::NotWritable) => {
+                self.show(Level::Warn, ReadOnly::NotWritable.message().into());
+            }
+            None => self.show(Level::Info, "Not read-only".into()),
         }
     }
 
@@ -3538,7 +3624,12 @@ impl MargApp {
                 }
             }
             (_, None) => String::new(),
-            (StatusPart::File, Some(open)) => open.file_name.clone(),
+            (StatusPart::File, Some(open)) => {
+                match open.read_only(self.config.annotation.ignore_permissions) {
+                    Some(_) => format!("{} [RO]", open.file_name),
+                    None => open.file_name.clone(),
+                }
+            }
             (StatusPart::Page, Some(open)) => {
                 let v = &open.view;
                 let pages = v.current_pages();

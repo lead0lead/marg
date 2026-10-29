@@ -37,6 +37,9 @@ pub enum Command {
     Open(String),
     /// Write the commented default config, if there is no config file.
     WriteConfig,
+    /// Allow annotating the open file although its permissions forbid it,
+    /// until it is closed.
+    Unlock,
     /// `:export md [path]`: write the annotations as Markdown.
     Export(Option<String>),
     Version,
@@ -348,6 +351,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("help", Command::Help, "keys of this mode"),
     ("help.page", Command::HelpPage, "help page"),
     (
+        "file.unlock",
+        Command::Unlock,
+        "annotate this file although it forbids it",
+    ),
+    (
         "config.write",
         Command::WriteConfig,
         "write the default config file",
@@ -365,6 +373,28 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
 ];
 
 impl Command {
+    /// Whether the command changes annotations (refused in read-only
+    /// files).
+    pub fn edits(&self) -> bool {
+        matches!(
+            self,
+            Command::Highlight(_)
+                | Command::Underline
+                | Command::PickCategory
+                | Command::Comment
+                | Command::Note
+                | Command::BoxMode
+                | Command::AnnotDelete
+                | Command::AnnotRecolor(_)
+                | Command::AnnotToggleType
+                | Command::AnnotEdit
+                | Command::Erase
+                | Command::EraseWhole
+                | Command::Undo
+                | Command::Redo
+        )
+    }
+
     /// Look up a bindable command by name.
     pub fn from_name(name: &str) -> Option<Self> {
         REGISTRY
@@ -438,6 +468,7 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
         },
         "help" | "h" => no_arg(Command::HelpPage),
         "config" => no_arg(Command::WriteConfig),
+        "unlock" => no_arg(Command::Unlock),
         "version" => no_arg(Command::Version),
         "debug" => no_arg(Command::DebugToggle),
         w if w.chars().all(|c| c.is_ascii_digit()) => match w.parse::<usize>() {
@@ -461,6 +492,27 @@ mod tests {
             assert_eq!(Command::from_name(name).as_ref(), Some(cmd));
             assert_eq!(cmd.name(), *name);
         }
+    }
+
+    #[test]
+    fn edits_are_the_annotation_commands() {
+        let edits: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|(_, c, _)| c.edits())
+            .map(|(n, _, _)| *n)
+            .collect();
+        for n in &edits {
+            assert!(
+                n.starts_with("annotate.")
+                    || n.starts_with("annot.")
+                    || ["undo", "redo"].contains(n),
+                "{n}"
+            );
+        }
+        for n in ["annot.next", "annot.prev", "annot.list", "selection.copy"] {
+            assert!(!edits.contains(&n), "{n}");
+        }
+        assert!(edits.contains(&"annotate.box") && edits.contains(&"annot.delete"));
     }
 
     #[test]
@@ -493,6 +545,7 @@ mod tests {
         assert!(parse_ex("export html").is_err());
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
         assert_eq!(parse_ex("config"), Ok(Command::WriteConfig));
+        assert_eq!(parse_ex("unlock"), Ok(Command::Unlock));
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
         assert!(parse_ex("e").is_err());

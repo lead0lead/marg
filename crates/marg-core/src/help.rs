@@ -214,6 +214,10 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 ":config",
                 "write a commented default config, if there is none",
             ),
+            (
+                ":unlock",
+                "annotate this file although its permissions forbid it",
+            ),
             (":version, :debug", "version; debug overlay"),
             (":<command name>", "run any command below, e.g. :zoom.in"),
         ],

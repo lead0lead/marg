@@ -31,6 +31,10 @@ pub struct DocInfo {
     pub id: Option<Vec<u8>>,
     /// Title from the metadata, if not empty.
     pub title: Option<String>,
+    /// The PDF's permissions allow adding and changing annotations.
+    pub can_annotate: bool,
+    /// marg may write the file (it was not refused permission).
+    pub writable: bool,
 }
 
 /// A rectangle in device pixels of a page rendered at some scale, with
@@ -158,6 +162,21 @@ fn temp_path(path: &Path) -> PathBuf {
         .file_name()
         .map_or("file.pdf".into(), |n| n.to_string_lossy().into_owned());
     path.with_file_name(format!(".{file}.{}-{n}.marg-tmp", std::process::id()))
+}
+
+/// Whether the permissions (`/P` of the encryption dictionary) allow
+/// adding and changing annotations (bit 6). Unencrypted files allow
+/// everything. Read directly: `PdfDocument::permissions` treats the
+/// undefined high bits that `/P` always has as "everything allowed".
+fn annotate_permitted(doc: &PdfDocument) -> Result<bool, mupdf::Error> {
+    const ANNOTATE: i32 = 1 << 5;
+    let Some(encrypt) = doc.trailer()?.get_dict("Encrypt")? else {
+        return Ok(true);
+    };
+    Ok(match encrypt.get_dict("P")? {
+        Some(p) => p.as_int()? & ANNOTATE != 0,
+        None => true,
+    })
 }
 
 /// Open `path`, with `password` if it is encrypted.
@@ -321,12 +340,21 @@ impl Doc {
             .metadata(MetadataName::Title)
             .ok()
             .filter(|t| !t.trim().is_empty());
+        let can_annotate = annotate_permitted(&doc).map_err(err)?;
+        // Opening for appending changes nothing; only a refusal counts (a
+        // file locked by another program on Windows is not read-only).
+        let writable = !std::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
         let info = DocInfo {
             path: path.to_path_buf(),
             page_sizes,
             labels,
             id,
             title,
+            can_annotate,
+            writable,
         };
         let disk = Stamp::of(path);
         let doc = Self {
