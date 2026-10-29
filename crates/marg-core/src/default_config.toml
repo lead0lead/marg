@@ -51,6 +51,8 @@
 # Length of the recent files list, and files remembered in the state file.
 #recent_files_max = 50
 #state_files_max = 1000
+# How often the reading position is saved while it changes.
+#state_save_secs = 5.0
 # Presses closer than this make a double or triple click (ms).
 #multi_click_ms = 400
 # How often the open file is checked for changes by other programs.

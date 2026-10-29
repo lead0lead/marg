@@ -244,6 +244,9 @@ pub struct UiConfig {
     /// Files remembered in the state file; the least recently opened are
     /// dropped beyond this.
     pub state_files_max: usize,
+    /// The reading position is saved this often while it changes (and on
+    /// opening, switching files and exit).
+    pub state_save_secs: f32,
     /// Presses closer together than this count as a double or triple click.
     pub multi_click_ms: u64,
     /// How often the open file is checked for changes by other programs.
@@ -273,6 +276,7 @@ impl Default for UiConfig {
             sequence_timeout_ms: 1000,
             recent_files_max: 50,
             state_files_max: 1000,
+            state_save_secs: 5.0,
             multi_click_ms: 400,
             file_check_secs: 1.0,
             drag_scroll_rate: 12.0,

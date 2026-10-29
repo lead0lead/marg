@@ -1282,6 +1282,9 @@ position is the document point at the window's top-left. Saved when a file
 opens, before `:e` switches files, and on exit; each save re-reads the file
 and changes only its own entry (several windows can share it). At most 1000
 files (`state_files_max`); the least recently opened are dropped.
+**As implemented (Phase 5):** also saved every `ui.state_save_secs`
+while the entry differs from the last one written (on the UI thread;
+the file is small).
 **As implemented (Phase 4):** the layout and marks (`[files."…".marks.a]`
 = page, x, y) are saved per file; older state files without marks load
 (empty).
@@ -1676,8 +1679,9 @@ building more.
 - Phase 2: the clipboard after `y` was not checked under Xvfb (no `xclip`);
   copy text is covered by unit tests.
 
-- Phase 3: a comment longer than the tooltip height is cut off in the
-  tooltip (the editor scrolls).
+- ~~Phase 3: a comment longer than the tooltip height is cut off~~
+  Fixed in Phase 5: the tooltip shows as many rows as fit and ends the
+  last in "…" (`e` shows the whole comment).
 - Phase 3: Square and Text annotations from other programs can be
   recolored (color and `/Subj`) but not switched with `U` (message).
 
@@ -1690,8 +1694,11 @@ building more.
   two magazine-style PDFs 268–291 ms; light pages 132–137 ms. Window ready at
   ~67 ms, document at ~80 ms; the rest is the cover render. A quick
   low-resolution first render could help; not done.
-- The state file is written on open, file switch and exit only; if marg is
-  killed, the reading position since opening is lost.
+- ~~The state file is written on open, file switch and exit only~~
+  Fixed in Phase 5: also every `[ui] state_save_secs` (5) while the
+  position, zoom, fit, layout or marks differ from the last write
+  (checked on Xvfb: killed after paging, the new page was saved). A
+  failing write is reported once, then only logged.
 - Tiles re-run the whole page's content per tile (MuPDF clips the drawing
   only). If tiled zoom feels slow, cache a display list per page on the
   document thread.

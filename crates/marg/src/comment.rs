@@ -179,11 +179,25 @@ pub fn tooltip(
                 .inner_margin(6)
                 .show(ui, |ui| {
                     ui.set_max_width(width - 12.0);
-                    ui.set_max_height(max_h.min(area.bottom() - y - 12.0).max(40.0));
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(text).monospace().color(th.panel_fg))
-                            .wrap(),
+                    let max_h = max_h.min(area.bottom() - y - 12.0).max(40.0);
+                    ui.set_max_height(max_h);
+                    // As many rows as fit; a longer comment ends in "…"
+                    // (`e` shows all of it).
+                    let row_h = ui.text_style_height(&egui::TextStyle::Monospace);
+                    let mut job = egui::text::LayoutJob::single_section(
+                        text.to_string(),
+                        egui::TextFormat::simple(
+                            egui::TextStyle::Monospace.resolve(ui.style()),
+                            th.panel_fg,
+                        ),
                     );
+                    job.wrap = egui::text::TextWrapping {
+                        max_width: width - 12.0,
+                        max_rows: ((max_h / row_h).floor() as usize).max(1),
+                        break_anywhere: false,
+                        overflow_character: Some('…'),
+                    };
+                    ui.add(egui::Label::new(job));
                 });
         });
 }

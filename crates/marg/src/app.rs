@@ -363,6 +363,12 @@ pub struct MargApp {
     /// The config and theme files as last read, and when to look again.
     config_stamp: startup::Stamp,
     next_config_check: Instant,
+    /// The open file's entry as last written to the state file (with
+    /// `last_opened` 0), when to compare again, and whether the last write
+    /// failed (reported once).
+    saved_state: Option<FileState>,
+    next_state_save: Instant,
+    state_save_failed: bool,
     /// `:set` changes of this session, re-applied after a config reload:
     /// (full name, value).
     session_sets: Vec<(String, String)>,
@@ -504,6 +510,9 @@ impl MargApp {
             config_stamp: Vec::new(),
             next_config_check: Instant::now(),
             session_sets: Vec::new(),
+            saved_state: None,
+            next_state_save: Instant::now(),
+            state_save_failed: false,
             reloading: false,
             author,
             cmdline: LineEdit::default(),
@@ -1136,21 +1145,52 @@ impl MargApp {
 
     /// Write the open document's reading position to the state file.
     fn save_state(&mut self) {
+        let Some(mut file) = self.file_state() else {
+            return;
+        };
         let Some(open) = &self.open else { return };
-        let file = FileState {
+        let key = open.key.clone();
+        self.saved_state = Some(file.clone());
+        file.last_opened = statefile::now_secs();
+        let max = self.config.ui.state_files_max;
+        self.state.update(key.clone(), file.clone(), max);
+        let Some(path) = &self.state_path else { return };
+        match statefile::save_entry(path, &key, file, max) {
+            Ok(()) => self.state_save_failed = false,
+            Err(e) if self.state_save_failed => log::error!("cannot save state: {e}"),
+            Err(e) => {
+                self.state_save_failed = true;
+                self.error(format!("Cannot save state: {e}"));
+            }
+        }
+    }
+
+    /// The open file's state-file entry, with `last_opened` 0.
+    fn file_state(&self) -> Option<FileState> {
+        let open = self.open.as_ref()?;
+        Some(FileState {
             path: open.info.path.to_string_lossy().into_owned(),
-            last_opened: statefile::now_secs(),
+            last_opened: 0,
             position: open.view.position(),
             zoom: open.view.zoom(),
             fit: open.view.fit(),
             layout: open.view.layout(),
             marks: open.marks.clone(),
-        };
-        let max = self.config.ui.state_files_max;
-        self.state.update(open.key.clone(), file.clone(), max);
-        let Some(path) = &self.state_path else { return };
-        if let Err(e) = statefile::save_entry(path, &open.key, file, max) {
-            self.error(format!("Cannot save state: {e}"));
+        })
+    }
+
+    /// Every `ui.state_save_secs`: save the reading position if it moved,
+    /// so it survives marg being killed. (The UI wakes up at least every
+    /// `file_check_secs` for the file checks, so an idle window gets here.)
+    fn autosave_state(&mut self) {
+        let now = Instant::now();
+        if now < self.next_state_save {
+            return;
+        }
+        self.next_state_save =
+            now + Duration::from_secs_f32(self.config.ui.state_save_secs.max(0.5));
+        if self.open.is_some() && self.file_state() != self.saved_state {
+            self.save_state();
         }
     }
 
@@ -3854,6 +3894,7 @@ impl eframe::App for MargApp {
         self.autosave(&ctx);
         self.check_disk(&ctx);
         self.check_config(&ctx);
+        self.autosave_state();
         if self
             .message
             .as_ref()
