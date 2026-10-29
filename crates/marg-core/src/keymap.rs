@@ -228,7 +228,8 @@ impl Keymap {
         }
     }
 
-    fn exact(&self, keys: &[KeyPress]) -> Option<&Command> {
+    /// The command bound to exactly this key sequence.
+    pub fn exact(&self, keys: &[KeyPress]) -> Option<&Command> {
         self.bindings
             .iter()
             .find(|b| b.keys == keys)

@@ -1137,6 +1137,15 @@ impl MargApp {
 
     fn recent_event(&mut self, ctx: &egui::Context, e: &Event) {
         let Some(list) = &mut self.recent else { return };
+        // The command line key (`:`), so that `:e` works before any file
+        // was opened.
+        if !list.filtering()
+            && let Some(k) = input::key_press(e)
+            && self.keymap.exact(&[k]) == Some(&Command::CommandLine)
+        {
+            self.run(ctx, Command::CommandLine, None);
+            return;
+        }
         match list.event(e) {
             recent::Action::None => {}
             recent::Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

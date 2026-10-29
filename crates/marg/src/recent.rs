@@ -57,6 +57,11 @@ impl RecentList {
         self.nav.set_len(self.shown.len());
     }
 
+    /// Whether typed text goes to the filter.
+    pub fn filtering(&self) -> bool {
+        self.nav.filtering()
+    }
+
     /// Moving and filtering as in `marg_core::list`; Esc with no filter
     /// quits.
     pub fn event(&mut self, e: &Event) -> Action {
@@ -91,7 +96,7 @@ impl RecentList {
                 ui.label(text(&format!("/{filter}"), th.panel_dim));
             } else {
                 ui.label(text(
-                    "j/k move   / filter   Enter open   Esc quit",
+                    "j/k move   / filter   Enter open   : command   Esc quit",
                     th.panel_dim,
                 ));
             }
@@ -101,7 +106,10 @@ impl RecentList {
                 + ui.spacing().item_spacing.y;
             self.half_page = ((ui.available_height() / row_h) as usize / 2).max(1);
             if self.items.is_empty() {
-                ui.label(text("No recent files. Run marg <file.pdf>.", th.panel_dim));
+                ui.label(text(
+                    "No recent files. Open one with :e <file.pdf>.",
+                    th.panel_dim,
+                ));
                 return;
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
