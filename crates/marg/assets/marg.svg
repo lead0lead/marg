@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <!-- marg app icon. The window icon is marg-256.png, made from this file:
-       rsvg-convert -w 256 -h 256 marg.svg -o marg-256.png -->
+  <!-- marg app icon. marg-256.png (window icon) and marg.ico (Windows .exe)
+       are rendered from this file: python3 scripts/make-icons.py -->
   <rect x="4" y="4" width="56" height="56" rx="13" fill="#FBFAF6" stroke="#D9D5C8" stroke-width="1"/>
   <rect x="11" y="35" width="42" height="12" rx="2.5" fill="#FFD400" transform="rotate(-6 32 41)"/>
   <path d="M19 46V27M19 33a7 7 0 0 1 13 0V46M32 33a7 7 0 0 1 13 0V46" fill="none" stroke="#1D1C1A" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>

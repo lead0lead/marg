@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.0.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.0.0): Linux binary and Windows `.exe`. Phases 0–5 merged into `main`. |
 | **Current phase** | none: all planned phases are done; the user uses marg daily |
-| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. Branch `app-icon` (not merged, not pushed) adds the app icon and window icon; waiting for the user to try it. |
+| **Next step** | The user uses marg as their main reader for a few weeks and collects a polish list; then plan the fixes with them (feature branch, release as 1.0.x / 1.1.0). The Phase 3–5 choices in §12 are open. App icon, window icon and Windows `.exe` icon merged into `main` and pushed (not released yet: the next 1.0.x / 1.1.0 ships them). |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.0.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (app icon on branch `app-icon`) |
+| **Last updated** | 2026-10-29 (app icons merged) |
 
 ---
 
@@ -990,9 +990,10 @@ Reference: Zathura's minimalism. No toolbar, no menu bar, no icons.
 
 - App icon (window, taskbar, launcher): a dark lowercase *m* with a tilted
   "Key point" yellow (`#FFD400`) highlighter stroke on a light rounded
-  tile. Source `crates/marg/assets/marg.svg`; the window icon is
-  `marg-256.png`, rendered from it with `rsvg-convert` and embedded in the
-  binary. Chosen by the user 2026-10-29 from three sketches.
+  tile. Source `crates/marg/assets/marg.svg`; `scripts/make-icons.py`
+  renders `marg-256.png` (window icon, embedded in the binary) and
+  `marg.ico` (Windows `.exe`, PNG entries 16–256 px) from it with
+  `rsvg-convert`. Chosen by the user 2026-10-29 from three sketches.
 
 - Background around pages: neutral dark gray `#2B2B2B` *(start)*. Pages render
   as-is (white). Thin 1 px shadow line at page edges.
@@ -1340,6 +1341,7 @@ render.
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
 | Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
+| Windows `.exe` icon | `winresource` (build dependency, Windows builds only, default features off) | Embeds `crates/marg/assets/marg.ico` and the version from `Cargo.toml` in the `.exe`. Only new crate besides it: `version_check`. Chosen over `embed-resource` (four more crates and a `.rc` file). Added 2026-10-29 with the user's approval |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
 Licence note: MuPDF is AGPL-3.0. That is fine for a private personal tool;
@@ -1442,7 +1444,7 @@ marg/
 │   ├── marg-pdf/src/       # mupdf adapter, document thread, save/backup
 │   └── marg/
 │       ├── src/            # main.rs, ui/, input/, overlays/
-│       └── assets/         # app icon: marg.svg (source), marg-256.png
+│       └── assets/         # app icon: marg.svg (source), marg-256.png, marg.ico
 ├── tests/fixtures/         # small PDFs: text, two-column, scanned page, slides, outline, links
 ├── .github/workflows/ci.yml
 └── .gitignore
@@ -1779,20 +1781,34 @@ Format:
   icon in `~/.local/share/icons/hicolor/scalable/apps/marg.svg`, marg as
   default PDF app (COSMIC reads `~/.config/cosmic-mimeapps.list` before
   `mimeapps.list`; both set, Zathura kept as an alternative). Branch
-  `app-icon` (not merged, not pushed): icon files in
-  `crates/marg/assets/`, window icon via `eframe::icon_data::from_png_bytes`
-  plus a test that the PNG decodes.
+  `app-icon`, merged into `main` (not pushed) and reinstalled: icon files
+  in `crates/marg/assets/`, window icon via
+  `eframe::icon_data::from_png_bytes` plus a test that the PNG decodes.
+  Branch `windows-exe-icon` (not merged, not pushed): `marg.ico`,
+  `scripts/make-icons.py`, and `winresource` in `crates/marg/build.rs`.
 - Decisions: icon variant A "paper tile" (user's pick of three sketches).
-  No new dependency: eframe already builds `image` with PNG support.
+  No new dependency for the window icon: eframe already builds `image`
+  with PNG support. The user approved a library for the `.exe` icon;
+  `winresource` chosen (see §9). Its default `FileDescription` (the
+  package name) is kept, because Windows shows it as the app name in
+  Task Manager and "Open with".
 - State: builds; all tests pass; clippy and fmt clean. Under Xvfb the
-  window has a 256×256 `_NET_WM_ICON`. Not tried by the user yet.
-- Next: the user tries the branch, then merge to `main`. Not done: the
-  icon embedded in the Windows `.exe` (needs a build crate such as
-  `winres`, not in §9: ask first) and a `marg.desktop` in the repo.
+  window has a 256×256 `_NET_WM_ICON`. The Windows-only code in `build.rs`
+  is not compiled on Linux; its calls were type-checked in a scratch crate.
+- Windows check: CI green; the Release workflow, run by hand on the
+  branch, built the `.exe`, which contains all 7 icon images and the
+  version details. It was shared as a temporary pre-release
+  (`windows-exe-icon-test`, deleted after the merge); the user confirmed
+  the icon on Windows. Branch merged into `main` and pushed.
+- Next: the user's polish list (console window on Windows, command
+  prompt cursor and paste, `:` from the recent files view). Not done: a
+  `marg.desktop` in the repo.
 - Watch out: on Wayland the window icon comes from the desktop file
   matched by app id `marg`, not from `with_icon`. The first commit on the
   branch (icon files only) was made before running the four checks; they
-  passed on the next commit.
+  passed on the next commit. `build.rs` gates the resources on
+  `cfg(windows)` (the host), which is right for native builds only:
+  cross-compiling from Linux to Windows would leave out the icon.
 
 ### 2026-10-29 — Phase 5: export & release
 - Done (branch `phase-5-release`, not merged, not pushed): plan agreed
