@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | Phase 4 built on branch `phase-4-reading` (steps 1–7, not merged, not pushed). Waiting for the user's check. |
-| **Current phase** | 4 — reading features (done, to check) |
-| **Next step** | The user reads a slide deck and a book chapter with the Phase 4 build (`cargo run --release -- file.pdf`) and decides the Phase 4 choices in §12. After their go-ahead: merge `phase-4-reading` into `main`, push, then Phase 5 in a fresh session. |
+| **Status** | Phases 0–4 merged into `main` and pushed on 2026-10-29 (Phase 4 at the user's request, "merge and push"). Phase 5 not started. |
+| **Current phase** | 5 — export & release, next |
+| **Next step** | Start Phase 5 in a fresh session, on branch `phase-5-release`: plan the steps (§11: Markdown export, `:config`, config reload and errors, password prompt, read-only, README + cheat sheet, release builds, polish), then one commit per step. The Phase 4 choices in §12 are still open for the user. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | none yet |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (Phase 4 built) |
+| **Last updated** | 2026-10-29 (Phase 4 merged) |
 
 ---
 
@@ -1622,8 +1622,11 @@ Format:
 - State: builds; 158 tests pass; clippy and fmt clean. Tests changed
   with new defaults: the default `[statusbar] right` and the count of
   default `g…` bindings (`gl`).
-- Next: the user tries the Phase 4 build on a slide deck and a book
-  chapter; then merge, push, Phase 5.
+- Merge: the user asked to merge and push right after the handover
+  ("merge and push"), before reporting on the Phase 4 choices; merged
+  into `main` and pushed with the branch.
+- Next: Phase 5 in a fresh session; ask the user about the §12 Phase 4
+  choices when they have used it.
 - Watch out: `View` paged layouts keep the shown row in `View::row`;
   `goto_page`/`put_doc_pos_at` switch it, `scroll_by` never does. Search
   hits are kept sorted by page as they stream in (`SearchState`).
