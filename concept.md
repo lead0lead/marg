@@ -68,14 +68,14 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | selection search (branch `selection-search`, planned 2026-10-30, steps in §11): look up the Visual selection in the browser (`gs`). Branch `cli-help` (`--help`) and `macos` wait for the user too. |
-| **Next step** | Selection search step 1 (core). Then the user tries it and the merge order of `cli-help`, `macos` and `selection-search` is settled. The Phase 3–5 choices in §12 are open. |
+| **Current phase** | selection search (branch `selection-search`, planned 2026-10-30, steps in §11): all 3 steps done, waiting for the user to try it. Branches `cli-help` (`--help`) and `macos` wait for the user too. |
+| **Next step** | The user tries `gs` (and a named engine) on a real paper, then merge. Merge order of `cli-help`, `macos` and `selection-search`: each touches concept.md §0 and the session log, so later merges need small conflict fixes. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (selection search planned) |
+| **Last updated** | 2026-10-30 (selection search) |
 
 ---
 
@@ -460,7 +460,22 @@ one follows it. "Still reading the links" / "No links in view".
   (dehyphenated, lines joined), whitespace collapsed, cut at a word
   boundary after `search.max_chars` (500) and percent-encoded. Stays in
   Visual, like `y`; the status bar names the engine.
-- Multi-column papers rely on MuPDF's block order. If the order is wrong on a
+
+**As implemented (selection search, 2026-10-30):** `marg-core/src/
+lookup.rs`: `query` (whitespace collapsed; cut before the word that
+passes `max_chars`, a single longer word inside), `url` (every `%s`
+replaced; RFC 3986 unreserved characters kept, the rest
+percent-encoded as UTF-8, space as `%20`), `check` (engines without
+`%s`; Visual bindings to engines not in the table), shown with the key
+binding warnings. `Command::SelectionSearch(Option<String>)`;
+`Command::from_name` parses `selection.search(name)`. The help overlay
+and page list named-engine bindings as "search the web with <name>".
+The app opens the URL with `browser::open` (as for links) and shows
+`Searching <engine>: "<first 40 characters>…"`, with "(cut)" when
+shortened. Checked on Xvfb with a stand-in `xdg-open` that logs the
+URL: a double-clicked word, a three-line paragraph (`Vjj`), a `wiki`
+engine with `max_chars = 30`, the config warnings and an unknown
+engine at the key press.- Multi-column papers rely on MuPDF's block order. If the order is wrong on a
   page, motions follow the wrong order; that is a known risk (§12), checked at
   the decision milestone.
 
@@ -880,6 +895,7 @@ remappable (§8).
 | | `Enter`, then `1`–`5` or `Enter` | highlight via category prompt (last category on `Enter`) |
 | | `c` | highlight + comment |
 | | `y` | copy text |
+| | `gs` | search the web for the text (`selection.search`, `selection.search(name)`) |
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
@@ -1272,6 +1288,13 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 
 **As implemented (drag and drop, 2026-10-30):** `[ui]` adds
 `drop_max_files = 10`.
+
+**As implemented (selection search, 2026-10-30):** new section
+`[search]` with `max_chars = 500` and the table `[search.engines]`
+(name → URL with `%s`; built-in `default =
+"https://duckduckgo.com/?q=%s"`, user entries are added to it and may
+replace it). `search.engines` counts as one setting for unknown-key
+warnings and `:set` refuses it, like `keys.*`.
 
 **As implemented (Phase 3b):** top-level `theme = ""`; `[view] recolor =
 false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
@@ -1857,6 +1880,23 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — Selection search
+- Done: branch `selection-search` off `main` (plan, core, app, docs; one
+  commit each). `gs` in Visual mode opens the selected text as a web
+  search in the default browser; `[search.engines]` holds named engines,
+  bound with `selection.search(name)`.
+- Decisions: the browser's own default engine cannot be used (user asked;
+  no common way to reach it), so DuckDuckGo is the default (user's
+  fallback choice); several named engines over one URL; key `gs` (all
+  three the user's picks of Claude's options). Text is cut at
+  `search.max_chars` (500) so URLs stay short enough for browsers and
+  engines. Stays in Visual after searching, like `y`.
+- State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
+  with a stand-in `xdg-open` (no real browser opened).
+- Next: the user tries it, then merge (see §0 on the merge order).
+- Watch out: `:set` cannot change `search.engines` (a table, like
+  `keys.*`); edit the config file.
 
 ### 2026-10-30 — Drag and drop; macOS assessed
 - Done (branch `drag-and-drop`, not merged, not pushed), one commit
