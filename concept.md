@@ -460,22 +460,7 @@ one follows it. "Still reading the links" / "No links in view".
   (dehyphenated, lines joined), whitespace collapsed, cut at a word
   boundary after `search.max_chars` (500) and percent-encoded. Stays in
   Visual, like `y`; the status bar names the engine.
-
-**As implemented (selection search, 2026-10-30):** `marg-core/src/
-lookup.rs`: `query` (whitespace collapsed; cut before the word that
-passes `max_chars`, a single longer word inside), `url` (every `%s`
-replaced; RFC 3986 unreserved characters kept, the rest
-percent-encoded as UTF-8, space as `%20`), `check` (engines without
-`%s`; Visual bindings to engines not in the table), shown with the key
-binding warnings. `Command::SelectionSearch(Option<String>)`;
-`Command::from_name` parses `selection.search(name)`. The help overlay
-and page list named-engine bindings as "search the web with <name>".
-The app opens the URL with `browser::open` (as for links) and shows
-`Searching <engine>: "<first 40 characters>…"`, with "(cut)" when
-shortened. Checked on Xvfb with a stand-in `xdg-open` that logs the
-URL: a double-clicked word, a three-line paragraph (`Vjj`), a `wiki`
-engine with `max_chars = 30`, the config warnings and an unknown
-engine at the key press.- Multi-column papers rely on MuPDF's block order. If the order is wrong on a
+- Multi-column papers rely on MuPDF's block order. If the order is wrong on a
   page, motions follow the wrong order; that is a known risk (§12), checked at
   the decision milestone.
 
@@ -497,6 +482,22 @@ click clears the selection; double/triple click within 400 ms
 (`ui.multi_click_ms`). Dragging into the 16 px edge zone at the top or
 bottom (or past it) scrolls, faster the further in (`ui.drag_scroll_rate`
 px/s per px, `ui.drag_scroll_edge_px`), and extends the selection.
+
+**As implemented (selection search, 2026-10-30):** `marg-core/src/
+lookup.rs`: `query` (whitespace collapsed; cut before the word that
+passes `max_chars`, a single longer word inside), `url` (every `%s`
+replaced; RFC 3986 unreserved characters kept, the rest
+percent-encoded as UTF-8, space as `%20`), `check` (engines without
+`%s`; Visual bindings to engines not in the table), shown with the key
+binding warnings. `Command::SelectionSearch(Option<String>)`;
+`Command::from_name` parses `selection.search(name)`. The help overlay
+and page list named-engine bindings as "search the web with <name>".
+The app opens the URL with `browser::open` (as for links) and shows
+`Searching <engine>: "<first 40 characters>…"`, with "(cut)" when
+shortened. Checked on Xvfb with a stand-in `xdg-open` that logs the
+URL: a double-clicked word, a three-line paragraph (`Vjj`), a `wiki`
+engine with `max_chars = 30`, the config warnings and an unknown
+engine at the key press.
 
 ### 2.8 Annotations
 
