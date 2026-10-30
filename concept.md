@@ -67,11 +67,11 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.2.0** on 2026-10-30: web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
+| **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
 | **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
-| **Live version** | v1.2.0 (tag pushed 2026-10-30) |
+| **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
@@ -1881,6 +1881,16 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — Release 1.2.0
+- Done: merged `selection-search` and `cli-help` into `main` and pushed;
+  version 1.2.0, tag `v1.2.0`. Release run green (20 min; CI 2 min):
+  `marg-linux-x86_64` and `marg-windows-x86_64.exe` attached. Local
+  install (`~/.local/bin/marg`) is the `main` build at the release.
+- Decisions: minor version (new features). macOS not included: `macos`
+  waits for the user's test on their Mac.
+- Next: the user tries the `macos` branch; then merge (conflicts noted
+  in §0) and release macOS in 1.2.x / 1.3.0.
 
 ### 2026-10-30 — Selection search
 - Done: branch `selection-search` off `main` (plan, core, app, docs; one
