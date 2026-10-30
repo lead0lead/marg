@@ -68,8 +68,8 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
-| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, not pushed; CI on macOS has not run yet. |
-| **Next step** | Push `main` and `macos` (user's OK) so CI builds and tests on macOS; fix what it finds. Then the user tries it on their Mac (CI artifact or a local build): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed. Then merge. The Phase 3–5 choices in §12 are open. |
+| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed; CI green on Linux, Windows and macOS (2026-10-30: build, tests and clippy `-D warnings` on `macos-latest` arm64, so all macOS code compiles; MuPDF builds with the runner's Xcode tools). |
+| **Next step** | The user tries it on their Mac (CI artifact or a local build): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed. Then merge. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -1915,7 +1915,10 @@ Format:
 - State: Linux build, tests, clippy and fmt pass. `macos.rs` passes
   clippy for `aarch64-apple-darwin` in a scratch crate (rustup target
   added on this machine); the rest of the macOS code never compiled yet.
-- Next: push, CI on macOS, the user's checks (§0).
+- Pushed `main` and `macos`; CI green on all three OSes, macOS
+  included (first run, ~1m40s). GitHub warns that `actions/checkout@v4`
+  runs on Node 20, which is deprecated (forced to Node 24; not fixed).
+- Next: the user's checks on their Mac (§0).
 - Watch out: macOS-only code is not compiled by Linux checks; check
   objc2 code in a scratch crate with `--target aarch64-apple-darwin`
   (pure Rust, no SDK needed) and the rest on CI.
