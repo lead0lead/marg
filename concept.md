@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
 | **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
-| **Next step** | Step 4: app bundle (`Info.plist`, `marg.icns`, `scripts/make-app.sh`). The Phase 3–5 choices in §12 are open. |
+| **Next step** | Step 5: release workflow builds `marg-macos-arm64.zip`; README install notes. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS, step 3) |
+| **Last updated** | 2026-10-30 (macOS, step 4) |
 
 ---
 
@@ -1492,7 +1492,7 @@ marg/
 │   ├── marg-pdf/src/       # mupdf adapter, document thread, save/backup
 │   └── marg/
 │       ├── src/            # main.rs, ui/, input/, overlays/
-│       └── assets/         # app icon: marg.svg (source), marg-256.png, marg.ico
+│       └── assets/         # app icon: marg.svg (source), marg-256.png, marg.ico, marg.icns; Info.plist (macOS)
 ├── tests/fixtures/         # small PDFs: text, two-column, scanned page, slides, outline, links
 ├── .github/workflows/ci.yml
 └── .gitignore
@@ -1663,6 +1663,14 @@ must save first, like closing the window); "Open With" support with
 4. App bundle: `marg.app` with `Info.plist` (PDF document type, rank
    Alternate, version from `Cargo.toml`) and `marg.icns` (from
    `scripts/make-icons.py`), built by `scripts/make-app.sh`.
+   **As implemented:** `crates/marg/assets/Info.plist` with `@VERSION@`
+   (filled from `Cargo.toml`), bundle id `io.github.lead0lead.marg`
+   (Claude's choice: the GitHub account), `LSMinimumSystemVersion`
+   11.0, role Editor for `com.adobe.pdf`, `NSHighResolutionCapable`.
+   `make-icons.py` also writes `marg.icns` (PNG entries 16–1024 px,
+   `icp4`…`ic14`). `make-app.sh <binary> <outdir>` signs the bundle ad
+   hoc (`codesign --sign -`) when `codesign` exists (macOS). Checked on
+   Linux: bundle layout, the plist parses, the icns entries.
 5. Release: the release workflow builds `marg-macos-arm64.zip` (the
    `.app`); README: install, Gatekeeper (`xattr -dr
    com.apple.quarantine marg.app` or right-click → Open), the terminal
