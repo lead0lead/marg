@@ -68,14 +68,14 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): all 4 steps done, waiting for the user to try it. Then macOS support (user, 2026-10-30), planned with the user first. |
-| **Next step** | The user tries drag and drop (on Wayland only through XWayland; Windows via a CI build), then merge into `main`. Then plan macOS support with the user (§12 has the findings). The Phase 3–5 choices in §12 are open. |
+| **Current phase** | selection search (branch `selection-search`, planned 2026-10-30, steps in §11): look up the Visual selection in the browser (`gs`). Branch `cli-help` (`--help`) and `macos` wait for the user too. |
+| **Next step** | Selection search step 1 (core). Then the user tries it and the merge order of `cli-help`, `macos` and `selection-search` is settled. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (drag and drop) |
+| **Last updated** | 2026-10-30 (selection search planned) |
 
 ---
 
@@ -447,6 +447,19 @@ one follows it. "Still reading the links" / "No links in view".
 - `y` copies the selected text to the clipboard (dehyphenated, lines joined
   with spaces).
 - Esc clears the selection and leaves Caret mode.
+- **Web search** (decided with the user 2026-10-30, branch
+  `selection-search`): `gs` in Visual mode (`selection.search`) looks the
+  selected text (a word, sentence or paragraph) up in the default browser
+  with a search engine from the config. The browser's own default engine
+  cannot be reached (no common way to ask a browser for it; only Firefox
+  has `--search`), so marg has its own: DuckDuckGo by default (user's
+  choice). Several named engines (user's choice over a single URL):
+  `[search.engines]`, `name = "URL with %s"`; `gs` uses `default`, and
+  `selection.search(name)` binds another, e.g. `gw =
+  "selection.search(wiki)"` in `[keys.visual]`. The text is the copy text
+  (dehyphenated, lines joined), whitespace collapsed, cut at a word
+  boundary after `search.max_chars` (500) and percent-encoded. Stays in
+  Visual, like `y`; the status bar names the engine.
 - Multi-column papers rely on MuPDF's block order. If the order is wrong on a
   page, motions follow the wrong order; that is a known risk (§12), checked at
   the decision milestone.
@@ -1628,6 +1641,14 @@ builds in CI on `v*` tags; 8 polish from the user's list (none yet; it
 grows as they test), docs and handover. To ask at their step: `:set`
 (Phase 1 put it in Phase 5, the Phase 3b choice ruled out runtime
 settings), the Windows CRT (§12), the Phase 4 choices.
+
+**Selection search steps** (branch `selection-search`, planned
+2026-10-30 with the user, one commit each): 1 core: `[search]` config
+(engines merged over the built-in `default`, `%s` required, unknown
+engine in a binding is a config error), `selection.search[(name)]`,
+`gs` in Visual, URL building (unit-tested); 2 app: open the URL with
+`browser::open`, status message, errors; 3 docs (README, cheat sheet,
+`:config` file) and handover.
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
