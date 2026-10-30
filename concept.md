@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): all 4 steps done, waiting for the user to try it. Then macOS support (user, 2026-10-30), planned with the user first. |
-| **Next step** | The user tries drag and drop (on Wayland only through XWayland; Windows via a CI build), then merge into `main`. Then plan macOS support with the user (§12 has the findings). The Phase 3–5 choices in §12 are open. |
+| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
+| **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
+| **Next step** | Step 2: `open` for links, macOS paths, macOS CI job. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
-| **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (drag and drop) |
+| **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
+| **Last updated** | 2026-10-30 (macOS, step 1) |
 
 ---
 
@@ -1383,6 +1383,7 @@ render.
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
 | Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
+| macOS "Open With" | `objc2`, `objc2-foundation`, `objc2-app-kit` (macOS only) | Finder, the Dock and Zotero hand files over as an Apple Event (`odoc`), which winit ignores; marg registers its own handler. Already compiled on macOS as winit dependencies (same versions), so no new crates. Approved by the user 2026-10-30 |
 | Windows `.exe` icon | `winresource` (build dependency, Windows builds only, default features off) | Embeds `crates/marg/assets/marg.ico` and the version from `Cargo.toml` in the `.exe`. Only new crate besides it: `version_check`. Chosen over `embed-resource` (four more crates and a `.rc` file). Added 2026-10-29 with the user's approval |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
@@ -1629,6 +1630,34 @@ grows as they test), docs and handover. To ask at their step: `:set`
 (Phase 1 put it in Phase 5, the Phase 3b choice ruled out runtime
 settings), the Windows CRT (§12), the Phase 4 choices.
 
+**macOS steps** (branch `macos`, planned 2026-10-30 with the user, one
+commit each). The user has a Mac and tries each build; Claude can only
+build and test on GitHub's `macos-latest` runner. Decisions (user):
+Apple Silicon only (arm64; Intel can come later); unsigned (ad-hoc
+signed by the linker) with a README note for Gatekeeper; Cmd works as
+Ctrl, as `input.rs` already does (Cmd-q quits through the app menu and
+must save first, like closing the window); "Open With" support with
+`objc2` (§9).
+1. This plan.
+2. Basics: links open with `open`; macOS paths in §8 and the README
+   (`directories`: `~/Library/Application Support/marg` for config,
+   state, log and backups); a `macos-latest` job in CI.
+3. "Open With": an `odoc` Apple Event handler. Files from it go the
+   same way as drops (§2.1): the first opens in this window if it shows
+   the recent files list or nothing yet, otherwise in a new marg
+   process; the rest in new processes. (macOS starts one app instance and
+   sends it every later "Open With"; marg keeps one window per file.)
+4. App bundle: `marg.app` with `Info.plist` (PDF document type, rank
+   Alternate, version from `Cargo.toml`) and `marg.icns` (from
+   `scripts/make-icons.py`), built by `scripts/make-app.sh`.
+5. Release: the release workflow builds `marg-macos-arm64.zip` (the
+   `.app`); README: install, Gatekeeper (`xattr -dr
+   com.apple.quarantine marg.app` or right-click → Open), the terminal
+   command (`marg.app/Contents/MacOS/marg`).
+6. Docs and handover, with a checklist for the user: Open With from
+   Finder and Zotero, Cmd-q with unsaved changes, keys on their layout
+   (Option as AltGr), links, drag and drop, Retina sharpness, speed.
+
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
 building more.
@@ -1724,7 +1753,7 @@ building more.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.
 
-**macOS (next, user 2026-10-30; findings from that day, nothing built):**
+**macOS (planned in §11 "macOS steps"; findings from 2026-10-30):**
 eframe/winit/wgpu (Metal), `directories` and MuPDF support macOS;
 `input.rs` already maps Cmd to Ctrl. To do: `browser.rs` needs `open`
 (today `xdg-open` for every non-Windows OS); macOS paths in §8; a `.app`
