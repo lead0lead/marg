@@ -78,6 +78,18 @@
 # Added to chars for the word labels of a picked line.
 #extra_chars = "qwertyuiop"
 
+#[search]
+# Selections longer than this are cut at a word boundary (characters).
+#max_chars = 500
+
+#[search.engines]
+# Web search for the selected text (Visual gs): name = URL, %s is the text.
+# gs uses default; bind others in [keys.visual], for example
+# gw = "selection.search(wiki)". Entries add to the default one.
+# wiki = "https://en.wikipedia.org/wiki/Special:Search?search=%s"
+# scholar = "https://scholar.google.com/scholar?q=%s"
+#default = "https://duckduckgo.com/?q=%s"
+
 #[annotation]
 # Annotation author; empty: your user name.
 #author = ""

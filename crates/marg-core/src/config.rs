@@ -28,6 +28,7 @@ pub struct Config {
     pub render: RenderConfig,
     pub ui: UiConfig,
     pub hints: HintsConfig,
+    pub search: SearchConfig,
     pub annotation: AnnotationConfig,
     /// Highlight categories; keys `1`–`5` pick the first five.
     #[serde(rename = "category")]
@@ -46,6 +47,7 @@ impl Default for Config {
             render: RenderConfig::default(),
             ui: UiConfig::default(),
             hints: HintsConfig::default(),
+            search: SearchConfig::default(),
             annotation: AnnotationConfig::default(),
             categories: default_categories(),
             keys: KeysConfig::default(),
@@ -150,6 +152,44 @@ impl Default for HintsConfig {
             extra_chars: "qwertyuiop".into(),
         }
     }
+}
+
+/// The search engine `selection.search` uses without a name.
+pub const DEFAULT_ENGINE: &str = "https://duckduckgo.com/?q=%s";
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SearchConfig {
+    /// Longer selections are cut at a word boundary (characters).
+    pub max_chars: usize,
+    /// Name → URL with `%s` for the text. Added to the built-in
+    /// `default`, which an entry of that name replaces.
+    #[serde(deserialize_with = "engines_over_default")]
+    pub engines: BTreeMap<String, String>,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            max_chars: 500,
+            engines: default_engines(),
+        }
+    }
+}
+
+fn default_engines() -> BTreeMap<String, String> {
+    BTreeMap::from([(
+        crate::lookup::DEFAULT.to_string(),
+        DEFAULT_ENGINE.to_string(),
+    )])
+}
+
+fn engines_over_default<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, String>, D::Error> {
+    let mut engines = default_engines();
+    engines.extend(BTreeMap::<String, String>::deserialize(d)?);
+    Ok(engines)
 }
 
 /// Key bindings on top of the defaults: key sequence → command name
@@ -331,7 +371,7 @@ impl Config {
 }
 
 /// Settings `:set` does not change: tables and the theme file.
-const NOT_SET: [&str; 3] = ["keys", "category", "theme"];
+const NOT_SET: [&str; 4] = ["keys", "category", "theme", "search.engines"];
 
 impl Config {
     /// `:set name=value`: this config with one setting changed. `name` is
@@ -460,14 +500,15 @@ pub fn unknown_settings(text: &str) -> Vec<String> {
     written.difference(&known).cloned().collect()
 }
 
-/// Every setting in `t`, dotted. The `keys.*` tables count as one
-/// setting each (their keys are key sequences); arrays of tables (such as
+/// Every setting in `t`, dotted. The `keys.*` tables and
+/// `search.engines` count as one setting each (their keys are key
+/// sequences or names); arrays of tables (such as
 /// `category`) by their tables' keys.
 fn setting_paths(t: &toml::Table, prefix: &str, out: &mut BTreeSet<String>) {
     for (k, v) in t {
         let p = format!("{prefix}{k}");
         match v {
-            toml::Value::Table(_) if prefix == "keys." => {
+            toml::Value::Table(_) if prefix == "keys." || p == "search.engines" => {
                 out.insert(p);
             }
             toml::Value::Table(t) => setting_paths(t, &format!("{p}."), out),

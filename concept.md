@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
-| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed; CI green on Linux, Windows and macOS (2026-10-30: build, tests and clippy `-D warnings` on `macos-latest` arm64, so all macOS code compiles; MuPDF builds with the runner's Xcode tools). |
-| **Next step** | The user tries it on their Mac (CI artifact or a local build): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed. Then merge. The Phase 3–5 choices in §12 are open. |
+| **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
+| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed; `main` (1.2.0: `gs`, `--help`) merged in 2026-10-30 for a fresh test build; CI green on Linux, Windows and macOS (2026-10-30: build, tests and clippy `-D warnings` on `macos-latest` arm64, so all macOS code compiles; MuPDF builds with the runner's Xcode tools). |
+| **Next step** | The user tries it on their Mac (the manual Release run on `macos` after merging `main`, artifact `marg-macos-arm64.zip`, or a local build), including `gs` and `--help`: Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed. Then merge. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
-| **Live version** | v1.1.0 |
+| **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS) |
+| **Last updated** | 2026-10-30 (macOS; `main` at 1.2.0 merged in) |
 
 ---
 
@@ -447,6 +447,19 @@ one follows it. "Still reading the links" / "No links in view".
 - `y` copies the selected text to the clipboard (dehyphenated, lines joined
   with spaces).
 - Esc clears the selection and leaves Caret mode.
+- **Web search** (decided with the user 2026-10-30, branch
+  `selection-search`): `gs` in Visual mode (`selection.search`) looks the
+  selected text (a word, sentence or paragraph) up in the default browser
+  with a search engine from the config. The browser's own default engine
+  cannot be reached (no common way to ask a browser for it; only Firefox
+  has `--search`), so marg has its own: DuckDuckGo by default (user's
+  choice). Several named engines (user's choice over a single URL):
+  `[search.engines]`, `name = "URL with %s"`; `gs` uses `default`, and
+  `selection.search(name)` binds another, e.g. `gw =
+  "selection.search(wiki)"` in `[keys.visual]`. The text is the copy text
+  (dehyphenated, lines joined), whitespace collapsed, cut at a word
+  boundary after `search.max_chars` (500) and percent-encoded. Stays in
+  Visual, like `y`; the status bar names the engine.
 - Multi-column papers rely on MuPDF's block order. If the order is wrong on a
   page, motions follow the wrong order; that is a known risk (§12), checked at
   the decision milestone.
@@ -469,6 +482,22 @@ click clears the selection; double/triple click within 400 ms
 (`ui.multi_click_ms`). Dragging into the 16 px edge zone at the top or
 bottom (or past it) scrolls, faster the further in (`ui.drag_scroll_rate`
 px/s per px, `ui.drag_scroll_edge_px`), and extends the selection.
+
+**As implemented (selection search, 2026-10-30):** `marg-core/src/
+lookup.rs`: `query` (whitespace collapsed; cut before the word that
+passes `max_chars`, a single longer word inside), `url` (every `%s`
+replaced; RFC 3986 unreserved characters kept, the rest
+percent-encoded as UTF-8, space as `%20`), `check` (engines without
+`%s`; Visual bindings to engines not in the table), shown with the key
+binding warnings. `Command::SelectionSearch(Option<String>)`;
+`Command::from_name` parses `selection.search(name)`. The help overlay
+and page list named-engine bindings as "search the web with <name>".
+The app opens the URL with `browser::open` (as for links) and shows
+`Searching <engine>: "<first 40 characters>…"`, with "(cut)" when
+shortened. Checked on Xvfb with a stand-in `xdg-open` that logs the
+URL: a double-clicked word, a three-line paragraph (`Vjj`), a `wiki`
+engine with `max_chars = 30`, the config warnings and an unknown
+engine at the key press.
 
 ### 2.8 Annotations
 
@@ -867,6 +896,7 @@ remappable (§8).
 | | `Enter`, then `1`–`5` or `Enter` | highlight via category prompt (last category on `Enter`) |
 | | `c` | highlight + comment |
 | | `y` | copy text |
+| | `gs` | search the web for the text (`selection.search`, `selection.search(name)`) |
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
@@ -1259,6 +1289,13 @@ config falls back to all defaults and shows the error. Reloading, `:set`,
 
 **As implemented (drag and drop, 2026-10-30):** `[ui]` adds
 `drop_max_files = 10`.
+
+**As implemented (selection search, 2026-10-30):** new section
+`[search]` with `max_chars = 500` and the table `[search.engines]`
+(name → URL with `%s`; built-in `default =
+"https://duckduckgo.com/?q=%s"`, user entries are added to it and may
+replace it). `search.engines` counts as one setting for unknown-key
+warnings and `:set` refuses it, like `keys.*`.
 
 **As implemented (Phase 3b):** top-level `theme = ""`; `[view] recolor =
 false`; new sections `[colors]`, `[fonts]`, `[statusbar]` (§6
@@ -1684,6 +1721,14 @@ must save first, like closing the window); "Open With" support with
    Finder and Zotero, Cmd-q with unsaved changes, keys on their layout
    (Option as AltGr), links, drag and drop, Retina sharpness, speed.
 
+**Selection search steps** (branch `selection-search`, planned
+2026-10-30 with the user, one commit each): 1 core: `[search]` config
+(engines merged over the built-in `default`, `%s` required, unknown
+engine in a binding is a config error), `selection.search[(name)]`,
+`gs` in Visual, URL building (unit-tested); 2 app: open the URL with
+`browser::open`, status message, errors; 3 docs (README, cheat sheet,
+`:config` file) and handover.
+
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
 building more.
@@ -1899,6 +1944,57 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — Release 1.2.0
+- Done: merged `selection-search` and `cli-help` into `main` and pushed;
+  version 1.2.0, tag `v1.2.0`. Release run green (20 min; CI 2 min):
+  `marg-linux-x86_64` and `marg-windows-x86_64.exe` attached. Local
+  install (`~/.local/bin/marg`) is the `main` build at the release.
+- Decisions: minor version (new features). macOS not included: `macos`
+  waits for the user's test on their Mac.
+- Next: the user tries the `macos` branch; then merge (conflicts noted
+  in §0) and release macOS in 1.2.x / 1.3.0.
+
+### 2026-10-30 — Selection search
+- Done: branch `selection-search` off `main` (plan, core, app, docs; one
+  commit each). `gs` in Visual mode opens the selected text as a web
+  search in the default browser; `[search.engines]` holds named engines,
+  bound with `selection.search(name)`.
+- Decisions: the browser's own default engine cannot be used (user asked;
+  no common way to reach it), so DuckDuckGo is the default (user's
+  fallback choice); several named engines over one URL; key `gs` (all
+  three the user's picks of Claude's options). Text is cut at
+  `search.max_chars` (500) so URLs stay short enough for browsers and
+  engines. Stays in Visual after searching, like `y`.
+- State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
+  with a stand-in `xdg-open` (no real browser opened).
+- Next: merged into `main` together with `cli-help` (user, 2026-10-30,
+  after trying a combined build installed in `~/.local/bin/marg`). The
+  user's own config has `gc = "selection.search(claude)"` with
+  `claude = "https://claude.ai/new?q=Explain%20this%20passage%3A%20%s"`
+  (user's choice; not in the default config). `claude.ai/new?q=` is
+  undocumented and may stop working.
+- Watch out: `:set` cannot change `search.engines` (a table, like
+  `keys.*`); edit the config file.
+
+### 2026-10-30 — `--help`
+- Done: branch `cli-help` off `main`. `marg --help` used to open a file
+  named `--help` (found while weighing a man page). Now `-h`/`--help`
+  prints usage, options and a pointer to `?` and `:help`; an unknown
+  argument starting with `--` is a usage error (exit 2). `parse_args`
+  takes the arguments, with a unit test.
+- Decisions: no man page for now (user asked; Claude advised against
+  until marg is packaged, since nothing would install it). If added later:
+  hand-written roff from the same key table as the help page, no new
+  library.
+- State: builds; all tests pass; clippy and fmt clean. Local install
+  (`~/.local/bin/marg`) updated to `main` at `6207d0a` (drag and drop)
+  before this branch.
+- Next: the user tries `marg --help`, then merge into `main`. Merging
+  `macos` afterwards touches the same `match` in `parse_args` (`-psn_`).
+- Watch out: a shared `CARGO_TARGET_DIR` across worktrees leaves test
+  binaries with the other worktree's fixture paths (`env!` paths are not
+  tracked); touch the tests to rebuild.
 
 ### 2026-10-30 — macOS support
 - Done (branch `macos`, not pushed): drag and drop merged into `main`

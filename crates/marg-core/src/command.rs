@@ -72,6 +72,9 @@ pub enum Command {
     PickCategory,
     /// Copy the selected text.
     Copy,
+    /// Look the selected text up in the browser with a search engine from
+    /// `[search.engines]` (`None`: `default`).
+    SelectionSearch(Option<String>),
     Undo,
     Redo,
     /// Save now (`:w`).
@@ -276,6 +279,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         "highlight: choose category",
     ),
     ("selection.copy", Command::Copy, "copy text"),
+    (
+        "selection.search",
+        Command::SelectionSearch(None),
+        "search the web for the text",
+    ),
     ("undo", Command::Undo, "undo"),
     ("redo", Command::Redo, "redo"),
     ("file.save", Command::Save, "save"),
@@ -417,8 +425,17 @@ impl Command {
         )
     }
 
-    /// Look up a bindable command by name.
+    /// Look up a bindable command by name. `selection.search(name)`
+    /// names a search engine.
     pub fn from_name(name: &str) -> Option<Self> {
+        if let Some(engine) = name
+            .strip_prefix("selection.search(")
+            .and_then(|r| r.strip_suffix(')'))
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        {
+            return Some(Command::SelectionSearch(Some(engine.to_string())));
+        }
         REGISTRY
             .iter()
             .find(|(n, _, _)| *n == name)
@@ -432,6 +449,7 @@ impl Command {
             Command::Export(_) => "file.export",
             Command::Set(_) => "config.set",
             Command::SetLayout(_) => "view.layout",
+            Command::SelectionSearch(_) => "selection.search",
             c => REGISTRY
                 .iter()
                 .find(|(_, r, _)| r == c)
