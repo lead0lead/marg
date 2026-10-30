@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | selection search (branch `selection-search`, planned 2026-10-30, steps in §11): all 3 steps done, waiting for the user to try it. Branches `cli-help` (`--help`) and `macos` wait for the user too. |
-| **Next step** | The user tries `gs` (and a named engine) on a real paper, then merge. Merge order of `cli-help`, `macos` and `selection-search`: each touches concept.md §0 and the session log, so later merges need small conflict fixes. The Phase 3–5 choices in §12 are open. |
+| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1, drag and drop, selection search (`gs`, `[search.engines]`) and `--help` merged into `main` (the last two on 2026-10-30, not released yet). |
+| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
+| **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (selection search) |
+| **Last updated** | 2026-10-30 (selection search and `--help` merged) |
 
 ---
 
@@ -1895,9 +1895,33 @@ Format:
   engines. Stays in Visual after searching, like `y`.
 - State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
   with a stand-in `xdg-open` (no real browser opened).
-- Next: the user tries it, then merge (see §0 on the merge order).
+- Next: merged into `main` together with `cli-help` (user, 2026-10-30,
+  after trying a combined build installed in `~/.local/bin/marg`). The
+  user's own config has `gc = "selection.search(claude)"` with
+  `claude = "https://claude.ai/new?q=Explain%20this%20passage%3A%20%s"`
+  (user's choice; not in the default config). `claude.ai/new?q=` is
+  undocumented and may stop working.
 - Watch out: `:set` cannot change `search.engines` (a table, like
   `keys.*`); edit the config file.
+
+### 2026-10-30 — `--help`
+- Done: branch `cli-help` off `main`. `marg --help` used to open a file
+  named `--help` (found while weighing a man page). Now `-h`/`--help`
+  prints usage, options and a pointer to `?` and `:help`; an unknown
+  argument starting with `--` is a usage error (exit 2). `parse_args`
+  takes the arguments, with a unit test.
+- Decisions: no man page for now (user asked; Claude advised against
+  until marg is packaged, since nothing would install it). If added later:
+  hand-written roff from the same key table as the help page, no new
+  library.
+- State: builds; all tests pass; clippy and fmt clean. Local install
+  (`~/.local/bin/marg`) updated to `main` at `6207d0a` (drag and drop)
+  before this branch.
+- Next: the user tries `marg --help`, then merge into `main`. Merging
+  `macos` afterwards touches the same `match` in `parse_args` (`-psn_`).
+- Watch out: a shared `CARGO_TARGET_DIR` across worktrees leaves test
+  binaries with the other worktree's fixture paths (`env!` paths are not
+  tracked); touch the tests to rebuild.
 
 ### 2026-10-30 — Drag and drop; macOS assessed
 - Done (branch `drag-and-drop`, not merged, not pushed), one commit

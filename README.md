@@ -38,6 +38,7 @@ cargo build --profile dist      # target/dist/marg
 marg paper.pdf              # open a file
 marg paper.pdf --page 12    # at page 12
 marg                        # recent files
+marg --help                 # options
 ```
 
 Dropping PDFs on the window opens them: the first in that window, the
