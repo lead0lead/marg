@@ -53,7 +53,8 @@ marg's annotations through its "Import annotations" option.
 
 **Annotations** are saved two seconds after a change and when you quit.
 `:w` saves immediately. Backups of the originals are kept in
-`~/.local/share/marg/backups` (Windows: `%LOCALAPPDATA%\marg\backups`).
+`~/.local/share/marg/backups` (Windows: `%LOCALAPPDATA%\marg\backups`,
+macOS: `~/Library/Application Support/marg/backups`).
 Encrypted PDFs ask for their password. PDFs whose permissions forbid
 annotations open read-only; `:unlock` allows annotations in the open file.
 
@@ -62,11 +63,11 @@ annotations open read-only; `:unlock` allows annotations in the open file.
 `:config` writes a commented config file with every setting and the
 default keys:
 
-| | Linux | Windows |
-|---|---|---|
-| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` |
-| State (positions, recent files) | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` |
-| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` |
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` | `~/Library/Application Support/marg/config.toml` |
+| State (positions, recent files) | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` | `~/Library/Application Support/marg/state.toml` |
+| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` | `~/Library/Application Support/marg/marg.log` |
 
 marg reloads the config when you save it, and reports mistakes in the
 status bar. Example themes are in [`docs/themes`](docs/themes).

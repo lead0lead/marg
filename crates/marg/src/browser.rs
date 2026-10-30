@@ -12,7 +12,13 @@ pub fn open(url: &str) -> std::io::Result<()> {
         c.args(["url.dll,FileProtocolHandler", url]);
         c
     };
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
     let mut cmd = {
         let mut c = Command::new("xdg-open");
         c.arg(url);

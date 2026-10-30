@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
 | **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
-| **Next step** | Step 2: `open` for links, macOS paths, macOS CI job. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Step 3: "Open With" (`odoc` handler). The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS, step 1) |
+| **Last updated** | 2026-10-30 (macOS, step 2) |
 
 ---
 
@@ -339,7 +339,7 @@ selected. Entries without a destination are dim. Destinations
 shown at the window's top left. Links: `Request::Links(page)` for the
 visible pages; internal links jump, URIs with a scheme (`https:`,
 `mailto:`) ask "Open … ? y: yes  any other key: no" (mode `Confirm`),
-then start `xdg-open` (Windows: `rundll32 url.dll,FileProtocolHandler`,
+then start `xdg-open` (macOS: `open`; Windows: `rundll32 url.dll,FileProtocolHandler`,
 no shell) without waiting. A click (press and release within 4 px, no
 selection made) on a link follows it; the pointer is a hand over links.
 
@@ -1175,12 +1175,12 @@ Not applicable. marg makes no sounds.
 
 ### Paths
 
-| | Linux | Windows |
-|---|---|---|
-| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` |
-| State | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` |
-| Data (backups) | `~/.local/share/marg/backups/` | `%LOCALAPPDATA%\marg\backups\` |
-| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` |
+| | Linux | Windows | macOS (all in one folder) |
+|---|---|---|---|
+| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` | `~/Library/Application Support/marg/config.toml` |
+| State | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` | `~/Library/Application Support/marg/state.toml` |
+| Data (backups) | `~/.local/share/marg/backups/` | `%LOCALAPPDATA%\marg\backups\` | `~/Library/Application Support/marg/backups/` |
+| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` | `~/Library/Application Support/marg/marg.log` |
 
 Resolve these with the `directories` crate (respecting `XDG_*` variables). A
 missing config file means defaults; `:config` writes a fully commented default
@@ -1756,7 +1756,7 @@ building more.
 **macOS (planned in §11 "macOS steps"; findings from 2026-10-30):**
 eframe/winit/wgpu (Metal), `directories` and MuPDF support macOS;
 `input.rs` already maps Cmd to Ctrl. To do: `browser.rs` needs `open`
-(today `xdg-open` for every non-Windows OS); macOS paths in §8; a `.app`
+(done in step 2); macOS paths in §8 (done in step 2); a `.app`
 bundle (`Info.plist` with a PDF document type, `.icns`); signing and
 notarization or a documented Gatekeeper workaround; a macOS CI and
 release job. Risk: Finder, the Dock and Zotero open files with an Apple
