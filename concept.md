@@ -68,14 +68,14 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): 1 spec in this document; 2 `ui.drop_max_files`; 3 dropping PDFs opens them; 4 docs and handover. Then macOS support (user, 2026-10-30), planned with the user first. |
-| **Next step** | Step 4: docs and handover. The Phase 3–5 choices in §12 are open. |
+| **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): all 4 steps done, waiting for the user to try it. Then macOS support (user, 2026-10-30), planned with the user first. |
+| **Next step** | The user tries drag and drop (on Wayland only through XWayland; Windows via a CI build), then merge into `main`. Then plan macOS support with the user (§12 has the findings). The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (drag and drop, step 3) |
+| **Last updated** | 2026-10-30 (drag and drop) |
 
 ---
 
@@ -157,6 +157,20 @@ defaults of `config.toml` (see §8), not scattered in code.
   While files hover over the window, an overlay says "Drop to open".
   Wayland: winit 0.30 has no drag and drop there, so drops only work on
   X11/XWayland, Windows (and macOS later); see §12.
+
+**As implemented (drag and drop, 2026-10-30):** `drop.rs` (app) sorts
+the paths of `raw.dropped_files` (`drop::sort`, unit-tested) and starts
+new windows (`current_exe()` with the path, stdio null, reaped by a
+thread, like `browser.rs`). `open_path` and drops share `open_files(path,
+rest)`; `AfterSave::Open` carries `rest`, so the new windows start only
+after the save succeeds. Drops are refused with a message in Insert, Box
+and Password modes (the comment, box or pending open would be lost);
+other modes work like `:e`. `raw.hovered_files` draws the "Drop to open"
+overlay over the view. Checked on Xvfb with a small XDND source written
+for the test (not in the repo): overlay, PDF plus `.txt` (opens the PDF,
+"Not a PDF: notes.txt"), two PDFs over an open file (second window with
+the right file), 11 PDFs (none opened, message). Not checked by hand:
+dropping with unsaved changes (same code path as `:e`), Windows.
 
 **As implemented (Phase 5, passwords):** `Request::Open { path, password
 }`; `Doc::open_with_password` answers `OpenError::NeedsPassword` or
@@ -1710,6 +1724,17 @@ building more.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.
 
+**macOS (next, user 2026-10-30; findings from that day, nothing built):**
+eframe/winit/wgpu (Metal), `directories` and MuPDF support macOS;
+`input.rs` already maps Cmd to Ctrl. To do: `browser.rs` needs `open`
+(today `xdg-open` for every non-Windows OS); macOS paths in §8; a `.app`
+bundle (`Info.plist` with a PDF document type, `.icns`); signing and
+notarization or a documented Gatekeeper workaround; a macOS CI and
+release job. Risk: Finder, the Dock and Zotero open files with an Apple
+Event, not argv, and winit 0.30.13 does not handle it, so "Open With
+marg" needs glue (e.g. `objc2`, a new library to approve). To decide:
+Cmd vs. Ctrl in the keymap, Option as AltGr, arm64 only or universal.
+
 **Known issues**
 
 - Drag and drop does nothing on Wayland: winit 0.30.13 only sends
@@ -1811,6 +1836,25 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — Drag and drop; macOS assessed
+- Done (branch `drag-and-drop`, not merged, not pushed), one commit
+  each: spec in §2.1; `ui.drop_max_files = 10`; dropping PDFs opens them
+  (`drop.rs`, "Drop to open" overlay); docs (README, §2.1, §12).
+- Decisions (user): PDFs only; drops work on the recent files list and
+  over an open file (first considered the list only; `:e` works
+  everywhere, so drops do too); several files: user 50/50, Claude
+  recommended first here + new windows for the rest, with a cap (none
+  open past it), and the user agreed. macOS support comes next.
+- Tried and failed: nothing in marg. Test harness: `pkill -x marg` was
+  refused (it could hit the user's own marg windows); kill test
+  processes by PID only.
+- State: build, tests, clippy and fmt pass. Drops checked on Xvfb with a
+  throwaway XDND source in C (Enter/Position/Drop, serves
+  `text/uri-list`): overlay, skip message, second window, cap.
+- Next: the user tries it (Wayland: not supported by winit 0.30.13;
+  XWayland or Windows), then merge; then plan macOS (§12).
+- Watch out: Wayland drops are a winit limit, not a marg bug.
 
 ### 2026-10-29 — Polish list, first items
 - Done (branch `polish-1`, not merged, not pushed), one commit each: prompt
