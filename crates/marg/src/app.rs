@@ -18,6 +18,7 @@ use marg_core::jumps::JumpList;
 use marg_core::keymap::{KeyMode, Keymap, Matcher, Outcome};
 use marg_core::keys::{KeyCode, KeyPress, Named};
 use marg_core::lineedit::LineEdit;
+use marg_core::lookup;
 use marg_core::outline::{Dest, Link, LinkTarget, OutlineEntry, link_at};
 use marg_core::search::Hit;
 use marg_core::state::{FileState, State, file_key};
@@ -2750,6 +2751,36 @@ impl MargApp {
         self.show(Level::Info, format!("Copied {n} characters"));
     }
 
+    /// Look the selected text up in the browser with a search engine
+    /// (`None`: the default one).
+    fn search_selection(&mut self, engine: Option<&str>) {
+        let (Some(open), Some(sel)) = (&self.open, &self.selection) else {
+            return;
+        };
+        let name = engine.unwrap_or(lookup::DEFAULT);
+        let Some(template) = self.config.search.engines.get(name) else {
+            self.error(format!("No search engine {name} in [search.engines]"));
+            return;
+        };
+        let (query, cut) = lookup::query(&sel.text(&open.texts), self.config.search.max_chars);
+        if query.is_empty() {
+            self.error("No text selected".into());
+            return;
+        }
+        let url = lookup::url(template, &query);
+        if let Err(e) = browser::open(&url) {
+            self.error(format!("Cannot open the browser: {e}"));
+            return;
+        }
+        const PREVIEW: usize = 40;
+        let mut shown: String = query.chars().take(PREVIEW).collect();
+        if query.chars().count() > PREVIEW {
+            shown.push('…');
+        }
+        let note = if cut { " (cut)" } else { "" };
+        self.show(Level::Info, format!("Searching {name}: \"{shown}\"{note}"));
+    }
+
     fn cmdline_event(&mut self, ctx: &egui::Context, e: &Event) {
         match e {
             Event::Text(t) => self.cmdline.insert(t),
@@ -3103,6 +3134,10 @@ impl MargApp {
             }
             Command::Copy => {
                 self.copy_selection(ctx);
+                return;
+            }
+            Command::SelectionSearch(engine) => {
+                self.search_selection(engine.as_deref());
                 return;
             }
             Command::Highlight(n) => {
@@ -4265,7 +4300,7 @@ fn annot_kind(subtype: &str) -> Option<AnnotKind> {
 
 /// The annotation author: the configured one, else the OS user name.
 /// The Normal, Caret, Visual and Annot keymaps, and warnings about the
-/// `[keys.*]` tables.
+/// `[keys.*]` tables and `[search]`.
 fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
     let mut warnings = Vec::new();
     let maps = [
@@ -4279,6 +4314,7 @@ fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
         warnings.extend(w);
         map
     });
+    warnings.extend(lookup::check(config));
     (maps, warnings)
 }
 
