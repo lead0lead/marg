@@ -67,7 +67,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
+| **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. Branch `cli-help` (2026-10-30, not merged): `marg -h`/`--help` prints usage and options; unknown `--options` are an error instead of a file name. |
 | **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): all 4 steps done, waiting for the user to try it. Then macOS support (user, 2026-10-30), planned with the user first. |
 | **Next step** | The user tries drag and drop (on Wayland only through XWayland; Windows via a CI build), then merge into `main`. Then plan macOS support with the user (§12 has the findings). The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
@@ -75,7 +75,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (drag and drop) |
+| **Last updated** | 2026-10-30 (`--help`) |
 
 ---
 
@@ -1836,6 +1836,25 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — `--help`
+- Done: branch `cli-help` off `main`. `marg --help` used to open a file
+  named `--help` (found while weighing a man page). Now `-h`/`--help`
+  prints usage, options and a pointer to `?` and `:help`; an unknown
+  argument starting with `--` is a usage error (exit 2). `parse_args`
+  takes the arguments, with a unit test.
+- Decisions: no man page for now (user asked; Claude advised against
+  until marg is packaged, since nothing would install it). If added later:
+  hand-written roff from the same key table as the help page, no new
+  library.
+- State: builds; all tests pass; clippy and fmt clean. Local install
+  (`~/.local/bin/marg`) updated to `main` at `6207d0a` (drag and drop)
+  before this branch.
+- Next: the user tries `marg --help`, then merge into `main`. Merging
+  `macos` afterwards touches the same `match` in `parse_args` (`-psn_`).
+- Watch out: a shared `CARGO_TARGET_DIR` across worktrees leaves test
+  binaries with the other worktree's fixture paths (`env!` paths are not
+  tracked); touch the tests to rebuild.
 
 ### 2026-10-30 — Drag and drop; macOS assessed
 - Done (branch `drag-and-drop`, not merged, not pushed), one commit

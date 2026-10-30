@@ -3,6 +3,7 @@
 // No console window next to marg on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
@@ -35,6 +36,20 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/marg-256.png");
 
 const USAGE: &str = "usage: marg [<file.pdf> [--page N]]";
 
+const HELP: &str = "\
+marg: keyboard-driven PDF reader and annotator
+
+usage: marg [<file.pdf> [--page N]]
+
+Without a file, marg shows the recent files list.
+
+options:
+  --page N       open the file at page N (from 1)
+  -h, --help     print this help
+  --version      print the version
+
+In marg, ? shows the keys of the current mode and :help shows all keys.";
+
 struct Args {
     /// No file: show the recent files list.
     path: Option<PathBuf>,
@@ -42,10 +57,11 @@ struct Args {
     page: Option<usize>,
 }
 
-fn parse_args() -> Result<Args, String> {
+/// `args` without the program name.
+fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, String> {
     let mut path = None;
     let mut page = None;
-    let mut args = std::env::args_os().skip(1);
+    let mut args = args.into_iter();
     while let Some(a) = args.next() {
         match a.to_str() {
             Some("--page") => {
@@ -61,6 +77,11 @@ fn parse_args() -> Result<Args, String> {
                 println!("marg {} ({GIT_HASH})", marg_core::VERSION);
                 std::process::exit(0);
             }
+            Some("-h" | "--help") => {
+                println!("{HELP}");
+                std::process::exit(0);
+            }
+            Some(s) if s.starts_with("--") => return Err(format!("unknown option {s}")),
             _ if path.is_none() => path = Some(PathBuf::from(a)),
             _ => return Err(format!("unexpected argument {}", a.to_string_lossy())),
         }
@@ -92,7 +113,7 @@ fn main() -> eframe::Result {
     attach_console();
     let start = std::time::Instant::now();
     let timing = std::env::var_os("MARG_TIMING").is_some_and(|v| v != "0");
-    let args = match parse_args() {
+    let args = match parse_args(std::env::args_os().skip(1)) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("marg: {e}\n{USAGE}");
@@ -164,5 +185,21 @@ mod tests {
     fn icon_decodes() {
         let icon = eframe::icon_data::from_png_bytes(super::ICON_PNG).unwrap();
         assert_eq!((icon.width, icon.height), (256, 256));
+    }
+
+    fn parse(args: &[&str]) -> Result<super::Args, String> {
+        super::parse_args(args.iter().map(Into::into))
+    }
+
+    #[test]
+    fn args() {
+        let a = parse(&["a.pdf", "--page", "3"]).unwrap();
+        assert_eq!(a.path.as_deref(), Some(std::path::Path::new("a.pdf")));
+        assert_eq!(a.page, Some(3));
+        assert!(parse(&[]).unwrap().path.is_none());
+        assert_eq!(parse(&["--hlep"]).err().unwrap(), "unknown option --hlep");
+        assert!(parse(&["--page", "0", "a.pdf"]).is_err());
+        assert!(parse(&["--page", "2"]).is_err());
+        assert!(parse(&["a.pdf", "b.pdf"]).is_err());
     }
 }
