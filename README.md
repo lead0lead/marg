@@ -167,6 +167,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 |---|---|
 | `o` | swap selection end |
 | `y` | copy text |
+| `gs` | search the web for the text |
 
 ### Visual — annotating
 

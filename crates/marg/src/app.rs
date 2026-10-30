@@ -3265,6 +3265,7 @@ impl MargApp {
             | Command::VisualLine
             | Command::VisualSwap
             | Command::Copy
+            | Command::SelectionSearch(_)
             | Command::Highlight(_)
             | Command::Underline
             | Command::PickCategory

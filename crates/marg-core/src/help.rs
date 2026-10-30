@@ -76,6 +76,22 @@ pub fn bindings(map: &Keymap, base: Option<&Keymap>) -> Vec<(&'static str, HelpL
                     },
                 ));
             }
+            // Bindings to named search engines are not in the registry.
+            if *cmd == Command::SelectionSearch(None) {
+                for (k, c) in map.iter() {
+                    if let Command::SelectionSearch(Some(name)) = c
+                        && !inherited(&k, c)
+                    {
+                        out.push((
+                            topic_name,
+                            HelpLine::Binding {
+                                keys: k,
+                                text: format!("search the web with {name}"),
+                            },
+                        ));
+                    }
+                }
+            }
         }
     }
     out
@@ -437,6 +453,18 @@ mod tests {
         assert!(has(&caret, "w", "next word"));
         assert!(!has(&caret, "J, PageDown, Ctrl-n", "next page"));
         assert!(has(&page, "1", "Key point"));
+    }
+
+    #[test]
+    fn named_search_engines_are_listed() {
+        let keys = KeysConfig {
+            visual: BTreeMap::from([("gw".to_string(), "selection.search(wiki)".to_string())]),
+            ..KeysConfig::default()
+        };
+        let [_, c, v, _] = maps(&keys);
+        let visual = section("", &v, Some(&c));
+        assert!(has(&visual, "gs", "search the web for the text"));
+        assert!(has(&visual, "gw", "search the web with wiki"));
     }
 
     const SHEET_START: &str = "<!-- cheat sheet: generated, MARG_BLESS=1 cargo test updates it -->";
