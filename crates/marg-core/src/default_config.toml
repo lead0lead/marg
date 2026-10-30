@@ -67,6 +67,9 @@
 # Annotation list and outline width (share of the window).
 #annot_list_width = 0.35
 #outline_width = 0.4
+# Dropped PDFs: the first opens here, each other one in a new window. More
+# than this many at once opens none.
+#drop_max_files = 10
 
 #[hints]
 # Label characters; two-stage (lines, then words) or words (all at once).

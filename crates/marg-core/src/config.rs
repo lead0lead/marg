@@ -266,6 +266,9 @@ pub struct UiConfig {
     pub annot_list_width: f32,
     /// Width of the outline, as a share of the window width.
     pub outline_width: f32,
+    /// Dropping more PDFs than this at once opens none of them (each one
+    /// after the first starts a window).
+    pub drop_max_files: usize,
 }
 
 impl Default for UiConfig {
@@ -285,6 +288,7 @@ impl Default for UiConfig {
             comment_max_height: 0.4,
             annot_list_width: 0.35,
             outline_width: 0.4,
+            drop_max_files: 10,
         }
     }
 }

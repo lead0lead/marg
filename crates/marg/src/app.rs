@@ -34,6 +34,7 @@ use crate::boxmode::BoxMode;
 use crate::browser;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
+use crate::drop;
 use crate::help::HelpView;
 use crate::input;
 use crate::outline::{self, OutlineList};
@@ -189,7 +190,8 @@ enum AfterSave {
     /// `:w`: say "Saved".
     Report,
     Quit,
-    Open(PathBuf),
+    /// Open the file here and the others in new windows.
+    Open(PathBuf, Vec<PathBuf>),
     Close,
 }
 
@@ -871,14 +873,17 @@ impl MargApp {
                                 AfterSave::Quit => {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close)
                                 }
-                                AfterSave::Open(path) => self.send_open(path, None),
+                                AfterSave::Open(path, rest) => {
+                                    self.send_open(path, None);
+                                    self.open_in_new_windows(rest);
+                                }
                                 AfterSave::Close => self.close_doc(ctx),
                             }
                         }
                         Err(e) => {
                             let what = match after {
                                 AfterSave::Quit => "Not quitting: ",
-                                AfterSave::Open(_) => "Not opening the other file: ",
+                                AfterSave::Open(..) => "Not opening the other file: ",
                                 AfterSave::Close => "Not closing: ",
                                 _ => "",
                             };
@@ -1031,6 +1036,16 @@ impl MargApp {
     /// anchors are relative to it.
     fn handle_input(&mut self, ctx: &egui::Context, area: egui::Rect) {
         self.area = area;
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.drop_files(dropped);
+        }
         let events = ctx.input(|i| i.events.clone());
         let pointer = ctx.input(|i| i.pointer.hover_pos()).map(|p| p - area.min);
         let mut skip_text = false;
@@ -3289,11 +3304,49 @@ impl MargApp {
             self.error(format!("No such file: {}", path.display()));
             return;
         }
+        self.open_files(path, Vec::new());
+    }
+
+    /// Open `path` here and `rest` in new windows, once pending changes
+    /// are saved.
+    fn open_files(&mut self, path: PathBuf, rest: Vec<PathBuf>) {
         self.start_page = None;
         if self.open.as_ref().is_some_and(|o| o.unsaved()) {
-            self.save(false, AfterSave::Open(path));
+            self.save(false, AfterSave::Open(path, rest));
         } else {
             self.send_open(path, None);
+            self.open_in_new_windows(rest);
+        }
+    }
+
+    fn open_in_new_windows(&mut self, paths: Vec<PathBuf>) {
+        for path in paths {
+            if let Err(e) = drop::open_in_new_window(&path) {
+                self.error(format!(
+                    "Cannot open {} in a new window: {e}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    /// Files dropped on the window (concept §2.1).
+    fn drop_files(&mut self, paths: Vec<PathBuf>) {
+        // These would lose what is being typed or drawn.
+        if matches!(self.mode, Mode::Insert | Mode::Box | Mode::Password) {
+            self.show(
+                Level::Warn,
+                "Not opening dropped files: finish or cancel first".into(),
+            );
+            return;
+        }
+        let dropped = drop::sort(paths, self.config.ui.drop_max_files);
+        if let Some(m) = dropped.message {
+            self.show(Level::Warn, m);
+        }
+        let mut pdfs = dropped.pdfs.into_iter();
+        if let Some(first) = pdfs.next() {
+            self.open_files(first, pdfs.collect());
         }
     }
 
@@ -4091,6 +4144,9 @@ impl eframe::App for MargApp {
                 ui_cfg.comment_max_height * screen.height(),
             );
         }
+        if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+            self.drop_overlay(&ctx, area);
+        }
         if self.debug {
             self.debug_overlay(&ctx);
         }
@@ -4100,6 +4156,23 @@ impl eframe::App for MargApp {
 }
 
 impl MargApp {
+    /// Files are dragged over the window (not on Wayland, concept §12).
+    fn drop_overlay(&self, ctx: &egui::Context, area: egui::Rect) {
+        let th = &self.theme;
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::unique("marg-drop"),
+        ));
+        painter.rect_filled(area, 0.0, th.panel_bg.gamma_multiply(0.85));
+        painter.text(
+            area.center(),
+            egui::Align2::CENTER_CENTER,
+            "Drop to open",
+            egui::FontId::proportional(self.config.fonts.size * 1.5),
+            th.panel_fg,
+        );
+    }
+
     fn debug_overlay(&self, ctx: &egui::Context) {
         let th = &self.theme;
         let mut lines = Vec::new();

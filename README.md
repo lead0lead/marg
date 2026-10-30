@@ -40,6 +40,10 @@ marg paper.pdf --page 12    # at page 12
 marg                        # recent files
 ```
 
+Dropping PDFs on the window opens them: the first in that window, the
+others in new windows (not on Wayland yet: the windowing library does not
+support drag and drop there; XWayland works).
+
 `?` shows the keys of the current mode, and `:help` shows everything,
 including your own bindings.
 
