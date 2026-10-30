@@ -18,10 +18,18 @@ annotations that Okular, Acrobat, browsers and Zotero can read.
 
 ## Install
 
-Release builds for Linux and Windows are attached to the
-[GitHub releases](https://github.com/lead0lead/marg/releases). The Windows
-`.exe` needs the Microsoft Visual C++ Redistributable (x64), which most
-systems already have.
+Release builds for Linux, Windows and macOS (Apple Silicon) are attached
+to the [GitHub releases](https://github.com/lead0lead/marg/releases). The
+Windows `.exe` needs the Microsoft Visual C++ Redistributable (x64), which
+most systems already have.
+
+**macOS:** unzip `marg-macos-arm64.zip` and move `marg.app` to
+Applications. The app is not signed with an Apple Developer ID, so macOS
+blocks the first start: right-click `marg.app` → Open → Open, or run
+`xattr -dr com.apple.quarantine /Applications/marg.app` once. marg then
+appears under "Open With" for PDFs (Finder, Zotero's file handling). For
+the terminal: `ln -s /Applications/marg.app/Contents/MacOS/marg
+/usr/local/bin/marg` (any directory on your `PATH`).
 
 To build from source, you need stable Rust, a C compiler and libclang
 (MuPDF is compiled from source by the `mupdf` crate). On Debian or Ubuntu:
@@ -31,6 +39,10 @@ sudo apt-get install libclang-dev libxkbcommon-dev libwayland-dev \
   libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
 cargo build --profile dist      # target/dist/marg
 ```
+
+On macOS, the Xcode command line tools are enough
+(`xcode-select --install`); `scripts/make-app.sh target/dist/marg .`
+builds `marg.app`.
 
 ## Use
 

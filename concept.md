@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
 | **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
-| **Next step** | Step 5: release workflow builds `marg-macos-arm64.zip`; README install notes. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Step 6: docs and handover; then push the branch (with the user's OK) so CI builds and tests on macOS. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS, step 4) |
+| **Last updated** | 2026-10-30 (macOS, step 5) |
 
 ---
 
@@ -1675,6 +1675,10 @@ must save first, like closing the window); "Open With" support with
    `.app`); README: install, Gatekeeper (`xattr -dr
    com.apple.quarantine marg.app` or right-click → Open), the terminal
    command (`marg.app/Contents/MacOS/marg`).
+   **As implemented:** `release.yml` has a `macos-latest` (arm64) row:
+   tests, `--profile dist`, `make-app.sh`, then `ditto -c -k --keepParent`
+   (keeps the signature) to `marg-macos-arm64.zip`. README: install,
+   Gatekeeper, a `PATH` symlink for the terminal, building on macOS.
 6. Docs and handover, with a checklist for the user: Open With from
    Finder and Zotero, Cmd-q with unsaved changes, keys on their layout
    (Option as AltGr), links, drag and drop, Retina sharpness, speed.
