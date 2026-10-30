@@ -1,7 +1,7 @@
 # marg — Concept & Build Plan
 
-> marg is a lightweight, very fast PDF reader and annotator for Linux and
-> Windows, driven almost entirely from the keyboard. It combines Zathura's
+> marg is a lightweight, very fast PDF reader and annotator for Linux,
+> Windows and macOS (Apple Silicon, added 2026-10-30), driven almost entirely from the keyboard. It combines Zathura's
 > speed and vim-style control with real annotations (highlights, underlines,
 > comments, boxes) that are written into the PDF as standard annotations.
 
@@ -68,14 +68,14 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
-| **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
-| **Next step** | Step 6: docs and handover; then push the branch (with the user's OK) so CI builds and tests on macOS. The Phase 3–5 choices in §12 are open. |
+| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, not pushed; CI on macOS has not run yet. |
+| **Next step** | Push `main` and `macos` (user's OK) so CI builds and tests on macOS; fix what it finds. Then the user tries it on their Mac (CI artifact or a local build): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed. Then merge. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS, step 5) |
+| **Last updated** | 2026-10-30 (macOS) |
 
 ---
 
@@ -1374,7 +1374,7 @@ render.
 
 | Part | Choice | Why |
 |---|---|---|
-| Language | Rust (stable) | Single static binary on Linux and Windows; memory safety; the compiler catches mistakes early |
+| Language | Rust (stable) | Single static binary on Linux, Windows and macOS; memory safety; the compiler catches mistakes early |
 | PDF engine | MuPDF via the `mupdf` crate | Fastest mainstream renderer; full PDF annotation API with incremental save |
 | UI | `eframe` / `egui` | Lightweight, GPU-drawn, cross-platform, easy custom overlays; no heavyweight widget toolkit needed for a minimal UI |
 | Config/state | `serde` + `toml` | Human-editable config |
@@ -1534,11 +1534,12 @@ test files), so their licence is clear.
   `cargo fmt --check` must pass before every commit.
 - Merge feature branches into `main` only when the user has tried the phase
   build and agrees.
-- **CI** (GitHub Actions): build, test and clippy on Linux and Windows on
-  every push. The user develops mainly on one OS; CI keeps the other one from
+- **CI** (GitHub Actions): build, test and clippy on Linux, Windows and
+  macOS (`macos-latest`, arm64; added 2026-10-30) on every push. The user develops mainly on one OS; CI keeps the other one from
   breaking silently.
 - **Releases**: when the user asks, tag `vX.Y.Z` on `main`; CI attaches the
-  Linux binary and the portable Windows `.exe` to a GitHub release.
+  Linux binary, the portable Windows `.exe` and the zipped macOS app to
+  a GitHub release (macOS added 2026-10-30, §11 "macOS steps").
   **As implemented (Phase 5):** `.github/workflows/release.yml`: on a
   `v*` tag, Linux and Windows run the tests, build `--profile dist -p
   marg` and upload `marg-linux-x86_64` and `marg-windows-x86_64.exe`; a
@@ -1761,6 +1762,14 @@ building more.
   (§9 spike report). Two small ones are covered by raw object access.
 - **Building MuPDF on Windows** (toolchain, clang/bindgen requirements).
   Checked in Phase 0 with CI on Windows.
+- **macOS, untested by hand** (2026-10-30): Claude cannot run it; CI
+  builds and tests on `macos-latest`, the user tries it on their Mac.
+  Unchecked: the `odoc` handler (timing against AppKit's default
+  handler), Cmd-q (AppKit's Quit menu item; `on_exit` saves, like
+  closing the window, but whether it is reached was not checked),
+  Option as AltGr on non-US layouts (`input.rs` takes Option as Alt and
+  the AltGr fix is Windows-only), Retina scaling, speed, MuPDF building
+  with only the Xcode command line tools.
 - ~~**Hint/caret selection not feeling faster than a mouse.**~~ The core bet.
   The user tried it on real papers and passed the decision milestone on
   2026-10-28 (reading, navigating and selecting "work great").
@@ -1778,7 +1787,7 @@ building more.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.
 
-**macOS (planned in §11 "macOS steps"; findings from 2026-10-30):**
+**macOS (built 2026-10-30, §11 "macOS steps"; the findings that led to it):**
 eframe/winit/wgpu (Metal), `directories` and MuPDF support macOS;
 `input.rs` already maps Cmd to Ctrl. To do: `browser.rs` needs `open`
 (done in step 2); macOS paths in §8 (done in step 2); a `.app`
@@ -1890,6 +1899,26 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-30 — macOS support
+- Done (branch `macos`, not pushed): drag and drop merged into `main`
+  first (not pushed either). One commit each: plan (§11 "macOS steps");
+  `open` for links, macOS paths, CI job; "Open With" (`macos.rs`, `odoc`
+  handler, `-psn_` ignored); bundle (`Info.plist`, `marg.icns`,
+  `make-app.sh`); release job (`marg-macos-arm64.zip`) and README; docs.
+- Decisions (user): they have a Mac and will try builds; add `objc2`
+  for "Open With" (§9); Cmd = Ctrl as now; Apple Silicon only;
+  unsigned with a README note. Claude chose: bundle id
+  `io.github.lead0lead.marg`, handler rank Alternate, role Editor,
+  macOS 11+, later "Open With" events go to new windows when this one
+  already has a file.
+- State: Linux build, tests, clippy and fmt pass. `macos.rs` passes
+  clippy for `aarch64-apple-darwin` in a scratch crate (rustup target
+  added on this machine); the rest of the macOS code never compiled yet.
+- Next: push, CI on macOS, the user's checks (§0).
+- Watch out: macOS-only code is not compiled by Linux checks; check
+  objc2 code in a scratch crate with `--target aarch64-apple-darwin`
+  (pure Rust, no SDK needed) and the rest on CI.
 
 ### 2026-10-30 — Drag and drop; macOS assessed
 - Done (branch `drag-and-drop`, not merged, not pushed), one commit

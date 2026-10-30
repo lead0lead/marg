@@ -1,6 +1,7 @@
 # marg
 
-A fast, keyboard-driven PDF reader and annotator for Linux and Windows.
+A fast, keyboard-driven PDF reader and annotator for Linux, Windows and
+macOS.
 Zathura's speed and vim-style keys, plus real annotations: highlights,
 underlines, comments, notes and boxes, written into the PDF as standard
 annotations that Okular, Acrobat, browsers and Zotero can read.
