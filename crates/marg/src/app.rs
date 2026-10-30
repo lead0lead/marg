@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -408,6 +409,8 @@ pub struct MargApp {
     /// Dark pages are on.
     recolor: bool,
     timing: Option<Timing>,
+    /// Files handed over by the system (macOS "Open With").
+    opened: Option<Receiver<Vec<PathBuf>>>,
 }
 
 /// Startup phase logging (`MARG_TIMING=1`).
@@ -443,6 +446,8 @@ pub struct Startup {
     pub errors: Vec<String>,
     /// Process start, when `MARG_TIMING` is set.
     pub timing_start: Option<Instant>,
+    /// Files handed over by the system (macOS "Open With").
+    pub opened: Option<Receiver<Vec<PathBuf>>>,
 }
 
 impl MargApp {
@@ -543,6 +548,7 @@ impl MargApp {
                 opened: false,
                 shown: false,
             }),
+            opened: s.opened,
         };
         app.set_recolor(app.config.view.recolor);
         app.config_stamp = startup::stamp(&app.config_files());
@@ -1045,6 +1051,14 @@ impl MargApp {
         });
         if !dropped.is_empty() {
             self.drop_files(dropped);
+        }
+        let opened: Vec<PathBuf> = self
+            .opened
+            .as_ref()
+            .map(|r| r.try_iter().flatten().collect())
+            .unwrap_or_default();
+        if !opened.is_empty() {
+            self.open_from_system(opened);
         }
         let events = ctx.input(|i| i.events.clone());
         let pointer = ctx.input(|i| i.pointer.hover_pos()).map(|p| p - area.min);
@@ -3347,6 +3361,24 @@ impl MargApp {
         let mut pdfs = dropped.pdfs.into_iter();
         if let Some(first) = pdfs.next() {
             self.open_files(first, pdfs.collect());
+        }
+    }
+
+    /// Files from macOS "Open With" (concept §11, "macOS steps"): like a
+    /// drop, but the first opens here only if this window has no file
+    /// yet; otherwise all go to new windows.
+    fn open_from_system(&mut self, paths: Vec<PathBuf>) {
+        let dropped = drop::sort(paths, self.config.ui.drop_max_files);
+        if let Some(m) = dropped.message {
+            self.show(Level::Warn, m);
+        }
+        let mut pdfs = dropped.pdfs.into_iter();
+        if self.open.is_none() && self.opening.is_none() {
+            if let Some(first) = pdfs.next() {
+                self.open_files(first, pdfs.collect());
+            }
+        } else {
+            self.open_in_new_windows(pdfs.collect());
         }
     }
 

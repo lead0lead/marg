@@ -17,6 +17,8 @@ mod complete;
 mod drop;
 mod help;
 mod input;
+#[cfg(target_os = "macos")]
+mod macos;
 mod outline;
 mod pages;
 mod paths;
@@ -61,6 +63,8 @@ fn parse_args() -> Result<Args, String> {
                 println!("marg {} ({GIT_HASH})", marg_core::VERSION);
                 std::process::exit(0);
             }
+            // Finder on older macOS adds a process serial number.
+            Some(s) if cfg!(target_os = "macos") && s.starts_with("-psn_") => {}
             _ if path.is_none() => path = Some(PathBuf::from(a)),
             _ => return Err(format!("unexpected argument {}", a.to_string_lossy())),
         }
@@ -110,6 +114,17 @@ fn main() -> eframe::Result {
             ctx.request_repaint();
         }
     });
+    #[cfg(target_os = "macos")]
+    let opened = {
+        let wake = repaint.clone();
+        Some(macos::install_open_handler(move || {
+            if let Some(ctx) = wake.get() {
+                ctx.request_repaint();
+            }
+        }))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let opened = None;
     if let Some(p) = &paths {
         doc.send(marg_pdf::Request::BackupDir(p.backup_dir.clone()));
     }
@@ -152,6 +167,7 @@ fn main() -> eframe::Result {
                     config_path: paths.as_ref().map(|p| p.config_file.clone()),
                     errors: config_errors,
                     timing_start: timing.then_some(start),
+                    opened,
                 },
             )))
         }),

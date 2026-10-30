@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5, polish 1 and drag and drop (2026-10-30, not released yet) merged into `main`. |
 | **Current phase** | macOS support (branch `macos`, planned 2026-10-30, steps in §11 "macOS steps") |
-| **Next step** | Step 3: "Open With" (`odoc` handler). The Phase 3–5 choices in §12 are open. |
+| **Next step** | Step 4: app bundle (`Info.plist`, `marg.icns`, `scripts/make-app.sh`). The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (in progress, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (macOS, step 2) |
+| **Last updated** | 2026-10-30 (macOS, step 3) |
 
 ---
 
@@ -1647,6 +1647,19 @@ must save first, like closing the window); "Open With" support with
    the recent files list or nothing yet, otherwise in a new marg
    process; the rest in new processes. (macOS starts one app instance and
    sends it every later "Open With"; marg keeps one window per file.)
+   **As implemented:** `macos.rs` defines an Objective-C class
+   (`MargOpenHandler`, `objc2` `define_class!`) that observes
+   `NSApplicationWillFinishLaunchingNotification` and then registers
+   itself with `NSAppleEventManager` for `aevt`/`odoc` (Apple's advice:
+   in will-finish-launching, so AppKit's default handler is replaced and
+   the launch event is not missed). The handler reads the file URLs of
+   the direct object (`fileURLValue`), sends them on a channel and wakes
+   the UI; `MargApp::open_from_system` reads it each frame and uses
+   `drop::sort`. A `-psn_…` argument (older Finder) is ignored. The
+   `objc2` calls that need `objc2-core-services` in the typed API are
+   made with `msg_send!` (four-character codes as `u32`), so no other
+   crate. Type-checked with clippy for `aarch64-apple-darwin` in a scratch
+   crate; `main.rs`'s macOS part only compiles on macOS (CI).
 4. App bundle: `marg.app` with `Info.plist` (PDF document type, rank
    Alternate, version from `Cargo.toml`) and `marg.icns` (from
    `scripts/make-icons.py`), built by `scripts/make-app.sh`.

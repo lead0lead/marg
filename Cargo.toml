@@ -20,6 +20,10 @@ directories = "6"
 simplelog = { version = "0.12", default-features = false }
 # Same version and a subset of the features egui uses: only checks font files.
 skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
+# macOS only: "Open With" (concept §9). The versions eframe uses.
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSNotification", "NSURL", "NSString", "NSObject"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication"] }
 # Windows only: embeds the icon and version details in the .exe.
 winresource = { version = "0.1.34", default-features = false }
 
