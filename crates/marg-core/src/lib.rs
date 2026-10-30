@@ -16,6 +16,7 @@ pub mod keymap;
 pub mod keys;
 pub mod lineedit;
 pub mod list;
+pub mod lookup;
 pub mod lru;
 pub mod outline;
 pub mod search;

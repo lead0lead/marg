@@ -71,6 +71,19 @@ default keys:
 marg reloads the config when you save it, and reports mistakes in the
 status bar. Example themes are in [`docs/themes`](docs/themes).
 
+**Web search:** `gs` in Visual mode looks the selected word, sentence or
+paragraph up in your default browser, with DuckDuckGo unless you change
+it. Add more engines (`%s` is the text) and bind them to keys:
+
+```toml
+[search.engines]
+default = "https://www.google.com/search?q=%s"   # replaces DuckDuckGo
+wiki = "https://en.wikipedia.org/wiki/Special:Search?search=%s"
+
+[keys.visual]
+gw = "selection.search(wiki)"
+```
+
 ## Keys
 
 The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
@@ -167,6 +180,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 |---|---|
 | `o` | swap selection end |
 | `y` | copy text |
+| `gs` | search the web for the text |
 
 ### Visual — annotating
 

@@ -94,6 +94,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 |---|---|
 | `o` | swap selection end |
 | `y` | copy text |
+| `gs` | search the web for the text |
 
 ## Visual — annotating
 
