@@ -68,14 +68,14 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.1.0 released** on 2026-10-29 (https://github.com/lead0lead/marg/releases/tag/v1.1.0): Linux binary and Windows `.exe` (now a GUI-subsystem PE). Changes: app icon (window, taskbar, Windows `.exe`), prompt cursor, paste in prompts, `:` from the recent files list, "No file open" for document commands without a file, no console window on Windows. v1.0.0 released earlier the same day. Phases 0–5 and polish 1 merged into `main`. |
-| **Current phase** | none: all planned phases are done; the user uses marg daily |
-| **Next step** | The user checks the `.exe` (no console window; `marg.exe --version` in PowerShell prints the version). The user keeps using marg daily and collects the next polish list; then plan the fixes with them (feature branch, 1.1.x / 1.2.0). The Phase 3–5 choices in §12 are open. |
+| **Current phase** | drag and drop (branch `drag-and-drop`, planned 2026-10-30): 1 spec in this document; 2 `ui.drop_max_files`; 3 dropping PDFs opens them; 4 docs and handover. Then macOS support (user, 2026-10-30), planned with the user first. |
+| **Next step** | Step 2: `ui.drop_max_files` in `marg-core` config. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.1.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
-| **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only. Out of scope: macOS, mobile, tablets, pen input. |
-| **Last updated** | 2026-10-29 (1.1.0) |
+| **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
+| **Last updated** | 2026-10-30 (drag and drop, step 1) |
 
 ---
 
@@ -144,6 +144,19 @@ defaults of `config.toml` (see §8), not scattered in code.
   whose permissions forbid annotation open read-only, with a status message.
 - Files that fail to open: show the MuPDF error in the status bar and in the
   log. Never crash.
+- **Drag and drop** (decided with the user 2026-10-30, branch
+  `drag-and-drop`): dropping PDFs on the window opens them, both over an
+  open document and on the recent files list (the user first thought of
+  allowing it only on the list, then chose everywhere since `:e` works
+  everywhere). PDFs only: files without a `.pdf` extension (any case) are
+  skipped with "Not a PDF: <name>". The first PDF opens in this window like
+  `:e` (pending changes are saved first; if that fails, nothing opens); each
+  further PDF starts its own `marg <path>` process, keeping one window per
+  file (user 50/50, Claude recommended this over ignoring the extra files).
+  More than `ui.drop_max_files` (10) PDFs at once opens none and says so.
+  While files hover over the window, an overlay says "Drop to open".
+  Wayland: winit 0.30 has no drag and drop there, so drops only work on
+  X11/XWayland, Windows (and macOS later); see §12.
 
 **As implemented (Phase 5, passwords):** `Request::Open { path, password
 }`; `Doc::open_with_password` answers `OpenError::NeedsPassword` or
@@ -1696,6 +1709,10 @@ building more.
 
 **Known issues**
 
+- Drag and drop does nothing on Wayland: winit 0.30.13 only sends
+  `DroppedFile` on Windows, X11 and macOS (checked in its source,
+  2026-10-30). marg on XWayland gets drops. Revisit when eframe moves to
+  a winit with Wayland drag and drop.
 - Phase 4: every search extracts the text of every page again on the
   document thread (no text cache there); a 700-page book takes about
   as long as extracting its text once (~0.5–1 s at the §2.2 timings,
