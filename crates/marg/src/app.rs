@@ -10,7 +10,7 @@ use marg_core::annot::{
     AnnotChange, AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, category_of, erase,
     parse_color, step_annot,
 };
-use marg_core::caret::{self, Motion, Selection, TextPos};
+use marg_core::caret::{self, Motion, SelKind, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::{Config, Layout};
 use marg_core::help;
@@ -1842,7 +1842,7 @@ impl MargApp {
             }
             Purpose::VisualLine => {
                 self.selection = Some(Selection {
-                    linewise: true,
+                    kind: SelKind::Line,
                     ..Selection::new(start, start)
                 });
                 self.set_caret(start);
@@ -1879,21 +1879,21 @@ impl MargApp {
 
     /// `v` / `V`: start a selection from Caret mode, switch its kind, or end
     /// it when it already has that kind.
-    fn visual(&mut self, linewise: bool) {
+    fn visual(&mut self, kind: SelKind) {
         match (self.mode, &mut self.selection) {
             (Mode::Caret, _) => {
                 let Some(c) = self.caret else { return };
                 self.selection = Some(Selection {
-                    linewise,
+                    kind,
                     ..Selection::new(c.pos, c.pos)
                 });
                 self.mode = Mode::Visual;
             }
-            (Mode::Visual, Some(sel)) if sel.linewise == linewise => {
+            (Mode::Visual, Some(sel)) if sel.kind == kind => {
                 self.selection = None;
                 self.mode = Mode::Caret;
             }
-            (Mode::Visual, Some(sel)) => sel.linewise = linewise,
+            (Mode::Visual, Some(sel)) => sel.kind = kind,
             _ => {}
         }
     }
@@ -1956,7 +1956,7 @@ impl MargApp {
                         }
                     }
                     _ => self.mouse_select(Selection {
-                        linewise: true,
+                        kind: SelKind::Line,
                         ..Selection::new(at, at)
                     }),
                 }
@@ -3141,8 +3141,12 @@ impl MargApp {
                 self.move_caret(m, n);
                 return;
             }
-            Command::VisualChar | Command::VisualLine => {
-                self.visual(command == Command::VisualLine);
+            Command::VisualChar => {
+                self.visual(SelKind::Char);
+                return;
+            }
+            Command::VisualLine => {
+                self.visual(SelKind::Line);
                 return;
             }
             Command::VisualSwap => {

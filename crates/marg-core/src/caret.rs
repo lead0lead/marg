@@ -311,6 +311,19 @@ pub fn apply_n(
     (p, want_x)
 }
 
+/// What a selection between its two ends covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelKind {
+    /// The characters from one end to the other, in reading order (`v`).
+    #[default]
+    Char,
+    /// The whole lines from one end to the other (`V`).
+    Line,
+    /// The characters inside the rectangle that the two ends' boxes span
+    /// (`Ctrl-q`).
+    Block,
+}
+
 /// A selection between two caret positions, both included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
@@ -318,16 +331,18 @@ pub struct Selection {
     pub anchor: TextPos,
     /// The end that motions move.
     pub head: TextPos,
-    /// Whole lines (`V`).
-    pub linewise: bool,
+    pub kind: SelKind,
 }
+
+/// A selected part of a line: (page, line index, character range).
+type Part = (usize, usize, Range<usize>);
 
 impl Selection {
     pub fn new(anchor: TextPos, head: TextPos) -> Self {
         Self {
             anchor,
             head,
-            linewise: false,
+            kind: SelKind::Char,
         }
     }
 
@@ -343,7 +358,7 @@ impl Selection {
         } else {
             (self.head, self.anchor)
         };
-        if !self.linewise {
+        if self.kind != SelKind::Line {
             return (a, b);
         }
         (
@@ -352,12 +367,12 @@ impl Selection {
         )
     }
 
-    /// The selected part of each line, in reading order, without leading
-    /// and trailing whitespace: (page, line index, character range).
-    pub fn line_parts(
-        &self,
-        src: &(impl TextSource + ?Sized),
-    ) -> Vec<(usize, usize, Range<usize>)> {
+    /// The selected part of each line, without leading and trailing
+    /// whitespace: in reading order, or for a block row by row.
+    pub fn line_parts(&self, src: &(impl TextSource + ?Sized)) -> Vec<Part> {
+        if self.kind == SelKind::Block {
+            return self.block_rows(src).into_iter().flatten().collect();
+        }
         let (a, b) = self.range(src);
         let mut out = Vec::new();
         for page in a.page..=b.page {
@@ -403,9 +418,92 @@ impl Selection {
             .collect()
     }
 
+    /// A block's parts, grouped into rows top to bottom (page by page),
+    /// each row left to right. The rectangle spans both ends' character
+    /// boxes; from the first end's page to the last's, the pages in between
+    /// are covered from top to bottom. A character is in it when its
+    /// center is.
+    fn block_rows(&self, src: &(impl TextSource + ?Sized)) -> Vec<Vec<Part>> {
+        let (a, b) = self.range(src);
+        let (Some(ta), Some(tb)) = (src.text(a.page), src.text(b.page)) else {
+            return Vec::new();
+        };
+        let (ba, bb) = (ta.chars[a.idx].bbox, tb.chars[b.idx].bbox);
+        let (x0, x1) = (ba.x0.min(bb.x0), ba.x1.max(bb.x1));
+        let mut rows = Vec::new();
+        for page in a.page..=b.page {
+            let Some(t) = src.text(page) else { continue };
+            let y0 = match (page == a.page, page == b.page) {
+                (true, true) => ba.y0.min(bb.y0),
+                (true, false) => ba.y0,
+                _ => f32::NEG_INFINITY,
+            };
+            let y1 = match (page == a.page, page == b.page) {
+                (true, true) => ba.y1.max(bb.y1),
+                (false, true) => bb.y1,
+                _ => f32::INFINITY,
+            };
+            let rect = BBox::new(x0, y0, x1, y1);
+            let inside = |i: &usize| {
+                let c = &t.chars[*i];
+                !c.c.is_whitespace() && rect.contains(c.bbox.center_x(), c.bbox.center_y())
+            };
+            // (part, its box)
+            let mut parts: Vec<(Part, BBox)> = Vec::new();
+            for (li, l) in t.lines.iter().enumerate() {
+                let (Some(first), Some(last)) =
+                    (l.chars.clone().find(inside), l.chars.clone().rfind(inside))
+                else {
+                    continue;
+                };
+                let r = first..last + 1;
+                let bbox = t.chars[r.clone()]
+                    .iter()
+                    .map(|c| c.bbox)
+                    .reduce(BBox::union)
+                    .expect("not empty");
+                parts.push(((page, li, r), bbox));
+            }
+            // A part joins the row of the part above it when its center is
+            // within that part's height (table cells, columns read in the
+            // wrong order).
+            parts.sort_by(|p, q| p.1.center_y().total_cmp(&q.1.center_y()));
+            let mut row: Vec<(Part, BBox)> = Vec::new();
+            for part in parts {
+                if row
+                    .first()
+                    .is_some_and(|(_, top)| part.1.center_y() > top.y1)
+                {
+                    rows.push(row_left_to_right(std::mem::take(&mut row)));
+                }
+                row.push(part);
+            }
+            if !row.is_empty() {
+                rows.push(row_left_to_right(row));
+            }
+        }
+        rows
+    }
+
     /// The selected text: lines joined with spaces; a hyphen at a line end
-    /// followed by a lowercase letter is removed and the word joined.
+    /// followed by a lowercase letter is removed and the word joined. A
+    /// block's rows are joined with line breaks, the parts of a row with
+    /// spaces, without dehyphenation.
     pub fn text(&self, src: &(impl TextSource + ?Sized)) -> String {
+        if self.kind == SelKind::Block {
+            let row_text = |row: Vec<Part>| {
+                row.into_iter()
+                    .filter_map(|(page, _, r)| Some(src.text(page)?.string(r)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            return self
+                .block_rows(src)
+                .into_iter()
+                .map(row_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
         let mut out = String::new();
         for (page, _, r) in self.line_parts(src) {
             let Some(t) = src.text(page) else { continue };
@@ -415,9 +513,15 @@ impl Selection {
     }
 }
 
+fn row_left_to_right(mut row: Vec<(Part, BBox)>) -> Vec<Part> {
+    row.sort_by(|p, q| p.1.x0.total_cmp(&q.1.x0));
+    row.into_iter().map(|(part, _)| part).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::Char;
     use crate::text::tests::page;
 
     fn doc(pages: &[&str]) -> Vec<Option<PageText>> {
@@ -566,12 +670,72 @@ mod tests {
         let d = doc(&["  abc def\nghi\njkl"]);
         let mut s = Selection::new(at(&d, 0, "def", 0), at(&d, 0, "h", 0));
         assert_eq!(s.text(&d), "def gh");
-        s.linewise = true;
+        s.kind = SelKind::Line;
         assert_eq!(s.text(&d), "abc def ghi");
         let r = s.rects(&d);
         assert_eq!(r.len(), 2);
         // Leading spaces are not part of the box.
         assert_eq!(r[0].1.x0, 12.0);
+    }
+
+    fn block(anchor: TextPos, head: TextPos) -> Selection {
+        Selection {
+            kind: SelKind::Block,
+            ..Selection::new(anchor, head)
+        }
+    }
+
+    #[test]
+    fn block_selects_a_rectangle() {
+        let d = doc(&["abc def\nghi jkl\nmno pqr"]);
+        let s = block(at(&d, 0, "d", 0), at(&d, 0, "q", 0));
+        assert_eq!(s.text(&d), "de\njk\npq");
+        assert_eq!(s.rects(&d).len(), 3);
+        assert_eq!(s.rects(&d)[1].1, BBox::new(24.0, 12.0, 36.0, 22.0));
+        // Any two opposite corners give the same rectangle.
+        assert_eq!(
+            block(at(&d, 0, "p", 0), at(&d, 0, "e", 0)).text(&d),
+            s.text(&d)
+        );
+        let mut back = s;
+        back.swap();
+        assert_eq!(back.text(&d), s.text(&d));
+        // Spaces at the edges are left out, the ones inside kept.
+        let s = block(at(&d, 0, "c", 0), at(&d, 0, "p", 0));
+        assert_eq!(s.text(&d), "c d\ni j\no p");
+    }
+
+    #[test]
+    fn block_rows_follow_the_page_not_the_reading_order() {
+        // A table read column by column: two blocks side by side.
+        let cell = |s: &str, x: f32, y: f32| -> Vec<Char> {
+            s.chars()
+                .enumerate()
+                .map(|(i, c)| Char {
+                    c,
+                    bbox: BBox::new(x + i as f32 * 6.0, y, x + i as f32 * 6.0 + 6.0, y + 10.0),
+                })
+                .collect()
+        };
+        let t = PageText::from_blocks(vec![
+            vec![cell("A1", 0.0, 0.0), cell("A2", 0.0, 12.0)],
+            vec![cell("B1", 60.0, 0.5), cell("B2", 60.0, 12.0)],
+        ]);
+        let d = vec![Some(t)];
+        let s = block(TextPos::new(0, 0), TextPos::new(0, 7));
+        assert_eq!(s.text(&d), "A1 B1\nA2 B2");
+        // The other two corners (A2, B1; B1 comes later in reading order).
+        let s = block(TextPos::new(0, 2), TextPos::new(0, 5));
+        assert_eq!(s.text(&d), "A1 B1\nA2 B2");
+    }
+
+    #[test]
+    fn block_across_pages() {
+        let d = doc(&["abc\ndef", "ghi\njkl"]);
+        let s = block(at(&d, 0, "e", 0), at(&d, 1, "h", 0));
+        assert_eq!(s.text(&d), "e\nh");
+        let s = block(at(&d, 0, "b", 0), at(&d, 1, "k", 0));
+        assert_eq!(s.text(&d), "b\ne\nh\nk");
     }
 
     #[test]
