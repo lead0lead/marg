@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Hint-visual (branch `hint-visual` off `main`, planned 2026-10-31, steps in §11): step 1. Then the user tries it. Separately, the user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (1.2.0) |
+| **Last updated** | 2026-10-31 (hint-visual planned) |
 
 ---
 
@@ -398,6 +398,15 @@ Hint labels are drawn over targets; typing a label picks that target.
   the start of the first to the end of the second (either order works).
 - `gl`: hints on visible links. `ga`: hints on visible annotations (selects
   the picked annotation).
+- **Hints straight into Visual** (decided with the user 2026-10-31, branch
+  `hint-visual`; `f` then `v` was an extra key the user kept tripping
+  over): `v` in Normal (`hint.visual`) picks a word and selects it
+  character-wise (Visual mode, caret on its last character). `V`
+  (`hint.visual_line`) shows only the line labels (stage 1, also in
+  `words` mode) and selects the picked line line-wise. `Ctrl-q`
+  (`hint.visual_block`) picks a word and starts a block selection on it
+  (§2.7). `f` and `F` stay as they are (`f` for notes at the caret and
+  for adjusting the start before `v`).
 - Pages without a text layer (scans): `f` / `F` show "no text on this page —
   use a box (b)" instead of empty hints.
 
@@ -439,6 +448,23 @@ one follows it. "Still reading the links" / "No links in view".
     visible.
 - `v` starts a character-wise selection at the caret. `V` starts a line-wise
   selection. Motions extend it. `o` swaps the moving end.
+- **Block selection** (decided with the user 2026-10-31, branch
+  `hint-visual`): `Ctrl-q` (`visual.block`) in Caret mode starts it at
+  the caret; in Visual it switches the kind or ends it, like `v`/`V`.
+  `Ctrl-v` (vim's key) is impossible: egui-winit turns Ctrl-V into a
+  paste event (nothing at all with an empty clipboard), so marg never
+  sees the key; `Ctrl-q` is vim's own stand-in where Ctrl-V pastes
+  (user's choice). On macOS it is the physical Ctrl key (Cmd-q quits).
+  It selects the text in a rectangle (user's choice over "use box
+  mode"): the rectangle spans the anchor's and the head's character boxes
+  horizontally and vertically (from the anchor's page to the head's,
+  whole pages in between), and a character is selected when its center
+  is inside. One part per line (highlights get one quad per line, `d`
+  erases inside the rectangle only). `y` copies the parts top to bottom,
+  parts on the same row joined with a space, rows with line breaks, no
+  dehyphenation. Uses: one column of a table, a column MuPDF reads in
+  the wrong order. Box mode (`b`) stays the way to draw a rectangle
+  annotation.
 - The selection is drawn as translucent blue over the selected character
   boxes, line by line.
 - **Mouse**: drag selects text character-wise. Double-click selects a word.
@@ -1673,6 +1699,15 @@ engine in a binding is a config error), `selection.search[(name)]`,
 `gs` in Visual, URL building (unit-tested); 2 app: open the URL with
 `browser::open`, status message, errors; 3 docs (README, cheat sheet,
 `:config` file) and handover.
+
+**Hint-visual steps** (branch `hint-visual`, planned 2026-10-31 with the
+user, one commit each): 1 `hint.visual` (`v`) and `hint.visual_line`
+(`V`) in Normal: core commands, keymap, help topic; app hints (line-only
+hints for `V`); 2 core: selection kinds (char, line, block) instead of
+`linewise`, block geometry and copy text (unit-tested); 3 app:
+`visual.block` (Caret/Visual `Ctrl-q`) and `hint.visual_block` (Normal
+`Ctrl-q`); 4 docs (README, cheat sheet, keymap table, as implemented)
+and handover.
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
