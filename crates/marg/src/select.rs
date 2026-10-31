@@ -32,6 +32,12 @@ pub enum Purpose {
     SelectStart,
     /// Second word; the first was (start, end).
     SelectEnd(TextPos, TextPos),
+    /// Select the word character-wise.
+    Visual,
+    /// Select a line line-wise; only lines get labels.
+    VisualLine,
+    /// Start a block selection on the word.
+    VisualBlock,
     /// Select an annotation: (page, object number) per target box.
     Annot(Vec<(usize, i32)>),
     /// Follow a link, one per target box.
@@ -119,9 +125,11 @@ impl Hinting {
         texts: &[Option<PageText>],
         cfg: &HintsConfig,
     ) -> Result<Self, &'static str> {
-        let targets = match cfg.mode {
-            HintMode::TwoStage => Targets::Lines(visible_lines(view, area, texts)),
-            HintMode::Words => Targets::Words(
+        // `V` picks a line, so it gets the line labels in both modes.
+        let targets = if cfg.mode == HintMode::TwoStage || matches!(purpose, Purpose::VisualLine) {
+            Targets::Lines(visible_lines(view, area, texts))
+        } else {
+            Targets::Words(
                 visible_lines(view, area, texts)
                     .into_iter()
                     .flat_map(|(page, l)| {
@@ -132,7 +140,7 @@ impl Hinting {
                             .map(move |r| (page, r))
                     })
                     .collect(),
-            ),
+            )
         };
         let n = match &targets {
             Targets::Lines(v) => v.len(),
@@ -181,6 +189,10 @@ impl Hinting {
             Targets::Lines(lines) => {
                 let (page, l) = lines[i];
                 let words = texts.text(page)?.words(l);
+                if matches!(self.purpose, Purpose::VisualLine) {
+                    // The line's first word stands for the line.
+                    return words.first().map(|w| Picked::Word(page, w.clone()));
+                }
                 if words.len() == 1 {
                     return Some(Picked::Word(page, words[0].clone()));
                 }

@@ -41,6 +41,9 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("q", "quit"),
     ("f", "hint.caret"),
     ("F", "hint.select"),
+    ("v", "hint.visual"),
+    ("V", "hint.visual_line"),
+    ("Ctrl-q", "hint.visual_block"),
     ("u", "undo"),
     ("Ctrl-r", "redo"),
     ("Ctrl-w", "file.close"),
@@ -87,6 +90,7 @@ pub const DEFAULT_CARET: &[(&str, &str)] = &[
     ("}", "caret.block_next"),
     ("v", "visual.char"),
     ("V", "visual.line"),
+    ("Ctrl-q", "visual.block"),
 ];
 
 /// Default Visual-mode bindings, on top of the Caret ones.

@@ -10,7 +10,7 @@ use marg_core::annot::{
     AnnotChange, AnnotFrom, AnnotInfo, AnnotKind, AnnotSpec, annot_at, category_of, erase,
     parse_color, step_annot,
 };
-use marg_core::caret::{self, Motion, Selection, TextPos};
+use marg_core::caret::{self, Motion, SelKind, Selection, TextPos};
 use marg_core::command::{Command, parse_ex};
 use marg_core::config::{Config, Layout};
 use marg_core::help;
@@ -450,6 +450,11 @@ impl MargApp {
     pub fn new(cc: &eframe::CreationContext<'_>, s: Startup) -> Self {
         // Ctrl +/- are not egui's UI zoom in marg.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // egui closes the window on Command-Q, which is Ctrl-q (a marg key)
+        // outside macOS; there `q` and `:q` quit, and macOS keeps Cmd-q.
+        if !cfg!(target_os = "macos") {
+            cc.egui_ctx.options_mut(|o| o.quit_shortcuts.clear());
+        }
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
         let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&s.config);
@@ -1835,6 +1840,27 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
+            Purpose::Visual | Purpose::VisualBlock => {
+                let kind = if matches!(h.purpose, Purpose::Visual) {
+                    SelKind::Char
+                } else {
+                    SelKind::Block
+                };
+                self.selection = Some(Selection {
+                    kind,
+                    ..Selection::new(start, end)
+                });
+                self.set_caret(end);
+                self.mode = Mode::Visual;
+            }
+            Purpose::VisualLine => {
+                self.selection = Some(Selection {
+                    kind: SelKind::Line,
+                    ..Selection::new(start, start)
+                });
+                self.set_caret(start);
+                self.mode = Mode::Visual;
+            }
             Purpose::Annot(_) | Purpose::Link(_) => {}
         }
     }
@@ -1864,23 +1890,23 @@ impl MargApp {
         }
     }
 
-    /// `v` / `V`: start a selection from Caret mode, switch its kind, or end
-    /// it when it already has that kind.
-    fn visual(&mut self, linewise: bool) {
+    /// `v` / `V` / `Ctrl-q`: start a selection from Caret mode, switch its
+    /// kind, or end it when it already has that kind.
+    fn visual(&mut self, kind: SelKind) {
         match (self.mode, &mut self.selection) {
             (Mode::Caret, _) => {
                 let Some(c) = self.caret else { return };
                 self.selection = Some(Selection {
-                    linewise,
+                    kind,
                     ..Selection::new(c.pos, c.pos)
                 });
                 self.mode = Mode::Visual;
             }
-            (Mode::Visual, Some(sel)) if sel.linewise == linewise => {
+            (Mode::Visual, Some(sel)) if sel.kind == kind => {
                 self.selection = None;
                 self.mode = Mode::Caret;
             }
-            (Mode::Visual, Some(sel)) => sel.linewise = linewise,
+            (Mode::Visual, Some(sel)) => sel.kind = kind,
             _ => {}
         }
     }
@@ -1943,7 +1969,7 @@ impl MargApp {
                         }
                     }
                     _ => self.mouse_select(Selection {
-                        linewise: true,
+                        kind: SelKind::Line,
                         ..Selection::new(at, at)
                     }),
                 }
@@ -3104,6 +3130,18 @@ impl MargApp {
                 self.start_hints(Purpose::SelectStart);
                 return;
             }
+            Command::HintVisual => {
+                self.start_hints(Purpose::Visual);
+                return;
+            }
+            Command::HintVisualLine => {
+                self.start_hints(Purpose::VisualLine);
+                return;
+            }
+            Command::HintVisualBlock => {
+                self.start_hints(Purpose::VisualBlock);
+                return;
+            }
             Command::HintAnnot => {
                 self.annot_hints();
                 return;
@@ -3120,8 +3158,16 @@ impl MargApp {
                 self.move_caret(m, n);
                 return;
             }
-            Command::VisualChar | Command::VisualLine => {
-                self.visual(command == Command::VisualLine);
+            Command::VisualChar => {
+                self.visual(SelKind::Char);
+                return;
+            }
+            Command::VisualLine => {
+                self.visual(SelKind::Line);
+                return;
+            }
+            Command::VisualBlock => {
+                self.visual(SelKind::Block);
                 return;
             }
             Command::VisualSwap => {
@@ -3291,6 +3337,9 @@ impl MargApp {
             | Command::DebugToggle => {}
             Command::HintCaret
             | Command::HintSelect
+            | Command::HintVisual
+            | Command::HintVisualLine
+            | Command::HintVisualBlock
             | Command::HintAnnot
             | Command::HintLinks
             | Command::Help
@@ -3298,6 +3347,7 @@ impl MargApp {
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
+            | Command::VisualBlock
             | Command::VisualSwap
             | Command::Copy
             | Command::SelectionSearch(_)
