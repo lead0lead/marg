@@ -36,6 +36,8 @@ pub enum Purpose {
     Visual,
     /// Select a line line-wise; only lines get labels.
     VisualLine,
+    /// Start a block selection on the word.
+    VisualBlock,
     /// Select an annotation: (page, object number) per target box.
     Annot(Vec<(usize, i32)>),
     /// Follow a link, one per target box.

@@ -55,6 +55,8 @@ pub enum Command {
     HintVisual,
     /// Hints on lines only; selects the picked line line-wise.
     HintVisualLine,
+    /// Hints on words; starts a block selection on the picked word.
+    HintVisualBlock,
     /// Hints on the visible annotations; selects the picked one.
     HintAnnot,
     /// Hints on the visible links; follows the picked one.
@@ -66,6 +68,8 @@ pub enum Command {
     VisualChar,
     /// The same for a line-wise selection.
     VisualLine,
+    /// The same for a block selection.
+    VisualBlock,
     /// Swap the moving end of the selection.
     VisualSwap,
     /// Highlight the selection with category 1–5.
@@ -186,6 +190,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         Command::HintVisualLine,
         "hint: select line",
     ),
+    (
+        "hint.visual_block",
+        Command::HintVisualBlock,
+        "hint: select block",
+    ),
     ("hint.annot", Command::HintAnnot, "hint: select annotation"),
     ("hint.links", Command::HintLinks, "hint: follow link"),
     (
@@ -256,6 +265,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ),
     ("visual.char", Command::VisualChar, "select characters"),
     ("visual.line", Command::VisualLine, "select lines"),
+    ("visual.block", Command::VisualBlock, "select a block"),
     ("visual.swap", Command::VisualSwap, "swap selection end"),
     (
         "annotate.highlight(1)",

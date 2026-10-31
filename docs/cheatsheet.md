@@ -45,6 +45,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | `F` | hint: select range |
 | `v` | hint: select word |
 | `V` | hint: select line |
+| `Ctrl-q` | hint: select block |
 
 ## Normal — annotating
 
@@ -89,6 +90,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | `}` | next paragraph |
 | `v` | select characters |
 | `V` | select lines |
+| `Ctrl-q` | select a block |
 
 ## Visual — selecting
 

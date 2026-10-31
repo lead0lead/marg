@@ -132,6 +132,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 | `F` | hint: select range |
 | `v` | hint: select word |
 | `V` | hint: select line |
+| `Ctrl-q` | hint: select block |
 
 ### Normal — annotating
 
@@ -176,6 +177,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 | `}` | next paragraph |
 | `v` | select characters |
 | `V` | select lines |
+| `Ctrl-q` | select a block |
 
 ### Visual — selecting
 

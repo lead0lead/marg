@@ -450,6 +450,11 @@ impl MargApp {
     pub fn new(cc: &eframe::CreationContext<'_>, s: Startup) -> Self {
         // Ctrl +/- are not egui's UI zoom in marg.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // egui closes the window on Command-Q, which is Ctrl-q (a marg key)
+        // outside macOS; there `q` and `:q` quit, and macOS keeps Cmd-q.
+        if !cfg!(target_os = "macos") {
+            cc.egui_ctx.options_mut(|o| o.quit_shortcuts.clear());
+        }
         let _ = s.repaint.set(cc.egui_ctx.clone());
         let doc = s.doc;
         let ([keymap, caret_map, visual_map, annot_map], warnings) = build_keymaps(&s.config);
@@ -1835,8 +1840,16 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
-            Purpose::Visual => {
-                self.selection = Some(Selection::new(start, end));
+            Purpose::Visual | Purpose::VisualBlock => {
+                let kind = if matches!(h.purpose, Purpose::Visual) {
+                    SelKind::Char
+                } else {
+                    SelKind::Block
+                };
+                self.selection = Some(Selection {
+                    kind,
+                    ..Selection::new(start, end)
+                });
                 self.set_caret(end);
                 self.mode = Mode::Visual;
             }
@@ -1877,8 +1890,8 @@ impl MargApp {
         }
     }
 
-    /// `v` / `V`: start a selection from Caret mode, switch its kind, or end
-    /// it when it already has that kind.
+    /// `v` / `V` / `Ctrl-q`: start a selection from Caret mode, switch its
+    /// kind, or end it when it already has that kind.
     fn visual(&mut self, kind: SelKind) {
         match (self.mode, &mut self.selection) {
             (Mode::Caret, _) => {
@@ -3125,6 +3138,10 @@ impl MargApp {
                 self.start_hints(Purpose::VisualLine);
                 return;
             }
+            Command::HintVisualBlock => {
+                self.start_hints(Purpose::VisualBlock);
+                return;
+            }
             Command::HintAnnot => {
                 self.annot_hints();
                 return;
@@ -3147,6 +3164,10 @@ impl MargApp {
             }
             Command::VisualLine => {
                 self.visual(SelKind::Line);
+                return;
+            }
+            Command::VisualBlock => {
+                self.visual(SelKind::Block);
                 return;
             }
             Command::VisualSwap => {
@@ -3318,6 +3339,7 @@ impl MargApp {
             | Command::HintSelect
             | Command::HintVisual
             | Command::HintVisualLine
+            | Command::HintVisualBlock
             | Command::HintAnnot
             | Command::HintLinks
             | Command::Help
@@ -3325,6 +3347,7 @@ impl MargApp {
             | Command::Motion(_)
             | Command::VisualChar
             | Command::VisualLine
+            | Command::VisualBlock
             | Command::VisualSwap
             | Command::Copy
             | Command::SelectionSearch(_)
