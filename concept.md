@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Annot-pick (branch `annot-pick` off `main`, planned 2026-10-31, steps in §11): step 1. Branch `hint-visual` (`v`, `V`, `Ctrl-q`; done 2026-10-31) waits for the user to try it. Then the file dialog with `rfd` (approved 2026-10-31, §9), planned as its own branch. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-30 (1.2.0) |
+| **Last updated** | 2026-10-31 (annot-pick planned) |
 
 ---
 
@@ -550,6 +550,11 @@ With the mouse, in box mode, drag a rectangle instead of steps 1–3.
   gets a dashed outline.
 - On a selected annotation: `e` edits its comment, `x` deletes it, `1`–`5`
   recolor it, `U` toggles highlight ↔ underline.
+- **Recolor via the category prompt** (asked for by the user 2026-10-31,
+  branch `annot-pick`): `Enter` on a selected annotation (`annot.pick`)
+  shows the same status-bar prompt as Visual `Enter` (`annotate.pick`),
+  headed `recolor:`; a digit recolors like `1`–`5`, `Enter` uses the last
+  category, Esc goes back with the annotation still selected.
 - Hovering an annotation with a comment, or selecting it, shows the comment
   as a tooltip next to it.
 - **Undo / redo**: `u` and `Ctrl-r` undo and redo annotation operations
@@ -1421,6 +1426,7 @@ render.
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
 | Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
 | Windows `.exe` icon | `winresource` (build dependency, Windows builds only, default features off) | Embeds `crates/marg/assets/marg.ico` and the version from `Cargo.toml` in the `.exe`. Only new crate besides it: `version_check`. Chosen over `embed-resource` (four more crates and a `.rc` file). Added 2026-10-29 with the user's approval |
+| File dialog | `rfd` (default features: xdg-desktop-portal on Linux, native on Windows and macOS) | "Open file" dialog; on COSMIC/GNOME/KDE the desktop's own picker. Measured 2026-10-31: +2 crates on Linux (`rfd`, `pollster`), +1 on Windows, +2 on macOS (`dispatch2`), eframe already brings the portal and D-Bus crates; ~10 s more release build, +226 KB binary. Approved by the user 2026-10-31 (over zenity/PowerShell/osascript helpers: no new crate, but a GTK dialog on COSMIC). Not added yet: planned as its own branch |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
 
 Licence note: MuPDF is AGPL-3.0. That is fine for a private personal tool;
@@ -1673,6 +1679,10 @@ engine in a binding is a config error), `selection.search[(name)]`,
 `gs` in Visual, URL building (unit-tested); 2 app: open the URL with
 `browser::open`, status message, errors; 3 docs (README, cheat sheet,
 `:config` file) and handover.
+
+**Annot-pick steps** (branch `annot-pick`, planned 2026-10-31 with the
+user, one commit each): 1 `annot.pick` on `Enter` in `[keys.annot]`, the
+category prompt recolors the selected annotation; 2 docs and handover.
 
 The early phases are the prototype. If keyboard selection does not feel right
 at the decision milestone, change the design (hint scheme, motions) before
