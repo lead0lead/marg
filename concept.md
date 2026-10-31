@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | File dialog (branch `file-dialog` off `main`, planned 2026-10-31, steps in §11): step 1 done (checked on Xvfb through the zenity fallback); step 2 (docs, handover). `main` has `v`/`V`/`Ctrl-q` and `Enter` recolor (merged 2026-10-31 at the user's request before trying them; unreleased); the user tries them in real use. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | File dialog (branch `file-dialog` off `main`, planned 2026-10-31, steps in §11): both steps done, not pushed; the user tries `O` and `:e` on COSMIC, then merge into `main`. `main` has `v`/`V`/`Ctrl-q` and `Enter` recolor (merged 2026-10-31 at the user's request before trying them; unreleased); the user tries them in real use. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-31 (file dialog planned) |
+| **Last updated** | 2026-10-31 (file dialog built) |
 
 ---
 
@@ -145,6 +145,18 @@ defaults of `config.toml` (see §8), not scattered in code.
   (pending changes saved first); Cancel does nothing. Defaults (`O`,
   `:e`, the start folder) proposed by Claude, the user's call after
   trying it.
+  **As implemented:** `marg/src/filedialog.rs`. `file.open_dialog`
+  (`Command::OpenDialog`) sets a flag and repaints; the next frame
+  (`poll_dialog`, which has the `eframe::Frame` for the parent window)
+  builds `rfd::AsyncFileDialog` (title "Open PDF", filter `pdf`/`PDF`:
+  portals match case-sensitively; start folder = the open file's
+  folder) and awaits it on a thread with an own `block_on`; the result
+  comes back over a channel with a repaint and goes to `open_files`.
+  A second `O` while it is open: "The file dialog is already open". The
+  recent files list passes the key bound to `file.open_dialog` through
+  like `:`, and its header and empty-list text mention `O`. If neither
+  the portal nor zenity works, the dialog does not appear and nothing
+  happens (rfd logs the reason to marg's log).
 - `:close` (alias `:bd`, key `Ctrl-w`) saves pending changes, closes the
   file and shows the recent files list (added 2026-10-28 at the user's
   request; nvim has no built-in start page, its dashboards are plugins,
@@ -953,6 +965,7 @@ remappable (§8).
 | | `?` | help |
 | | `q` | save and quit |
 | | `Ctrl-w` | save and close the file, show recent files |
+| | `O`, `:e` | open a file in the desktop's file dialog |
 | Caret | `w b e ge 0 $ j k ( ) { }` | motions |
 | | `v` / `V` / `Ctrl-q` | start visual / line-visual / block-visual |
 | Visual (selection) | motions | extend selection |
@@ -1773,6 +1786,13 @@ building more.
 
 **Open decisions (user)**
 
+- **File dialog choices to confirm** (2026-10-31, Claude's defaults, the
+  user's call after trying it): `O` and `:e` without a path; start folder
+  = the open file's folder (none from the recent files list: the
+  dialog's own default). Not checked: the COSMIC portal picker itself
+  (only the zenity fallback was driven on Xvfb), Windows and macOS (CI
+  builds them). The zenity fallback ignores the start folder (rfd does
+  not pass it).
 - **Hint-visual choices to confirm** (2026-10-31, Claude's defaults, the
   user's call after trying it): `v`/`Ctrl-q` select the whole picked word
   (vim's `v` would select one character); `V` puts the caret on the
@@ -1979,6 +1999,32 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-31 — File dialog
+- Done: branch `file-dialog` off `main` (plan, feature, docs). `O`
+  (Normal and the recent files list) and `:e` without a path open the
+  desktop's file dialog through `rfd` 0.17.2 (§2.1); the picked PDF opens
+  like `:e`.
+- Decisions: the user approved `rfd` (measured first, §9) and asked to
+  start; Claude's defaults for the key, `:e` and the start folder are in
+  §12 to confirm. Own std-only `block_on` instead of `pollster` (no
+  second new crate). §9's explanation of the small cost was wrong (rfd
+  uses the system libdbus via `dlopen`, not Rust D-Bus crates) and is
+  corrected; the measured numbers stand.
+- Tried and failed: the first Xvfb run unset `DBUS_SESSION_BUS_ADDRESS`
+  only; libdbus then found the user's session bus at
+  `$XDG_RUNTIME_DIR/bus`, so the request went to the user's real COSMIC
+  portal and an "Open PDF" dialog probably appeared on their desktop
+  (marg was stopped at once; the user was told). Fix for tests: set
+  `DBUS_SESSION_BUS_ADDRESS` to a missing socket and `XDG_RUNTIME_DIR`
+  to a scratch dir, so rfd falls back to zenity on Xvfb.
+- State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
+  (zenity fallback): `O` shows it while marg keeps drawing, picking a
+  file opens it, `:e`, `O` while open, Cancel, `O` from the recent list.
+- Next: the user tries it on COSMIC (the portal picker, its start
+  folder, parenting), then merge into `main`.
+- Watch out: never let a test marg reach the user's session bus (see
+  above); the portal draws on the user's real desktop.
 
 ### 2026-10-31 — Recolor prompt; rfd approved
 - Done: branch `annot-pick` off `main` (plan, feature, docs). `Enter` on a
