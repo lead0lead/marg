@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | Hint-visual (branch `hint-visual` off `main`, planned 2026-10-31, steps in §11): steps 1–3 done (`v`, `V`, `Ctrl-q`; checked on Xvfb); step 4 (docs, handover). Then the user tries it. Separately, the user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Hint-visual (branch `hint-visual` off `main`, planned 2026-10-31, steps in §11): all 4 steps done, not pushed; the user tries it (`v`, `V`, `Ctrl-q` in Normal; `Ctrl-q` in Caret/Visual; highlight and copy a block), then merge into `main`. The choices in §12 "Hint-visual choices" are the user's call. Separately, the user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-31 (hint-visual planned) |
+| **Last updated** | 2026-10-31 (hint-visual built) |
 
 ---
 
@@ -407,6 +407,12 @@ Hint labels are drawn over targets; typing a label picks that target.
   (`hint.visual_block`) picks a word and starts a block selection on it
   (§2.7). `f` and `F` stay as they are (`f` for notes at the caret and
   for adjusting the start before `v`).
+  **As implemented:** `Purpose::Visual`, `VisualLine`, `VisualBlock` in
+  `marg/src/select.rs`. `v` and `Ctrl-q` select the whole picked word
+  (anchor on its first character, caret on its last), like `F` and a
+  double click; `V` puts the caret on the line's first word. In Caret and
+  Visual mode, `v`/`V`/`Ctrl-q` keep their Caret meaning (the Caret
+  table is on top of Normal).
 - Pages without a text layer (scans): `f` / `F` show "no text on this page —
   use a box (b)" instead of empty hints.
 
@@ -465,6 +471,18 @@ one follows it. "Still reading the links" / "No links in view".
   dehyphenation. Uses: one column of a table, a column MuPDF reads in
   the wrong order. Box mode (`b`) stays the way to draw a rectangle
   annotation.
+  **As implemented:** `caret::SelKind` (`Char`, `Line`, `Block`)
+  replaces `Selection::linewise`. `Selection::line_parts` returns a
+  block's parts row by row (`block_rows`): parts sorted by vertical
+  center, a part joins the row of the first part above it when its
+  center is within that part's height, each row sorted left to right.
+  Everything built on `line_parts` (drawing, highlights, underlines,
+  comments, `d`/`D`, `gs`) works on blocks unchanged. The status bar
+  shows `VISUAL` for all three kinds, as it did for `V`. No mouse block
+  selection. egui closes the window on Command-Q by default
+  (`Options::quit_shortcuts`), which is Ctrl-q outside macOS: every
+  Ctrl-q quit marg (saving first) before marg handled the key; the
+  shortcut is cleared there (`MargApp::new`), macOS keeps Cmd-q.
 - The selection is drawn as translucent blue over the selected character
   boxes, line by line.
 - **Mouse**: drag selects text character-wise. Double-click selects a word.
@@ -904,6 +922,7 @@ remappable (§8).
 | | `/`, `n` / `N` | search, next / previous hit |
 | | `m{a-z}`, `'{a-z}` | set mark, jump to mark |
 | | `f`, `F` | hint: caret, hint: select range |
+| | `v`, `V`, `Ctrl-q` | hint: select word, line, block |
 | | `gl`, `ga` | hint: links, hint: annotations |
 | | `]a` / `[a` | next / previous annotation |
 | | `i` | new note |
@@ -914,7 +933,7 @@ remappable (§8).
 | | `q` | save and quit |
 | | `Ctrl-w` | save and close the file, show recent files |
 | Caret | `w b e ge 0 $ j k ( ) { }` | motions |
-| | `v` / `V` | start visual / line-visual |
+| | `v` / `V` / `Ctrl-q` | start visual / line-visual / block-visual |
 | Visual (selection) | motions | extend selection |
 | | `o` | swap selection end |
 | | `1`–`5` | highlight with category |
@@ -1719,6 +1738,13 @@ building more.
 
 **Open decisions (user)**
 
+- **Hint-visual choices to confirm** (2026-10-31, Claude's defaults, the
+  user's call after trying it): `v`/`Ctrl-q` select the whole picked word
+  (vim's `v` would select one character); `V` puts the caret on the
+  line's first word; block selections show `VISUAL` (vim: `VISUAL
+  BLOCK`); block copy joins the parts of a row with one space. On macOS
+  (branch `macos`), Cmd counts as Ctrl in `input.rs`, so Cmd-q would be
+  `Ctrl-q` if the app menu did not take it first; check on the Mac.
 - Category names and colors in §2.8 are suggestions; confirm or change.
 - **Keyboard layout**: the default keymap is US/vim-style. On a German QWERTZ
   layout, `[ ] { } /` need AltGr or Shift. Decide whether to keep these
@@ -1897,6 +1923,8 @@ Cmd vs. Ctrl in the keymap, Option as AltGr, arm64 only or universal.
 - Presentation mode (fullscreen, no status bar) for slide decks.
 - Hint labels on list rows (recent files, outline): one key per visible row
   opens it, like `f` in the page.
+- Block selection with the mouse (e.g. Alt-drag), like the keyboard's
+  `Ctrl-q` (2026-10-31).
 
 ---
 
@@ -1916,6 +1944,35 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-31 — Hints into Visual, block selection
+- Done: branch `hint-visual` off `main` (plan, `v`/`V` hints, core
+  selection kinds, `Ctrl-q` app, docs; one commit each). Normal `v`
+  (`hint.visual`) selects the picked word, `V` (`hint.visual_line`)
+  shows line labels only and selects the line, `Ctrl-q`
+  (`hint.visual_block`) starts a block selection on the word. Caret and
+  Visual `Ctrl-q` (`visual.block`) start, switch to or end a block. A
+  block is the text in the rectangle its two ends span (§2.7).
+- Decisions: the user kept tripping over `f` then `v` and asked for a
+  direct way into Visual; `v`/`V` in Normal (Claude's suggestion, the
+  user agreed to both), `f`/`F` unchanged. Block selection asked for by
+  the user as Ctrl-v; Ctrl-q instead (user's choice), since egui-winit
+  turns Ctrl-V into a paste event and marg never sees the key. Text in a
+  rectangle (user's choice over "use box mode"). One branch, `v`/`V`
+  first (user's choice).
+- Tried and failed: on Xvfb, every `Ctrl-q` closed marg (exit 0, after
+  saving): egui's default `quit_shortcuts` (Command-Q = Ctrl-q on
+  Linux/Windows) fire at the end of the frame. Cleared outside macOS.
+  This was also true before the branch: Ctrl-q always quit marg.
+- State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
+  with a copy of `columns.pdf`: `v` + label + `e`, `V` + label, `Ctrl-q`
+  + label + `jjj` (a clean column across four lines), `1` on a block
+  (one highlight per line), Caret `Ctrl-q` and back, `q` saves.
+- Next: the user tries the branch, then merge into `main`.
+- Watch out: Xvfb runs need `env -u WAYLAND_DISPLAY`, otherwise winit
+  opens the window on the user's Wayland session (happened once here; the
+  stray window was closed at once). Start marg as a background command:
+  a `&` child of a one-off shell can be reaped when that shell ends.
 
 ### 2026-10-30 — Release 1.2.0
 - Done: merged `selection-search` and `cli-help` into `main` and pushed;

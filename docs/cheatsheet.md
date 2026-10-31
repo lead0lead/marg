@@ -127,7 +127,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | `Backspace` | remove the last typed character |
 | `Esc` | cancel |
 
-Text hints come in two stages: every visible line gets a label at its left, then each word of the picked line gets one. f puts the caret on the word, F selects from one word to another.
+Text hints come in two stages: every visible line gets a label at its left, then each word of the picked line gets one. f puts the caret on the word, F selects from one word to another, v selects the word, V a whole line (line labels only), and Ctrl-q starts a block selection (the text in a rectangle) on the word.
 
 ## Box mode
 
