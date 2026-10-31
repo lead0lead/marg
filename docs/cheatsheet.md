@@ -68,6 +68,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | `:` | command line |
 | `q` | quit |
 | `Ctrl-w` | close the file, show recent files |
+| `O` | open a file (file dialog) |
 | `?` | keys of this mode |
 
 ## Caret — selecting

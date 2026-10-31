@@ -155,6 +155,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 | `:` | command line |
 | `q` | quit |
 | `Ctrl-w` | close the file, show recent files |
+| `O` | open a file (file dialog) |
 | `?` | keys of this mode |
 
 ### Caret — selecting

@@ -69,7 +69,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | File dialog (branch `file-dialog` off `main`, planned 2026-10-31, steps in §11): step 1. `main` has `v`/`V`/`Ctrl-q` and `Enter` recolor (merged 2026-10-31 at the user's request before trying them; unreleased); the user tries them in real use. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | File dialog (branch `file-dialog` off `main`, planned 2026-10-31, steps in §11): step 1 done (checked on Xvfb through the zenity fallback); step 2 (docs, handover). `main` has `v`/`V`/`Ctrl-q` and `Enter` recolor (merged 2026-10-31 at the user's request before trying them; unreleased); the user tries them in real use. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -1743,11 +1743,12 @@ engine in a binding is a config error), `selection.search[(name)]`,
 `:config` file) and handover.
 
 **File-dialog steps** (branch `file-dialog`, planned 2026-10-31 with the
-user, one commit each): 1 core: `file.open_dialog`, `:e` without a path,
-`O` in Normal (unit-tested parsing); 2 app: `rfd` dependency,
-`filedialog.rs` (dialog created on the UI thread with the window as
-parent, awaited on a thread, result over a channel with a repaint), `O`
-in the recent files list, open the picked file; 3 docs and handover.
+user, one commit each): 1 core and app together (the app's exhaustive
+`match` needs the new command): `file.open_dialog`, `:e` without a path,
+`O` in Normal (unit-tested parsing); `rfd` dependency, `filedialog.rs`
+(dialog created on the UI thread with the window as parent, awaited on a
+thread, result over a channel with a repaint), `O` in the recent files
+list, open the picked file; 2 docs and handover.
 
 **Annot-pick steps** (branch `annot-pick`, planned 2026-10-31 with the
 user, one commit each): 1 `annot.pick` on `Enter` in `[keys.annot]`, the
