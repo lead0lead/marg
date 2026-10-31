@@ -130,6 +130,8 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 |---|---|
 | `f` | hint: place caret |
 | `F` | hint: select range |
+| `v` | hint: select word |
+| `V` | hint: select line |
 
 ### Normal — annotating
 

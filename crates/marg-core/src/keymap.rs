@@ -41,6 +41,8 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("q", "quit"),
     ("f", "hint.caret"),
     ("F", "hint.select"),
+    ("v", "hint.visual"),
+    ("V", "hint.visual_line"),
     ("u", "undo"),
     ("Ctrl-r", "redo"),
     ("Ctrl-w", "file.close"),

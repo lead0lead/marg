@@ -1835,6 +1835,19 @@ impl MargApp {
                 self.set_caret(e.max(end));
                 self.mode = Mode::Visual;
             }
+            Purpose::Visual => {
+                self.selection = Some(Selection::new(start, end));
+                self.set_caret(end);
+                self.mode = Mode::Visual;
+            }
+            Purpose::VisualLine => {
+                self.selection = Some(Selection {
+                    linewise: true,
+                    ..Selection::new(start, start)
+                });
+                self.set_caret(start);
+                self.mode = Mode::Visual;
+            }
             Purpose::Annot(_) | Purpose::Link(_) => {}
         }
     }
@@ -3104,6 +3117,14 @@ impl MargApp {
                 self.start_hints(Purpose::SelectStart);
                 return;
             }
+            Command::HintVisual => {
+                self.start_hints(Purpose::Visual);
+                return;
+            }
+            Command::HintVisualLine => {
+                self.start_hints(Purpose::VisualLine);
+                return;
+            }
             Command::HintAnnot => {
                 self.annot_hints();
                 return;
@@ -3291,6 +3312,8 @@ impl MargApp {
             | Command::DebugToggle => {}
             Command::HintCaret
             | Command::HintSelect
+            | Command::HintVisual
+            | Command::HintVisualLine
             | Command::HintAnnot
             | Command::HintLinks
             | Command::Help

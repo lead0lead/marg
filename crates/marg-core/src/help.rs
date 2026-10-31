@@ -27,6 +27,7 @@ pub fn topic(c: &Command) -> &'static str {
     if starts(&[
         "hint.caret",
         "hint.select",
+        "hint.visual",
         "caret.",
         "visual.",
         "selection.",

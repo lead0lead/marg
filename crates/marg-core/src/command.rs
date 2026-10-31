@@ -51,6 +51,10 @@ pub enum Command {
     HintCaret,
     /// Hints on two words; selects from the first to the second.
     HintSelect,
+    /// Hints on words; selects the picked word character-wise.
+    HintVisual,
+    /// Hints on lines only; selects the picked line line-wise.
+    HintVisualLine,
     /// Hints on the visible annotations; selects the picked one.
     HintAnnot,
     /// Hints on the visible links; follows the picked one.
@@ -176,6 +180,12 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
     ("debug.toggle", Command::DebugToggle, "debug overlay"),
     ("hint.caret", Command::HintCaret, "hint: place caret"),
     ("hint.select", Command::HintSelect, "hint: select range"),
+    ("hint.visual", Command::HintVisual, "hint: select word"),
+    (
+        "hint.visual_line",
+        Command::HintVisualLine,
+        "hint: select line",
+    ),
     ("hint.annot", Command::HintAnnot, "hint: select annotation"),
     ("hint.links", Command::HintLinks, "hint: follow link"),
     (
