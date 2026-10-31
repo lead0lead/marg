@@ -98,6 +98,8 @@ pub enum Command {
     EraseWhole,
     /// Give the selected annotation category 1–5.
     AnnotRecolor(u8),
+    /// Ask for the category, then recolor the selected annotation.
+    AnnotPick,
     /// Switch the selected annotation between highlight and underline.
     AnnotToggleType,
     /// Edit the comment of the selected annotation.
@@ -344,6 +346,7 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         Command::AnnotRecolor(5),
         "recolor: category 5",
     ),
+    ("annot.pick", Command::AnnotPick, "recolor: choose category"),
     ("annot.edit", Command::AnnotEdit, "edit comment"),
     ("annotate.comment", Command::Comment, "highlight + comment"),
     ("annotate.note", Command::Note, "new note"),
@@ -397,6 +400,7 @@ impl Command {
                 | Command::BoxMode
                 | Command::AnnotDelete
                 | Command::AnnotRecolor(_)
+                | Command::AnnotPick
                 | Command::AnnotToggleType
                 | Command::AnnotEdit
                 | Command::Erase

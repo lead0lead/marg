@@ -112,6 +112,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | Keys | |
 |---|---|
 | `1-5` | recolor: category 1-5 |
+| `Enter` | recolor: choose category |
 | `e` | edit comment |
 | `U` | switch highlight / underline |
 
