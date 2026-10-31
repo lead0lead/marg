@@ -118,6 +118,7 @@ pub const DEFAULT_ANNOT: &[(&str, &str)] = &[
     ("3", "annot.recolor(3)"),
     ("4", "annot.recolor(4)"),
     ("5", "annot.recolor(5)"),
+    ("Enter", "annot.pick"),
     ("U", "annot.toggle_type"),
     ("e", "annot.edit"),
 ];

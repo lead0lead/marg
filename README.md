@@ -203,6 +203,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 | Keys | |
 |---|---|
 | `1-5` | recolor: category 1-5 |
+| `Enter` | recolor: choose category |
 | `e` | edit comment |
 | `U` | switch highlight / underline |
 

@@ -270,6 +270,9 @@ enum Mode {
     Visual,
     /// Visual mode, asking which category to highlight with.
     Category,
+    /// An annotation is selected, asking which category to recolor it
+    /// with.
+    Recolor,
     /// The comment editor is open.
     Insert,
     /// Drawing a box.
@@ -291,9 +294,12 @@ enum Mode {
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Normal | Mode::Command | Mode::Search | Mode::Confirm | Mode::Password => {
-                "NORMAL"
-            }
+            Mode::Normal
+            | Mode::Command
+            | Mode::Search
+            | Mode::Confirm
+            | Mode::Password
+            | Mode::Recolor => "NORMAL",
             Mode::Help => "HELP",
             Mode::Recent => "RECENT",
             Mode::Hint => "HINT",
@@ -1090,7 +1096,7 @@ impl MargApp {
                 }
                 _ if self.mode == Mode::Recent => self.recent_event(ctx, e),
                 _ if self.mode == Mode::Hint => self.hint_event(e),
-                _ if self.mode == Mode::Category => self.category_event(e),
+                _ if matches!(self.mode, Mode::Category | Mode::Recolor) => self.category_event(e),
                 // The comment editor's text field takes the keys.
                 _ if self.mode == Mode::Insert => {}
                 _ if self.mode == Mode::Box => self.box_event(e),
@@ -2740,20 +2746,34 @@ impl MargApp {
             KeyCode::Char(c) if !k.ctrl && !k.alt => {
                 let n = self.config.categories.len().min(9);
                 if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
-                    self.annotate(AnnotKind::Highlight, d as u8);
+                    self.category_picked(d as u8);
                 }
             }
-            KeyCode::Named(Named::Enter) => {
-                self.annotate(AnnotKind::Highlight, self.last_category);
-            }
+            KeyCode::Named(Named::Enter) => self.category_picked(self.last_category),
+            KeyCode::Named(Named::Esc) if self.mode == Mode::Recolor => self.mode = Mode::Normal,
             KeyCode::Named(Named::Esc) => self.mode = Mode::Visual,
             _ => {}
         }
     }
 
+    /// Highlight the selection with `category`, or recolor the selected
+    /// annotation.
+    fn category_picked(&mut self, category: u8) {
+        if self.mode == Mode::Recolor {
+            self.mode = Mode::Normal;
+            self.recolor_annotation(category);
+        } else {
+            self.annotate(AnnotKind::Highlight, category);
+        }
+    }
+
     /// The status line of the category prompt.
     fn category_prompt(&self) -> String {
-        let mut out = String::from("highlight:");
+        let mut out = String::from(if self.mode == Mode::Recolor {
+            "recolor:"
+        } else {
+            "highlight:"
+        });
         for (i, c) in self.config.categories.iter().take(9).enumerate() {
             out.push_str(&format!("  {} {}", i + 1, c.name));
         }
@@ -3069,6 +3089,16 @@ impl MargApp {
                 self.recolor_annotation(c);
                 return;
             }
+            Command::AnnotPick => {
+                if self.selected_info().is_some() {
+                    self.mode = Mode::Recolor;
+                    // The annotation's message would crowd the prompt.
+                    self.message = None;
+                } else {
+                    self.show(Level::Info, "No annotation selected".into());
+                }
+                return;
+            }
             Command::AnnotToggleType => {
                 self.toggle_annotation_type();
                 return;
@@ -3362,6 +3392,7 @@ impl MargApp {
             | Command::AnnotPrev
             | Command::AnnotDelete
             | Command::AnnotRecolor(_)
+            | Command::AnnotPick
             | Command::AnnotToggleType
             | Command::AnnotEdit
             | Command::Comment
@@ -3963,7 +3994,7 @@ impl MargApp {
                 let prefix = format!("Password for {name}: ");
                 prompt::show(ui, &prefix, &dots, self.passline.cursor(), th.statusbar_fg);
             } else {
-                let left = if self.mode == Mode::Category {
+                let left = if matches!(self.mode, Mode::Category | Mode::Recolor) {
                     self.category_prompt()
                 } else if self.mode == Mode::Box {
                     self.box_prompt()
