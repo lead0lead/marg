@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.2.0 released** on 2026-10-30 (https://github.com/lead0lead/marg/releases/tag/v1.2.0): web search for the Visual selection (`gs`; named engines in `[search.engines]`, bound with `selection.search(name)`), drag and drop of PDFs onto the window (X11/XWayland, Windows), `marg --help`, unknown `--options` rejected. Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.1.0 and v1.0.0 released 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | Annot-pick (branch `annot-pick` off `main`, planned 2026-10-31, steps in §11): step 1 done (checked on Xvfb); step 2 (docs, handover). Branch `hint-visual` (`v`, `V`, `Ctrl-q`; done 2026-10-31) waits for the user to try it. Then the file dialog with `rfd` (approved 2026-10-31, §9), planned as its own branch. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Annot-pick (branch `annot-pick` off `main`, planned 2026-10-31, steps in §11): both steps done, not pushed; the user tries `Enter` on a selected annotation, then merge into `main`. Branch `hint-visual` (`v`, `V`, `Ctrl-q`; done 2026-10-31) waits for the user to try it. Then the file dialog with `rfd` (approved 2026-10-31, §9), planned as its own branch. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.2.0 |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-10-31 (annot-pick planned) |
+| **Last updated** | 2026-10-31 (annot-pick built) |
 
 ---
 
@@ -555,6 +555,12 @@ With the mouse, in box mode, drag a rectangle instead of steps 1–3.
   shows the same status-bar prompt as Visual `Enter` (`annotate.pick`),
   headed `recolor:`; a digit recolors like `1`–`5`, `Enter` uses the last
   category, Esc goes back with the annotation still selected.
+  **As implemented:** `Mode::Recolor` shares `category_event` and
+  `category_prompt` with Visual's `Mode::Category`; the status bar shows
+  `NORMAL`. Opening the prompt clears the status message (the `]a`
+  message ran into the prompt). Refused in read-only files like the
+  other edits; "No annotation selected" otherwise. Does not change the
+  last-used category, like `1`–`5` on an annotation.
 - Hovering an annotation with a comment, or selecting it, shows the comment
   as a tooltip next to it.
 - **Undo / redo**: `u` and `Ctrl-r` undo and redo annotation operations
@@ -905,6 +911,7 @@ remappable (§8).
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
 | Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
+| | `Enter`, then `1`–`5` or `Enter` | recolor via category prompt (last category on `Enter`) |
 | Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set name=value`, `:debug` | |
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
@@ -1891,6 +1898,23 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-10-31 — Recolor prompt; rfd approved
+- Done: branch `annot-pick` off `main` (plan, feature, docs). `Enter` on a
+  selected annotation (`annot.pick`, `[keys.annot]`) opens the category
+  prompt (`recolor:`) and recolors. Same session, branch `hint-visual`
+  (separate entry in that branch's concept.md) was finished first.
+- Decisions: the user asked for `Enter` to match Visual `Enter`. The
+  user approved `rfd` for an "open file" dialog (§9, measured cost there);
+  not built yet, its own branch next.
+- State: builds; all tests pass; clippy and fmt clean. Checked on Xvfb
+  with a copy of `columns.pdf`: prompt, digit, Esc, `Enter` `Enter`, `u`.
+- Next: the user tries `hint-visual` and `annot-pick`; merge both (both
+  touch concept.md §0 and the session log, and `app.rs` in separate
+  places); then plan the `rfd` file dialog with the user (key, `:e`
+  without a path, start folder).
+- Watch out: Xvfb runs need `env -u WAYLAND_DISPLAY` and a background
+  command (see the `hint-visual` entry).
 
 ### 2026-10-30 — Release 1.2.0
 - Done: merged `selection-search` and `cli-help` into `main` and pushed;
