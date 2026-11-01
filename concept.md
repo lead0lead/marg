@@ -2012,8 +2012,9 @@ Format:
 - Watch out: the user's disk was full (0 bytes free) during the release
   checks; Claude deleted `target/debug/incremental` (3.2 GB, cache only)
   and told the user. `target/` holds ~18 GB more of rebuildable cache.
-  The local install is the `file-dialog` build at `c1d66dc`: same code,
-  but it reports version 1.2.0.
+  After the user freed disk space (and `target/` with it), the local
+  install (`~/.local/bin/marg`) was rebuilt from scratch (`dist`, 8m 44s)
+  at the 1.3.0 release and now reports 1.3.0.
 - Next: the user tries the `macos` branch on their Mac; the §12 choices
   (hint-visual, file dialog) after real use.
 
