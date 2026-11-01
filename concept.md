@@ -67,7 +67,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.3.0** on 2026-11-01: hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
+| **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
 | **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
 | **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
@@ -75,7 +75,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-11-01 (1.3.0) |
+| **Last updated** | 2026-11-01 (1.3.0 released) |
 
 ---
 
@@ -1999,6 +1999,23 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-01 — Release 1.3.0
+- Done: the user tried the local install ("Feels very nice now") and
+  asked to push and release. Merged `file-dialog` into `main`, version
+  1.3.0, tag `v1.3.0`. Release run green (19 min; CI 2–3 min on all
+  pushed branches): `marg-linux-x86_64` and `marg-windows-x86_64.exe`
+  attached. Feature branches `hint-visual`, `annot-pick`, `file-dialog`
+  pushed.
+- Decisions: minor version (new features). macOS not included (`macos`
+  still waits for the user's Mac test).
+- Watch out: the user's disk was full (0 bytes free) during the release
+  checks; Claude deleted `target/debug/incremental` (3.2 GB, cache only)
+  and told the user. `target/` holds ~18 GB more of rebuildable cache.
+  The local install is the `file-dialog` build at `c1d66dc`: same code,
+  but it reports version 1.2.0.
+- Next: the user tries the `macos` branch on their Mac; the §12 choices
+  (hint-visual, file dialog) after real use.
 
 ### 2026-10-31 — File dialog
 - Done: branch `file-dialog` off `main` (plan, feature, docs). `O`
