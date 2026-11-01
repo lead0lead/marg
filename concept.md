@@ -2022,7 +2022,10 @@ Format:
   (zenity fallback): `O` shows it while marg keeps drawing, picking a
   file opens it, `:e`, `O` while open, Cancel, `O` from the recent list.
 - Next: the user tries it on COSMIC (the portal picker, its start
-  folder, parenting), then merge into `main`.
+  folder, parenting), then merge into `main`. Local install
+  (`~/.local/bin/marg`) updated 2026-11-01 to the `dist` build of
+  `file-dialog` at `c1d66dc` (includes `main`'s `v`/`V`/`Ctrl-q` and
+  `Enter` recolor).
 - Watch out: never let a test marg reach the user's session bus (see
   above); the portal draws on the user's real desktop.
 
