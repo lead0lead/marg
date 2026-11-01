@@ -16,6 +16,7 @@ mod browser;
 mod comment;
 mod complete;
 mod drop;
+mod filedialog;
 mod help;
 mod input;
 mod outline;

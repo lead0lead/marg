@@ -36,6 +36,7 @@ use crate::browser;
 use crate::comment::{self, CommentEditor};
 use crate::complete;
 use crate::drop;
+use crate::filedialog::{self, Picking};
 use crate::help::HelpView;
 use crate::input;
 use crate::outline::{self, OutlineList};
@@ -349,6 +350,11 @@ pub struct MargApp {
     selection_before_hints: Option<Selection>,
     /// The external link waiting for `y` (Confirm mode).
     pending_url: Option<String>,
+    /// `file.open_dialog` was run; the dialog needs the frame, so it is
+    /// shown at the start of the next one.
+    dialog_requested: bool,
+    /// The open file dialog.
+    picking: Option<Picking>,
     /// A press on a link: where, and the link; a release there follows it.
     link_press: Option<(egui::Pos2, Link)>,
     /// `m` or `'` was pressed: the next key names the mark (true: set).
@@ -513,6 +519,8 @@ impl MargApp {
             selection_before_hints: None,
             pending_mark: None,
             pending_url: None,
+            dialog_requested: false,
+            picking: None,
             link_press: None,
             drag_anchor: None,
             last_click: None,
@@ -1165,12 +1173,13 @@ impl MargApp {
     fn recent_event(&mut self, ctx: &egui::Context, e: &Event) {
         let Some(list) = &mut self.recent else { return };
         // The command line key (`:`), so that `:e` works before any file
-        // was opened.
+        // was opened, and the file dialog key.
         if !list.filtering()
             && let Some(k) = input::key_press(e)
-            && self.keymap.exact(&[k]) == Some(&Command::CommandLine)
+            && let Some(c @ (Command::CommandLine | Command::OpenDialog)) =
+                self.keymap.exact(&[k]).cloned()
         {
-            self.run(ctx, Command::CommandLine, None);
+            self.run(ctx, c, None);
             return;
         }
         match list.event(e) {
@@ -3127,6 +3136,15 @@ impl MargApp {
                 self.open_path(&path);
                 return;
             }
+            Command::OpenDialog => {
+                if self.picking.is_some() {
+                    self.show(Level::Info, "The file dialog is already open".into());
+                } else {
+                    self.dialog_requested = true;
+                    ctx.request_repaint();
+                }
+                return;
+            }
             Command::WriteConfig => {
                 self.write_config();
                 return;
@@ -3359,6 +3377,7 @@ impl MargApp {
             | Command::Quit
             | Command::QuitForce
             | Command::Open(_)
+            | Command::OpenDialog
             | Command::Export(_)
             | Command::WriteConfig
             | Command::Unlock
@@ -3412,6 +3431,25 @@ impl MargApp {
             | Command::EraseWhole
             | Command::Undo
             | Command::Redo => {}
+        }
+    }
+
+    /// Show the file dialog when asked for, and open what it picked.
+    fn poll_dialog(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
+        if std::mem::take(&mut self.dialog_requested) {
+            let dir = self
+                .open
+                .as_ref()
+                .and_then(|o| o.info.path.parent())
+                .filter(|d| !d.as_os_str().is_empty());
+            self.picking = Some(filedialog::start(frame, dir, ctx.clone()));
+        }
+        let Some(picked) = self.picking.as_ref().and_then(Picking::poll) else {
+            return;
+        };
+        self.picking = None;
+        if let Some(path) = picked {
+            self.open_files(path, Vec::new());
         }
     }
 
@@ -4058,12 +4096,13 @@ impl eframe::App for MargApp {
         log::error!("save on exit timed out; changes lost");
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
         let th = self.theme.clone();
         let ctx = ui.ctx().clone();
         self.handle_responses(&ctx);
         self.poll_export();
+        self.poll_dialog(frame, &ctx);
         // Closing the window saves first, like `q`.
         if ctx.input(|i| i.viewport().close_requested())
             && !self.discard

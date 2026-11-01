@@ -96,7 +96,7 @@ impl RecentList {
                 ui.label(text(&format!("/{filter}"), th.panel_dim));
             } else {
                 ui.label(text(
-                    "j/k move   / filter   Enter open   : command   Esc quit",
+                    "j/k move   / filter   Enter open   O file dialog   : command   Esc quit",
                     th.panel_dim,
                 ));
             }
@@ -107,7 +107,7 @@ impl RecentList {
             self.half_page = ((ui.available_height() / row_h) as usize / 2).max(1);
             if self.items.is_empty() {
                 ui.label(text(
-                    "No recent files. Open one with :e <file.pdf>.",
+                    "No recent files. Open one with O (file dialog) or :e <file.pdf>.",
                     th.panel_dim,
                 ));
                 return;

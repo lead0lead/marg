@@ -35,6 +35,8 @@ pub enum Command {
     Quit,
     QuitForce,
     Open(String),
+    /// Pick a file to open in the desktop's file dialog.
+    OpenDialog,
     /// Write the commented default config, if there is no config file.
     WriteConfig,
     /// `:set name=value` changes a setting for this session; `:set name`
@@ -324,6 +326,11 @@ pub const REGISTRY: &[(&str, Command, &str)] = &[
         Command::Close,
         "close the file, show recent files",
     ),
+    (
+        "file.open_dialog",
+        Command::OpenDialog,
+        "open a file (file dialog)",
+    ),
     ("annot.next", Command::AnnotNext, "next annotation"),
     ("annot.prev", Command::AnnotPrev, "previous annotation"),
     (
@@ -439,6 +446,7 @@ impl Command {
                 | Command::Quit
                 | Command::QuitForce
                 | Command::Open(_)
+                | Command::OpenDialog
                 | Command::WriteConfig
                 | Command::Set(_)
                 | Command::Version
@@ -515,7 +523,7 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
         "q!" | "quit!" => no_arg(Command::QuitForce),
         "e" | "edit" => {
             if rest.is_empty() {
-                Err("usage: e <path>".into())
+                Ok(Command::OpenDialog)
             } else {
                 Ok(Command::Open(rest.to_string()))
             }
@@ -635,7 +643,8 @@ mod tests {
         assert!(parse_ex("set").is_err());
         assert!(parse_ex("layout wide").is_err());
         assert!(parse_ex("0").is_err());
-        assert!(parse_ex("e").is_err());
+        assert_eq!(parse_ex("e"), Ok(Command::OpenDialog));
+        assert!(!Command::OpenDialog.needs_document());
         assert!(parse_ex("q now").is_err());
         assert!(parse_ex("nonsense").is_err());
     }

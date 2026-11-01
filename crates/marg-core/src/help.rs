@@ -190,6 +190,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ("Enter", "open"),
             ("Esc", "clear the filter, then close"),
             ("recent files: :", "command line, e.g. :e path"),
+            ("recent files: O", "open a file (file dialog)"),
             ("annotations: 1-5, 0", "one category, all"),
             ("annotations: e, x", "edit the comment, delete"),
         ],
@@ -222,6 +223,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 ":e path, :e!",
                 "open a file (Tab completes); reload from disk",
             ),
+            (":e", "open a file (file dialog)"),
             (":close, :bd", "close the file, show the recent files"),
             (":layout continuous|single|spread", "set the layout"),
             (

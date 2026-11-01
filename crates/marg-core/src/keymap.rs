@@ -47,6 +47,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("u", "undo"),
     ("Ctrl-r", "redo"),
     ("Ctrl-w", "file.close"),
+    ("O", "file.open_dialog"),
     ("]a", "annot.next"),
     ("[a", "annot.prev"),
     ("x", "annot.delete"),

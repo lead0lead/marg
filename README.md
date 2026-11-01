@@ -41,6 +41,10 @@ marg                        # recent files
 marg --help                 # options
 ```
 
+`O` (or `:e` without a path) opens the desktop's file dialog; on Linux
+that is the xdg-desktop-portal picker (COSMIC, GNOME, KDE), with zenity
+as the fallback.
+
 Dropping PDFs on the window opens them: the first in that window, the
 others in new windows (not on Wayland yet: the windowing library does not
 support drag and drop there; XWayland works).
@@ -155,6 +159,7 @@ The default keys (also in [`docs/cheatsheet.md`](docs/cheatsheet.md)):
 | `:` | command line |
 | `q` | quit |
 | `Ctrl-w` | close the file, show recent files |
+| `O` | open a file (file dialog) |
 | `?` | keys of this mode |
 
 ### Caret — selecting
@@ -247,6 +252,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `Enter` | open |
 | `Esc` | clear the filter, then close |
 | `recent files: :` | command line, e.g. :e path |
+| `recent files: O` | open a file (file dialog) |
 | `annotations: 1-5, 0` | one category, all |
 | `annotations: e, x` | edit the comment, delete |
 
@@ -267,6 +273,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `:w, :w!` | save; save over changes made by another program |
 | `:q, :q!` | save and quit; quit without saving |
 | `:e path, :e!` | open a file (Tab completes); reload from disk |
+| `:e` | open a file (file dialog) |
 | `:close, :bd` | close the file, show the recent files |
 | `:layout continuous\|single\|spread` | set the layout |
 | `:export md [path]` | write the annotations as Markdown (default: &lt;file&gt;.notes.md) |
