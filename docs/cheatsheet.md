@@ -141,6 +141,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `s` | snap to the image under the box |
 | `1-5` | category |
 | `Enter / Esc` | save / cancel |
+| `c` | save, then comment on the box |
 
 ## Comment editor
 

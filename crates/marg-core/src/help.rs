@@ -170,6 +170,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ("s", "snap to the image under the box"),
             ("1-5", "category"),
             ("Enter / Esc", "save / cancel"),
+            ("c", "save, then comment on the box"),
         ],
     ));
     out.extend(fixed(

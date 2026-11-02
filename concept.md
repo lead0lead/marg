@@ -68,7 +68,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
-| **Current phase** | Branch `comment-key` (off `main`, not merged): `c` comments in every mode (new note, highlight + comment, edit), `i`/`e` kept; waiting for the user to try it. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
+| **Current phase** | Branch `comment-key` (off `main`, not merged): `c` comments in every mode (new note, highlight + comment, edit, and in Box mode saves the box and comments on it), `i`/`e` kept; waiting for the user to try it. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
 | **Next step** | The user tries `comment-key`, then merge. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
@@ -605,7 +605,8 @@ config (default: the OS user name).
 3. Adjust: `h/j/k/l` move the bottom-right corner, `H/J/K/L` the top-left
    corner, by 4 pt *(start)*; with `Ctrl` by 1 pt. `s` snaps the box to the
    bounds of the image block it overlaps most, if there is one.
-4. `1`–`5` set the category, Enter confirms, Esc cancels.
+4. `1`–`5` set the category, Enter confirms, `c` confirms and opens the
+   comment editor on the box, Esc cancels.
 
 With the mouse, in box mode, drag a rectangle instead of steps 1–3.
 
@@ -733,7 +734,9 @@ analogy with vim, where Visual `D` deletes whole lines.
   (1) (`Ctrl-Shift-hjkl` for the top-left corner); corners stop at the page
   edge and at a 2 pt minimum size. `1`–`5` set the category (shown in the
   status bar), `s` snaps, Enter saves (a `Square` with
-  `box_stroke_pt` line width, no fill, category color and `/Subj`), Esc
+  `box_stroke_pt` line width, no fill, category color and `/Subj`), `c`
+  saves and opens the comment editor on the new box (Esc there keeps the
+  box, like Visual `c`; asked for by the user 2026-11-02), Esc
   cancels. A mouse drag in Box mode draws the box (on the page where the
   drag starts) and goes straight to adjusting. Box mode keys are fixed,
   not in the keymap (like the list keys).
@@ -989,7 +992,8 @@ inconsistent): `c` makes a new note in Normal and Caret mode
 edits the comment of a selected annotation (`annot.edit`) and of the
 annotation list's row. `i` and `e` stay as second bindings; `c` is
 listed first in the help and cheat sheet. On scanned pages (no text, no
-caret) a comment goes on a box: `b`, draw, Enter, select it, `c`.
+caret) a comment goes on a box: `b`, draw, then `c` (saves the box and
+opens the editor).
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -2014,11 +2018,14 @@ Format:
   and with an annotation selected (`annot.edit`), Visual `c` unchanged,
   `c` next to `e` in the annotation list; help page, README and
   `docs/cheatsheet.md` regenerated; test `c_comments_in_every_mode`.
+  Second commit: `c` in Box mode (once adjusting) saves the box and
+  opens the comment editor on it (`comment_box`; `confirm_box` now
+  returns the created tag and spec).
 - Decisions: the user found `i` / Visual `c` / `e` inconsistent; `c`
-  becomes the default, `i` and `e` stay.
+  becomes the default, `i` and `e` stay. Box-mode `c` replaces the
+  idea of keeping a confirmed box selected.
 - State: build, tests, clippy, fmt pass; not merged, not installed.
-- Next: the user tries it, then merge. Idea not built: keep a box
-  selected after Enter so `c` follows directly (scanned pages).
+- Next: the user tries it, then merge.
 
 ### 2026-11-01 — Release 1.3.0
 - Done: the user tried the local install ("Feels very nice now") and
