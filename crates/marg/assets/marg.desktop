@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=marg
+GenericName=PDF Reader
+Comment=Keyboard-driven PDF reader and annotator
+Exec=marg %f
+Icon=marg
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;

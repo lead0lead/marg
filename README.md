@@ -32,6 +32,12 @@ sudo apt-get install libclang-dev libxkbcommon-dev libwayland-dev \
 cargo build --profile dist      # target/dist/marg
 ```
 
+On Linux, `scripts/install.sh` builds that and installs it for your user:
+the binary in `~/.local/bin`, a desktop entry and the icon in
+`~/.local/share`. `scripts/install.sh --default-app` also makes marg the
+default PDF app. Run it again to update; open marg windows keep the old
+version until restarted.
+
 ## Use
 
 ```sh
