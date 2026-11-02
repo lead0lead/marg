@@ -68,7 +68,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
-| **Current phase** | Branch `install-script` (not merged): `scripts/install.sh` for the local install (§3 Look, README). Before that: `comment-key` merged into `main` and pushed 2026-11-02 (`c` comments in every mode, also in Box mode; `i`/`e` kept), not released; local install updated. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
+| **Current phase** | `install-script` merged into `main` and pushed 2026-11-02: `scripts/install.sh` for the local install (§3 Look, README). Before that: `comment-key` merged into `main` and pushed 2026-11-02 (`c` comments in every mode, also in Box mode; `i`/`e` kept), not released; local install updated. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
 | **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
@@ -2033,8 +2033,9 @@ Format:
   where none exists.
 - State: tested with a fake `HOME` (install, `--default-app` on an
   existing COSMIC list, unknown option, `--help`); not run on the real
-  install, which is still `dc41b52`.
-- Next: the user tries `scripts/install.sh`, then merge.
+  install, which is still `dc41b52`. Merged into `main` and pushed at
+  the user's request.
+- Next: the user runs `scripts/install.sh` for the next update.
 
 ### 2026-11-02 — `c` as the comment key
 - Done: branch `comment-key`: default `c` in Normal (`annotate.note`)
