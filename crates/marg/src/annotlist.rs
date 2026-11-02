@@ -93,11 +93,11 @@ impl AnnotList {
                 };
                 match k.code {
                     KeyCode::Char(c) if !self.nav.filtering() && !k.ctrl && !k.alt => match c {
-                        'e' | 'x' => {
+                        'c' | 'e' | 'x' => {
                             let Some((page, xref)) = self.selected().map(at) else {
                                 return Action::None;
                             };
-                            return if c == 'e' {
+                            return if c != 'x' {
                                 Action::Edit { page, xref }
                             } else {
                                 Action::Delete { page, xref }

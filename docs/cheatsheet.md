@@ -57,7 +57,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 | `]a` | next annotation |
 | `[a` | previous annotation |
 | `x` | delete the selected annotation |
-| `i` | new note |
+| `c, i` | new note |
 | `b` | box mode |
 | `A` | annotation list |
 
@@ -118,7 +118,7 @@ The default keys. `?` shows the keys of the current mode and `:help` everything,
 |---|---|
 | `1-5` | recolor: category 1-5 |
 | `Enter` | recolor: choose category |
-| `e` | edit comment |
+| `c, e` | edit comment |
 | `U` | switch highlight / underline |
 
 ## Hints
@@ -141,6 +141,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `s` | snap to the image under the box |
 | `1-5` | category |
 | `Enter / Esc` | save / cancel |
+| `c` | save, then comment on the box |
 
 ## Comment editor
 
@@ -163,7 +164,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `recent files: :` | command line, e.g. :e path |
 | `recent files: O` | open a file (file dialog) |
 | `annotations: 1-5, 0` | one category, all |
-| `annotations: e, x` | edit the comment, delete |
+| `annotations: c / e, x` | edit the comment, delete |
 
 ## Search prompt
 

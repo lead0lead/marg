@@ -53,6 +53,7 @@ pub const DEFAULT_NORMAL: &[(&str, &str)] = &[
     ("x", "annot.delete"),
     ("ga", "hint.annot"),
     ("gl", "hint.links"),
+    ("c", "annotate.note"),
     ("i", "annotate.note"),
     ("b", "annotate.box"),
     ("A", "annot.list"),
@@ -121,6 +122,7 @@ pub const DEFAULT_ANNOT: &[(&str, &str)] = &[
     ("5", "annot.recolor(5)"),
     ("Enter", "annot.pick"),
     ("U", "annot.toggle_type"),
+    ("c", "annot.edit"),
     ("e", "annot.edit"),
 ];
 
@@ -372,6 +374,33 @@ mod tests {
     fn defaults_parse_without_conflicts() {
         let map = defaults();
         assert_eq!(map.iter().count(), DEFAULT_NORMAL.len());
+    }
+
+    #[test]
+    fn c_comments_in_every_mode() {
+        let keys = KeysConfig::default();
+        let mut m = Matcher::default();
+        for (mode, command) in [
+            (KeyMode::Normal, Command::Note),
+            (KeyMode::Caret, Command::Note),
+            (KeyMode::Visual, Command::Comment),
+            (KeyMode::Annot, Command::AnnotEdit),
+        ] {
+            let (map, warnings) = Keymap::build(mode, &keys);
+            assert!(warnings.is_empty(), "{warnings:?}");
+            assert_eq!(
+                feed_str(&mut m, &map, "c"),
+                [run(command, None)],
+                "{mode:?}"
+            );
+        }
+        // The older keys stay.
+        let (annot, _) = Keymap::build(KeyMode::Annot, &keys);
+        assert_eq!(
+            feed_str(&mut m, &annot, "e"),
+            [run(Command::AnnotEdit, None)]
+        );
+        assert_eq!(feed_str(&mut m, &annot, "i"), [run(Command::Note, None)]);
     }
 
     #[test]

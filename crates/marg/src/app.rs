@@ -1402,6 +1402,10 @@ impl MargApp {
                             self.snap_box();
                             return;
                         }
+                        'c' => {
+                            self.comment_box();
+                            return;
+                        }
                         _ => {
                             let n = self.config.categories.len().min(9);
                             if let Some(d) = c.to_digit(10).filter(|&d| d >= 1 && d as usize <= n) {
@@ -1424,7 +1428,9 @@ impl MargApp {
                         self.mode = Mode::Normal;
                     }
                     egui::Key::Backspace if !b.adjusting() => b.pop(),
-                    egui::Key::Enter if b.adjusting() => self.confirm_box(),
+                    egui::Key::Enter if b.adjusting() => {
+                        self.confirm_box();
+                    }
                     // Ctrl drops the text event, so fine steps come from
                     // the key; Shift moves the top-left corner.
                     egui::Key::H | egui::Key::J | egui::Key::K | egui::Key::L
@@ -1481,19 +1487,17 @@ impl MargApp {
     }
 
     /// Enter in Box mode: create the box (one undo step).
-    fn confirm_box(&mut self) {
-        let Some(b) = self.boxing.take() else { return };
+    fn confirm_box(&mut self) -> Option<(u64, AnnotSpec)> {
+        let b = self.boxing.take()?;
         self.mode = Mode::Normal;
         let (Some(sel), Some(open)) = (b.sel, &mut self.open) else {
-            return;
+            return None;
         };
-        let Some(cat) = self.config.categories.get(usize::from(b.category) - 1) else {
-            return;
-        };
+        let cat = self.config.categories.get(usize::from(b.category) - 1)?;
         let Some(color) = parse_color(&cat.color) else {
             let msg = format!("Bad color for category {}: {}", cat.name, cat.color);
             self.error(msg);
-            return;
+            return None;
         };
         let spec = AnnotSpec {
             page: sel.page,
@@ -1518,11 +1522,30 @@ impl MargApp {
             edit: Edit::Create(spec.clone()),
         });
         open.undo.push(UndoOp {
-            created: vec![Created { spec, tag }],
+            created: vec![Created {
+                spec: spec.clone(),
+                tag,
+            }],
             ..UndoOp::default()
         });
         self.last_category = b.category;
         self.show(Level::Info, format!("Box: {}", cat.name));
+        Some((tag, spec))
+    }
+
+    /// `c` in Box mode: create the box, then the comment editor on it
+    /// (Esc keeps the box, like Visual `c` keeps the highlight).
+    fn comment_box(&mut self) {
+        let Some((tag, spec)) = self.confirm_box() else {
+            return;
+        };
+        let target = comment::Target::Created {
+            page: spec.page,
+            tag,
+            note: false,
+        };
+        self.editor = Some(CommentEditor::new(target, spec.rects[0], String::new()));
+        self.mode = Mode::Insert;
     }
 
     /// Dark pages on or off; the visible pages are rendered again.

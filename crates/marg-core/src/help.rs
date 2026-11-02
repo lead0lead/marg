@@ -170,6 +170,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ("s", "snap to the image under the box"),
             ("1-5", "category"),
             ("Enter / Esc", "save / cancel"),
+            ("c", "save, then comment on the box"),
         ],
     ));
     out.extend(fixed(
@@ -192,7 +193,7 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
             ("recent files: :", "command line, e.g. :e path"),
             ("recent files: O", "open a file (file dialog)"),
             ("annotations: 1-5, 0", "one category, all"),
-            ("annotations: e, x", "edit the comment, delete"),
+            ("annotations: c / e, x", "edit the comment, delete"),
         ],
     ));
     out.extend(fixed(
