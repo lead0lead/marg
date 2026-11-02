@@ -68,7 +68,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
-| **Current phase** | `comment-key` merged into `main` and pushed 2026-11-02 (`c` comments in every mode, also in Box mode; `i`/`e` kept), not released; local install updated. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
+| **Current phase** | Branch `install-script` (not merged): `scripts/install.sh` for the local install (§3 Look, README). Before that: `comment-key` merged into `main` and pushed 2026-11-02 (`c` comments in every mode, also in Box mode; `i`/`e` kept), not released; local install updated. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
 | **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
@@ -1156,6 +1156,16 @@ Reference: Zathura's minimalism. No toolbar, no menu bar, no icons.
   renders `marg-256.png` (window icon, embedded in the binary) and
   `marg.ico` (Windows `.exe`, PNG entries 16–256 px) from it with
   `rsvg-convert`. Chosen by the user 2026-10-29 from three sketches.
+- Local install (Linux): `scripts/install.sh` builds `--profile dist`
+  and installs, per user, `~/.local/bin/marg`,
+  `crates/marg/assets/marg.desktop` to `~/.local/share/applications`,
+  the SVG (scalable) and PNG (256×256) icons to the `hicolor` theme. It
+  copies to `*.new` and renames, so a running marg is not disturbed;
+  refreshes the MIME cache, and the icon cache only if one exists.
+  `--default-app` sets `application/pdf=marg.desktop` under `[Default
+  Applications]` in `mimeapps.list` and, if present, COSMIC's
+  `cosmic-mimeapps.list` (other lines untouched). Asked for by the user
+  2026-11-02.
 
 - Background around pages: neutral dark gray `#2B2B2B` *(start)*. Pages render
   as-is (white). Thin 1 px shadow line at page edges.
@@ -2012,6 +2022,19 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-02 — Install script
+- Done: branch `install-script`: `scripts/install.sh [--default-app]`
+  (see the local install note in the look section), the desktop entry
+  now in the repo (`crates/marg/assets/marg.desktop`, as installed
+  2026-10-29), README "Install" mentions it.
+- Decisions: the user agreed to a script (reinstalls after almost every
+  branch). Plain `sh`, no new dependency. No icon cache is created
+  where none exists.
+- State: tested with a fake `HOME` (install, `--default-app` on an
+  existing COSMIC list, unknown option, `--help`); not run on the real
+  install, which is still `dc41b52`.
+- Next: the user tries `scripts/install.sh`, then merge.
 
 ### 2026-11-02 — `c` as the comment key
 - Done: branch `comment-key`: default `c` in Normal (`annotate.note`)
