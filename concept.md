@@ -68,8 +68,8 @@ with no memory of earlier ones; this file and the git history are all it has.
 | | |
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
-| **Current phase** | macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Current phase** | Branch `comment-key` (off `main`, not merged): `c` comments in every mode (new note, highlight + comment, edit), `i`/`e` kept; waiting for the user to try it. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
+| **Next step** | The user tries `comment-key`, then merge. The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -594,7 +594,7 @@ config (default: the OS user name).
 | Highlight | Highlight | `1`–`5` on a selection | One QuadPoint per selected line, category color, opacity 0.4 *(start)* |
 | Underline | Underline | `U` on a selection | Last-used category color |
 | Comment | Highlight + `/Contents` | `c` on a selection | Highlight in last-used category, then the comment editor opens |
-| Note | Text (sticky note) | `i` | At the caret, or at the top-left page margin if there is no caret; comment editor opens immediately |
+| Note | Text (sticky note) | `c` (or `i`) in Normal/Caret | At the caret, or at the top-left page margin if there is no caret; comment editor opens immediately |
 | Box | Square | `b` (box mode) | Stroke 1.5 pt *(start)*, category color, no fill |
 
 **Box mode** (`b`):
@@ -614,7 +614,7 @@ With the mouse, in box mode, drag a rectangle instead of steps 1–3.
 - `]a` / `[a` select the next or previous annotation in page order; `ga` picks
   one with hints; clicking an annotation selects it. A selected annotation
   gets a dashed outline.
-- On a selected annotation: `e` edits its comment, `x` deletes it, `1`–`5`
+- On a selected annotation: `c` (or `e`) edits its comment, `x` deletes it, `1`–`5`
   recolor it, `U` toggles highlight ↔ underline.
 - **Recolor via the category prompt** (asked for by the user 2026-10-31,
   branch `annot-pick`): `Enter` on a selected annotation (`annot.pick`)
@@ -819,7 +819,7 @@ lines joined like `y`; first 80 characters), or `[Box]`, `[Note]`,
 `[<Subtype>]`; the comment in italics. The list keys of §3 "Lists"
 (`/` fuzzy filter over text and comment, Esc clears it, then closes),
 plus `1`–`5` (one category, shown as `[Name]` in the header), `0` (all),
-`e` (go to it and edit; closes the list), `x` (delete; the list stays),
+`c` or `e` (go to it and edit; closes the list), `x` (delete; the list stays),
 `A` closes. Enter goes to the annotation (a third from the top if it was
 off screen) and selects it. Opening the list asks for the text of
 annotated pages; rows update as annotations and texts arrive.
@@ -958,7 +958,7 @@ remappable (§8).
 | | `v`, `V`, `Ctrl-q` | hint: select word, line, block |
 | | `gl`, `ga` | hint: links, hint: annotations |
 | | `]a` / `[a` | next / previous annotation |
-| | `i` | new note |
+| | `c`, `i` | new note (`c` comments everywhere, see below) |
 | | `b` | box mode |
 | | `A` | annotation list |
 | | `u` / `Ctrl-r` | undo / redo |
@@ -978,9 +978,18 @@ remappable (§8).
 | | `gs` | search the web for the text (`selection.search`, `selection.search(name)`) |
 | | `d` | erase highlights/underlines from the selected text |
 | | `D` | delete every highlight/underline the selection touches, whole |
-| Selected annotation | `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
+| Selected annotation | `c` / `e`, `x`, `1`–`5`, `U` | edit comment, delete, recolor, toggle type |
 | | `Enter`, then `1`–`5` or `Enter` | recolor via category prompt (last category on `Enter`) |
 | Command | `:w`, `:w!`, `:q`, `:q!`, `:e path`, `:e!`, `:close` / `:bd`, `:export md [path]`, `:layout …`, `:config`, `:unlock`, `:set name=value`, `:debug` | |
+
+**`c` comments everywhere** (asked for by the user 2026-11-02, branch
+`comment-key`; the three keys `i`, Visual `c` and `e` felt
+inconsistent): `c` makes a new note in Normal and Caret mode
+(`annotate.note`), a highlight + comment in Visual (`annotate.comment`),
+edits the comment of a selected annotation (`annot.edit`) and of the
+annotation list's row. `i` and `e` stay as second bindings; `c` is
+listed first in the help and cheat sheet. On scanned pages (no text, no
+caret) a comment goes on a box: `b`, draw, Enter, select it, `c`.
 
 Note: `L` is deliberately unbound in Normal mode (it is used in Box mode for
 corner moves); layout cycling uses `Ctrl-l`.
@@ -1999,6 +2008,17 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-02 — `c` as the comment key
+- Done: branch `comment-key`: default `c` in Normal (`annotate.note`)
+  and with an annotation selected (`annot.edit`), Visual `c` unchanged,
+  `c` next to `e` in the annotation list; help page, README and
+  `docs/cheatsheet.md` regenerated; test `c_comments_in_every_mode`.
+- Decisions: the user found `i` / Visual `c` / `e` inconsistent; `c`
+  becomes the default, `i` and `e` stay.
+- State: build, tests, clippy, fmt pass; not merged, not installed.
+- Next: the user tries it, then merge. Idea not built: keep a box
+  selected after Enter so `c` follows directly (scanned pages).
 
 ### 2026-11-01 — Release 1.3.0
 - Done: the user tried the local install ("Feels very nice now") and
