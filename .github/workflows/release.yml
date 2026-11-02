@@ -1,7 +1,7 @@
 name: Release
 
-# A tag vX.Y.Z on main builds the Linux binary and the Windows .exe with
-# the dist profile and attaches them to a GitHub release. The tag must
+# A tag vX.Y.Z on main builds the Linux binary, the Windows .exe and the
+# macOS app (Apple Silicon, zipped marg.app) with the dist profile and attaches them to a GitHub release. The tag must
 # match the version in Cargo.toml. Run by hand (Actions → Release → Run
 # workflow) to build the binaries as artifacts without a release.
 
@@ -26,6 +26,9 @@ jobs:
           - os: windows-latest
             binary: marg.exe
             asset: marg-windows-x86_64.exe
+          - os: macos-latest
+            binary: marg
+            asset: marg-macos-arm64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -63,8 +66,15 @@ jobs:
             echo "::warning::LNK4098 (C runtime conflict) in the release build"
           fi
       - name: Rename
+        if: runner.os != 'macOS'
         shell: bash
         run: cp "target/dist/${{ matrix.binary }}" "${{ matrix.asset }}"
+      # ditto keeps the ad hoc signature and the bundle's attributes.
+      - name: Bundle marg.app
+        if: runner.os == 'macOS'
+        run: |
+          scripts/make-app.sh target/dist/marg bundle
+          ditto -c -k --keepParent bundle/marg.app "${{ matrix.asset }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}

@@ -1,7 +1,7 @@
 # marg — Concept & Build Plan
 
-> marg is a lightweight, very fast PDF reader and annotator for Linux and
-> Windows, driven almost entirely from the keyboard. It combines Zathura's
+> marg is a lightweight, very fast PDF reader and annotator for Linux,
+> Windows and macOS (Apple Silicon, added 2026-10-30), driven almost entirely from the keyboard. It combines Zathura's
 > speed and vim-style control with real annotations (highlights, underlines,
 > comments, boxes) that are written into the PDF as standard annotations.
 
@@ -67,15 +67,15 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`; macOS is not in this release (branch `macos` not merged). v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
-| **Current phase** | `install-script` merged into `main` and pushed 2026-11-02: `scripts/install.sh` for the local install (§3 Look, README). Before that: `comment-key` merged into `main` and pushed 2026-11-02 (`c` comments in every mode, also in Box mode; `i`/`e` kept), not released; local install updated. Also: macOS support (branch `macos`, steps in §11 "macOS steps"): all 6 steps done, pushed, CI green; waiting for the user to try it on their Mac. |
-| **Next step** | The user tries the `macos` branch on their Mac, then merge. Merging it conflicts in `parse_args` (`crates/marg/src/main.rs`: its `-psn_` arm next to the new `-h`/`--help` and unknown-option arms; keep all three; `-psn_` has one dash, so the unknown-option arm does not catch it) and in concept.md §0 and the session log. The Phase 3–5 choices in §12 are open. |
+| **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`. macOS support (branch `macos`) merged into `main` 2026-11-02, after 1.3.0, so not in a release yet. v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
+| **Current phase** | `macos` merged into `main` 2026-11-02 at the user's request (macOS steps in §11 "macOS steps", all 6 done; CI was green on `macos-latest` arm64 on 2026-10-30). The hands-on Mac test listed below had not been reported before the merge. Before that on 2026-11-02: `install-script` (`scripts/install.sh`) and `comment-key` (`c` comments in every mode) merged into `main`, not released. |
+| **Next step** | The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
-| **Target** | Linux (X11 and Wayland) and Windows 10/11, desktop only; macOS next (user, 2026-10-30, after drag and drop). Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-11-01 (1.3.0 released) |
+| **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (merged 2026-11-02, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
+| **Last updated** | 2026-11-02 (`macos` merged into `main`) |
 
 ---
 
@@ -361,7 +361,7 @@ selected. Entries without a destination are dim. Destinations
 shown at the window's top left. Links: `Request::Links(page)` for the
 visible pages; internal links jump, URIs with a scheme (`https:`,
 `mailto:`) ask "Open … ? y: yes  any other key: no" (mode `Confirm`),
-then start `xdg-open` (Windows: `rundll32 url.dll,FileProtocolHandler`,
+then start `xdg-open` (macOS: `open`; Windows: `rundll32 url.dll,FileProtocolHandler`,
 no shell) without waiting. A click (press and release within 4 px, no
 selection made) on a link follows it; the pointer is a hand over links.
 
@@ -1308,12 +1308,12 @@ Not applicable. marg makes no sounds.
 
 ### Paths
 
-| | Linux | Windows |
-|---|---|---|
-| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` |
-| State | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` |
-| Data (backups) | `~/.local/share/marg/backups/` | `%LOCALAPPDATA%\marg\backups\` |
-| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` |
+| | Linux | Windows | macOS (all in one folder) |
+|---|---|---|---|
+| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` | `~/Library/Application Support/marg/config.toml` |
+| State | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` | `~/Library/Application Support/marg/state.toml` |
+| Data (backups) | `~/.local/share/marg/backups/` | `%LOCALAPPDATA%\marg\backups\` | `~/Library/Application Support/marg/backups/` |
+| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` | `~/Library/Application Support/marg/marg.log` |
 
 Resolve these with the `directories` crate (respecting `XDG_*` variables). A
 missing config file means defaults; `:config` writes a fully commented default
@@ -1514,7 +1514,7 @@ render.
 
 | Part | Choice | Why |
 |---|---|---|
-| Language | Rust (stable) | Single static binary on Linux and Windows; memory safety; the compiler catches mistakes early |
+| Language | Rust (stable) | Single static binary on Linux, Windows and macOS; memory safety; the compiler catches mistakes early |
 | PDF engine | MuPDF via the `mupdf` crate | Fastest mainstream renderer; full PDF annotation API with incremental save |
 | UI | `eframe` / `egui` | Lightweight, GPU-drawn, cross-platform, easy custom overlays; no heavyweight widget toolkit needed for a minimal UI |
 | Config/state | `serde` + `toml` | Human-editable config |
@@ -1523,6 +1523,7 @@ render.
 | Clipboard | via egui/eframe's built-in clipboard | No extra dependency |
 | Fuzzy filter | own small subsequence scorer in core | Lists are short; no dependency needed |
 | Font check | `skrifa` (same version and a subset of the features egui uses) | egui panics on a font file it cannot parse; marg checks `[fonts] file` first. Added 2026-10-28 with the user's approval (Phase 3b) |
+| macOS "Open With" | `objc2`, `objc2-foundation`, `objc2-app-kit` (macOS only) | Finder, the Dock and Zotero hand files over as an Apple Event (`odoc`), which winit ignores; marg registers its own handler. Already compiled on macOS as winit dependencies (same versions), so no new crates. Approved by the user 2026-10-30 |
 | Windows `.exe` icon | `winresource` (build dependency, Windows builds only, default features off) | Embeds `crates/marg/assets/marg.ico` and the version from `Cargo.toml` in the `.exe`. Only new crate besides it: `version_check`. Chosen over `embed-resource` (four more crates and a `.rc` file). Added 2026-10-29 with the user's approval |
 | File dialog | `rfd` (default features: xdg-desktop-portal on Linux, native on Windows and macOS) | "Open file" dialog; on COSMIC/GNOME/KDE the desktop's own picker. Measured 2026-10-31: +2 crates on Linux (`rfd`, `pollster`), +1 on Windows, +2 on macOS (`dispatch2`), on Linux rfd talks to the portal through the system `libdbus` (opened at runtime with `dlopen`, so no build-time library; falls back to zenity without it), not through Rust D-Bus crates (corrected 2026-10-31: Claude first said eframe already brought them); ~10 s more release build, +226 KB binary. Approved by the user 2026-10-31 (over zenity/PowerShell/osascript helpers: no new crate, but a GTK dialog on COSMIC). Added 2026-10-31 (branch `file-dialog`); its futures run on marg's own small `block_on` (std only) instead of the `pollster` crate, which would be one more crate on Windows and macOS |
 | Tests | `cargo test`; fixture PDFs in `tests/fixtures/` | Round-trip annotation tests |
@@ -1632,7 +1633,7 @@ marg/
 │   ├── marg-pdf/src/       # mupdf adapter, document thread, save/backup
 │   └── marg/
 │       ├── src/            # main.rs, ui/, input/, overlays/
-│       └── assets/         # app icon: marg.svg (source), marg-256.png, marg.ico
+│       └── assets/         # app icon: marg.svg (source), marg-256.png, marg.ico, marg.icns; Info.plist (macOS)
 ├── tests/fixtures/         # small PDFs: text, two-column, scanned page, slides, outline, links
 ├── .github/workflows/ci.yml
 └── .gitignore
@@ -1674,11 +1675,12 @@ test files), so their licence is clear.
   `cargo fmt --check` must pass before every commit.
 - Merge feature branches into `main` only when the user has tried the phase
   build and agrees.
-- **CI** (GitHub Actions): build, test and clippy on Linux and Windows on
-  every push. The user develops mainly on one OS; CI keeps the other one from
+- **CI** (GitHub Actions): build, test and clippy on Linux, Windows and
+  macOS (`macos-latest`, arm64; added 2026-10-30) on every push. The user develops mainly on one OS; CI keeps the other one from
   breaking silently.
 - **Releases**: when the user asks, tag `vX.Y.Z` on `main`; CI attaches the
-  Linux binary and the portable Windows `.exe` to a GitHub release.
+  Linux binary, the portable Windows `.exe` and the zipped macOS app to
+  a GitHub release (macOS added 2026-10-30, §11 "macOS steps").
   **As implemented (Phase 5):** `.github/workflows/release.yml`: on a
   `v*` tag, Linux and Windows run the tests, build `--profile dist -p
   marg` and upload `marg-linux-x86_64` and `marg-windows-x86_64.exe`; a
@@ -1769,6 +1771,59 @@ builds in CI on `v*` tags; 8 polish from the user's list (none yet; it
 grows as they test), docs and handover. To ask at their step: `:set`
 (Phase 1 put it in Phase 5, the Phase 3b choice ruled out runtime
 settings), the Windows CRT (§12), the Phase 4 choices.
+
+**macOS steps** (branch `macos`, planned 2026-10-30 with the user, one
+commit each). The user has a Mac and tries each build; Claude can only
+build and test on GitHub's `macos-latest` runner. Decisions (user):
+Apple Silicon only (arm64; Intel can come later); unsigned (ad-hoc
+signed by the linker) with a README note for Gatekeeper; Cmd works as
+Ctrl, as `input.rs` already does (Cmd-q quits through the app menu and
+must save first, like closing the window); "Open With" support with
+`objc2` (§9).
+1. This plan.
+2. Basics: links open with `open`; macOS paths in §8 and the README
+   (`directories`: `~/Library/Application Support/marg` for config,
+   state, log and backups); a `macos-latest` job in CI.
+3. "Open With": an `odoc` Apple Event handler. Files from it go the
+   same way as drops (§2.1): the first opens in this window if it shows
+   the recent files list or nothing yet, otherwise in a new marg
+   process; the rest in new processes. (macOS starts one app instance and
+   sends it every later "Open With"; marg keeps one window per file.)
+   **As implemented:** `macos.rs` defines an Objective-C class
+   (`MargOpenHandler`, `objc2` `define_class!`) that observes
+   `NSApplicationWillFinishLaunchingNotification` and then registers
+   itself with `NSAppleEventManager` for `aevt`/`odoc` (Apple's advice:
+   in will-finish-launching, so AppKit's default handler is replaced and
+   the launch event is not missed). The handler reads the file URLs of
+   the direct object (`fileURLValue`), sends them on a channel and wakes
+   the UI; `MargApp::open_from_system` reads it each frame and uses
+   `drop::sort`. A `-psn_…` argument (older Finder) is ignored. The
+   `objc2` calls that need `objc2-core-services` in the typed API are
+   made with `msg_send!` (four-character codes as `u32`), so no other
+   crate. Type-checked with clippy for `aarch64-apple-darwin` in a scratch
+   crate; `main.rs`'s macOS part only compiles on macOS (CI).
+4. App bundle: `marg.app` with `Info.plist` (PDF document type, rank
+   Alternate, version from `Cargo.toml`) and `marg.icns` (from
+   `scripts/make-icons.py`), built by `scripts/make-app.sh`.
+   **As implemented:** `crates/marg/assets/Info.plist` with `@VERSION@`
+   (filled from `Cargo.toml`), bundle id `io.github.lead0lead.marg`
+   (Claude's choice: the GitHub account), `LSMinimumSystemVersion`
+   11.0, role Editor for `com.adobe.pdf`, `NSHighResolutionCapable`.
+   `make-icons.py` also writes `marg.icns` (PNG entries 16–1024 px,
+   `icp4`…`ic14`). `make-app.sh <binary> <outdir>` signs the bundle ad
+   hoc (`codesign --sign -`) when `codesign` exists (macOS). Checked on
+   Linux: bundle layout, the plist parses, the icns entries.
+5. Release: the release workflow builds `marg-macos-arm64.zip` (the
+   `.app`); README: install, Gatekeeper (`xattr -dr
+   com.apple.quarantine marg.app` or right-click → Open), the terminal
+   command (`marg.app/Contents/MacOS/marg`).
+   **As implemented:** `release.yml` has a `macos-latest` (arm64) row:
+   tests, `--profile dist`, `make-app.sh`, then `ditto -c -k --keepParent`
+   (keeps the signature) to `marg-macos-arm64.zip`. README: install,
+   Gatekeeper, a `PATH` symlink for the terminal, building on macOS.
+6. Docs and handover, with a checklist for the user: Open With from
+   Finder and Zotero, Cmd-q with unsaved changes, keys on their layout
+   (Option as AltGr), links, drag and drop, Retina sharpness, speed.
 
 **Selection search steps** (branch `selection-search`, planned
 2026-10-30 with the user, one commit each): 1 core: `[search]` config
@@ -1891,6 +1946,14 @@ building more.
   (§9 spike report). Two small ones are covered by raw object access.
 - **Building MuPDF on Windows** (toolchain, clang/bindgen requirements).
   Checked in Phase 0 with CI on Windows.
+- **macOS, untested by hand** (2026-10-30): Claude cannot run it; CI
+  builds and tests on `macos-latest`, the user tries it on their Mac.
+  Unchecked: the `odoc` handler (timing against AppKit's default
+  handler), Cmd-q (AppKit's Quit menu item; `on_exit` saves, like
+  closing the window, but whether it is reached was not checked),
+  Option as AltGr on non-US layouts (`input.rs` takes Option as Alt and
+  the AltGr fix is Windows-only), Retina scaling, speed, MuPDF building
+  with only the Xcode command line tools.
 - ~~**Hint/caret selection not feeling faster than a mouse.**~~ The core bet.
   The user tried it on real papers and passed the decision milestone on
   2026-10-28 (reading, navigating and selecting "work great").
@@ -1908,10 +1971,10 @@ building more.
 - **Rendering throughput with one document thread.** Measured in Phase 1;
   extra render workers only if needed.
 
-**macOS (next, user 2026-10-30; findings from that day, nothing built):**
+**macOS (built 2026-10-30, §11 "macOS steps"; the findings that led to it):**
 eframe/winit/wgpu (Metal), `directories` and MuPDF support macOS;
 `input.rs` already maps Cmd to Ctrl. To do: `browser.rs` needs `open`
-(today `xdg-open` for every non-Windows OS); macOS paths in §8; a `.app`
+(done in step 2); macOS paths in §8 (done in step 2); a `.app`
 bundle (`Info.plist` with a PDF document type, `.icns`); signing and
 notarization or a documented Gatekeeper workaround; a macOS CI and
 release job. Risk: Finder, the Dock and Zotero open files with an Apple
@@ -2022,6 +2085,21 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-02 — macOS merged into `main`
+- Done: branch `macos` merged into `main` (on top of 1.3.0,
+  `comment-key` and `install-script`). Conflicts: `Cargo.lock` (`objc2`
+  crates next to `rfd`), README build notes (Linux install script and
+  macOS app, both kept), concept.md §0. `parse_args` merged cleanly
+  (already resolved when `main` 1.2.0 went into `macos`).
+- Decisions: the user asked for the merge before reporting a hands-on
+  Mac test.
+- State: build, tests, clippy and fmt pass on Linux; macOS code last
+  checked by CI on 2026-10-30, CI on `main` will check it again.
+- Next: the user tries `main` on their Mac (list in §0), then a release
+  with the macOS app.
+- Watch out: macOS is untested by hand; the release notes should say so
+  until the user confirms it.
 
 ### 2026-11-02 — Install script
 - Done: branch `install-script`: `scripts/install.sh [--default-app]`
@@ -2197,6 +2275,29 @@ Format:
 - Watch out: a shared `CARGO_TARGET_DIR` across worktrees leaves test
   binaries with the other worktree's fixture paths (`env!` paths are not
   tracked); touch the tests to rebuild.
+
+### 2026-10-30 — macOS support
+- Done (branch `macos`, not pushed): drag and drop merged into `main`
+  first (not pushed either). One commit each: plan (§11 "macOS steps");
+  `open` for links, macOS paths, CI job; "Open With" (`macos.rs`, `odoc`
+  handler, `-psn_` ignored); bundle (`Info.plist`, `marg.icns`,
+  `make-app.sh`); release job (`marg-macos-arm64.zip`) and README; docs.
+- Decisions (user): they have a Mac and will try builds; add `objc2`
+  for "Open With" (§9); Cmd = Ctrl as now; Apple Silicon only;
+  unsigned with a README note. Claude chose: bundle id
+  `io.github.lead0lead.marg`, handler rank Alternate, role Editor,
+  macOS 11+, later "Open With" events go to new windows when this one
+  already has a file.
+- State: Linux build, tests, clippy and fmt pass. `macos.rs` passes
+  clippy for `aarch64-apple-darwin` in a scratch crate (rustup target
+  added on this machine); the rest of the macOS code never compiled yet.
+- Pushed `main` and `macos`; CI green on all three OSes, macOS
+  included (first run, ~1m40s). GitHub warns that `actions/checkout@v4`
+  runs on Node 20, which is deprecated (forced to Node 24; not fixed).
+- Next: the user's checks on their Mac (§0).
+- Watch out: macOS-only code is not compiled by Linux checks; check
+  objc2 code in a scratch crate with `--target aarch64-apple-darwin`
+  (pure Rust, no SDK needed) and the rest on CI.
 
 ### 2026-10-30 — Drag and drop; macOS assessed
 - Done (branch `drag-and-drop`, not merged, not pushed), one commit

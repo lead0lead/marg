@@ -15,6 +15,8 @@ impl Paths {
     /// Linux: `~/.config/marg` and `~/.local/state/marg` (respecting
     /// `XDG_*`), backups in `~/.local/share/marg/backups`. Windows:
     /// `%APPDATA%\marg` for config, `%LOCALAPPDATA%\marg` for the rest.
+    /// macOS: everything in `~/Library/Application Support/marg` (no state
+    /// dir there).
     pub fn resolve() -> Option<Self> {
         let base = BaseDirs::new()?;
         let config = base.config_dir().join("marg");

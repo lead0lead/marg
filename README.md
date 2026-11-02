@@ -1,6 +1,7 @@
 # marg
 
-A fast, keyboard-driven PDF reader and annotator for Linux and Windows.
+A fast, keyboard-driven PDF reader and annotator for Linux, Windows and
+macOS.
 Zathura's speed and vim-style keys, plus real annotations: highlights,
 underlines, comments, notes and boxes, written into the PDF as standard
 annotations that Okular, Acrobat, browsers and Zotero can read.
@@ -18,10 +19,18 @@ annotations that Okular, Acrobat, browsers and Zotero can read.
 
 ## Install
 
-Release builds for Linux and Windows are attached to the
-[GitHub releases](https://github.com/lead0lead/marg/releases). The Windows
-`.exe` needs the Microsoft Visual C++ Redistributable (x64), which most
-systems already have.
+Release builds for Linux, Windows and macOS (Apple Silicon) are attached
+to the [GitHub releases](https://github.com/lead0lead/marg/releases). The
+Windows `.exe` needs the Microsoft Visual C++ Redistributable (x64), which
+most systems already have.
+
+**macOS:** unzip `marg-macos-arm64.zip` and move `marg.app` to
+Applications. The app is not signed with an Apple Developer ID, so macOS
+blocks the first start: right-click `marg.app` → Open → Open, or run
+`xattr -dr com.apple.quarantine /Applications/marg.app` once. marg then
+appears under "Open With" for PDFs (Finder, Zotero's file handling). For
+the terminal: `ln -s /Applications/marg.app/Contents/MacOS/marg
+/usr/local/bin/marg` (any directory on your `PATH`).
 
 To build from source, you need stable Rust, a C compiler and libclang
 (MuPDF is compiled from source by the `mupdf` crate). On Debian or Ubuntu:
@@ -37,6 +46,10 @@ the binary in `~/.local/bin`, a desktop entry and the icon in
 `~/.local/share`. `scripts/install.sh --default-app` also makes marg the
 default PDF app. Run it again to update; open marg windows keep the old
 version until restarted.
+
+On macOS, the Xcode command line tools are enough
+(`xcode-select --install`); `scripts/make-app.sh target/dist/marg .`
+builds `marg.app`.
 
 ## Use
 
@@ -64,7 +77,8 @@ marg's annotations through its "Import annotations" option.
 
 **Annotations** are saved two seconds after a change and when you quit.
 `:w` saves immediately. Backups of the originals are kept in
-`~/.local/share/marg/backups` (Windows: `%LOCALAPPDATA%\marg\backups`).
+`~/.local/share/marg/backups` (Windows: `%LOCALAPPDATA%\marg\backups`,
+macOS: `~/Library/Application Support/marg/backups`).
 Encrypted PDFs ask for their password. PDFs whose permissions forbid
 annotations open read-only; `:unlock` allows annotations in the open file.
 
@@ -73,11 +87,11 @@ annotations open read-only; `:unlock` allows annotations in the open file.
 `:config` writes a commented config file with every setting and the
 default keys:
 
-| | Linux | Windows |
-|---|---|---|
-| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` |
-| State (positions, recent files) | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` |
-| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` |
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| Config | `~/.config/marg/config.toml` | `%APPDATA%\marg\config.toml` | `~/Library/Application Support/marg/config.toml` |
+| State (positions, recent files) | `~/.local/state/marg/state.toml` | `%LOCALAPPDATA%\marg\state.toml` | `~/Library/Application Support/marg/state.toml` |
+| Log | `~/.local/state/marg/marg.log` | `%LOCALAPPDATA%\marg\marg.log` | `~/Library/Application Support/marg/marg.log` |
 
 marg reloads the config when you save it, and reports mistakes in the
 status bar. Example themes are in [`docs/themes`](docs/themes).
