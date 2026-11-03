@@ -3693,6 +3693,7 @@ impl MargApp {
                 date: &marg_core::export::date(statefile::now_secs()),
                 labels: open.info.labels.as_deref(),
                 categories: &names,
+                cite: None,
             },
             &entries,
         );
@@ -4488,6 +4489,7 @@ fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
         map
     });
     warnings.extend(lookup::check(config));
+    warnings.extend(marg_core::export::check(config));
     (maps, warnings)
 }
 

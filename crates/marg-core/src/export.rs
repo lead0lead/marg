@@ -1,6 +1,10 @@
 //! Markdown export of the annotations (§2.11).
 
 use crate::annotlist::Entry;
+use crate::config::Config;
+
+/// The placeholders of the citation template.
+const PLACEHOLDERS: [&str; 4] = ["author", "year", "page", "title"];
 
 /// What the export is made from.
 pub struct Export<'a> {
@@ -14,6 +18,18 @@ pub struct Export<'a> {
     pub labels: Option<&'a [String]>,
     /// Category names, in order.
     pub categories: &'a [&'a str],
+    /// `:export md cite`: quotes end with this citation instead of the
+    /// page number.
+    pub cite: Option<Cite<'a>>,
+}
+
+/// What a quote's citation is made from.
+pub struct Cite<'a> {
+    /// `export.citation`.
+    pub template: &'a str,
+    pub author: &'a str,
+    /// Empty: "n.d.".
+    pub year: &'a str,
 }
 
 /// The Markdown text for `entries` (in reading order, as the annotation
@@ -44,7 +60,11 @@ pub fn markdown(x: &Export, entries: &[Entry]) -> String {
                 .unwrap_or_else(|| (e.page + 1).to_string());
             out.push('\n');
             if e.marked {
-                out.push_str(&format!("> {}\n> — p. {page}\n", one_line(&e.text)));
+                let source = match &x.cite {
+                    Some(c) => citation(c, &page, x.title.unwrap_or(x.file_name)),
+                    None => format!("p. {page}"),
+                };
+                out.push_str(&format!("> {}\n> — {source}\n", one_line(&e.text)));
             } else {
                 out.push_str(&format!("**{}** — p. {page}\n", e.text));
             }
@@ -55,6 +75,56 @@ pub fn markdown(x: &Export, entries: &[Entry]) -> String {
                 out.push('\n');
             }
         }
+    }
+    out
+}
+
+/// The template with its placeholders filled in; unknown ones are kept as
+/// written.
+fn citation(c: &Cite, page: &str, title: &str) -> String {
+    let year = c.year.trim();
+    let values = [
+        one_line(c.author),
+        if year.is_empty() {
+            "n.d.".into()
+        } else {
+            one_line(year)
+        },
+        page.to_string(),
+        one_line(title),
+    ];
+    let mut out = one_line(c.template);
+    for (name, value) in PLACEHOLDERS.iter().zip(values) {
+        out = out.replace(&format!("{{{name}}}"), &value);
+    }
+    out
+}
+
+/// The year of a PDF date (`D:20240315…`, or anything starting with four
+/// digits), for prefilling the year prompt.
+pub fn year(pdf_date: &str) -> Option<String> {
+    let d = pdf_date.trim();
+    let d = d.strip_prefix("D:").unwrap_or(d);
+    let y: String = d.chars().take(4).collect();
+    (y.len() == 4 && y.chars().all(|c| c.is_ascii_digit())).then_some(y)
+}
+
+/// Config problems, for the status bar: `{names}` in the citation template
+/// that are not placeholders.
+pub fn check(config: &Config) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = config.export.citation.as_str();
+    while let Some((_, after)) = rest.split_once('{') {
+        let Some((name, next)) = after.split_once('}') else {
+            break;
+        };
+        if !PLACEHOLDERS.contains(&name) {
+            out.push(format!(
+                "export.citation: unknown placeholder {{{name}}} (known: {})",
+                PLACEHOLDERS.map(|p| format!("{{{p}}}")).join(", ")
+            ));
+        }
+        rest = next;
     }
     out
 }
@@ -104,6 +174,7 @@ mod tests {
             date: "2026-10-27",
             labels: Some(&labels),
             categories: &["Key point", "Question", "Definition"],
+            cite: None,
         };
         let entries = [
             entry(0, Some(1), "[Box]", "Comment on the box."),
@@ -139,11 +210,70 @@ mod tests {
             date: "2026-01-01",
             labels: None,
             categories: &["Key point"],
+            cite: None,
         };
         let md = markdown(&x, &[entry(4, Some(0), "five", "")]);
         assert!(md.contains("\n# slides.pdf\n"));
         assert!(md.ends_with("> five\n> — p. 5\n"));
         assert!(!markdown(&x, &[]).contains("##"));
+    }
+
+    #[test]
+    fn quotes_end_with_the_citation_and_boxes_keep_the_page() {
+        let labels: Vec<String> = ["12"].map(String::from).into();
+        let x = Export {
+            file_name: "paper.pdf",
+            title: Some("A\nPaper"),
+            date: "2026-01-01",
+            labels: Some(&labels),
+            categories: &["Key point"],
+            cite: Some(Cite {
+                template: "({author}, {year}, p. {page}) {title} {x}",
+                author: " Smith &\nLee ",
+                year: "2024",
+            }),
+        };
+        let md = markdown(
+            &x,
+            &[
+                entry(0, Some(0), "quote", ""),
+                entry(0, Some(0), "[Box]", ""),
+            ],
+        );
+        assert!(md.contains("\n> quote\n> — (Smith & Lee, 2024, p. 12) A Paper {x}\n"));
+        assert!(md.ends_with("\n**[Box]** — p. 12\n"));
+    }
+
+    #[test]
+    fn empty_year_is_no_date() {
+        let c = Cite {
+            template: "({author}, {year})",
+            author: "Smith",
+            year: " ",
+        };
+        assert_eq!(citation(&c, "1", "t"), "(Smith, n.d.)");
+    }
+
+    #[test]
+    fn year_of_pdf_dates() {
+        assert_eq!(year("D:20240315120000+01'00'").as_deref(), Some("2024"));
+        assert_eq!(year("2019-05-01").as_deref(), Some("2019"));
+        assert_eq!(year("D:24"), None);
+        assert_eq!(year(""), None);
+        assert_eq!(year("Tuesday"), None);
+    }
+
+    #[test]
+    fn unknown_placeholders_are_problems() {
+        assert!(check(&Config::default()).is_empty());
+        let mut c = Config::default();
+        c.export.citation = "{author} {yr} {page".into();
+        assert_eq!(
+            check(&c),
+            [
+                "export.citation: unknown placeholder {yr} (known: {author}, {year}, {page}, {title})"
+            ]
+        );
     }
 
     #[test]

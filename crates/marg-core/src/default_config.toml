@@ -110,6 +110,12 @@
 # them anyway. :unlock does it for the open file only.
 #ignore_permissions = false
 
+#[export]
+# :export md cite writes this after each quote. {author} and {year} are
+# asked for (prefilled from the PDF's metadata); {page} is the page label,
+# {title} the PDF's title or file name.
+#citation = "({author}, {year}, p. {page})"
+
 # Highlight categories, keys 1-5 in order. The name is written to the
 # annotation's subject; the colors match Zotero's. Setting any [[category]]
 # replaces all five, so uncomment all of them to change one.
