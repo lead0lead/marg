@@ -67,7 +67,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 
 | | |
 |---|---|
-| **Status** | **v1.4.0** on 2026-11-03: `:export md cite [path]` (quotes end with a citation from the `[export] citation` template; author and year asked for, prefilled from the metadata), the export message shows the full path, `c` comments in every mode, `scripts/install.sh` for Linux, and the first macOS download (`marg-macos-arm64.zip`, Apple Silicon; built and tested by CI, not yet tried by hand on a Mac, said so in the release notes). Linux binary, Windows `.exe` and macOS app. v1.3.0 released 2026-11-01, v1.2.0 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
+| **Status** | **v1.4.0 released** on 2026-11-03 (https://github.com/lead0lead/marg/releases/tag/v1.4.0): `:export md cite [path]` (quotes end with a citation from the `[export] citation` template; author and year asked for, prefilled from the metadata), the export message shows the full path, `c` comments in every mode, `scripts/install.sh` for Linux, and the first macOS download (`marg-macos-arm64.zip`, Apple Silicon; built and tested by CI, not yet tried by hand on a Mac, said so in the release notes). Linux binary, Windows `.exe` and macOS app. v1.3.0 released 2026-11-01, v1.2.0 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
 | **Current phase** | `export-citations` (with `export-full-path`) merged into `main` 2026-11-03 after the user tried it ("feels very nice"); not released. `macos` merged into `main` 2026-11-02 at the user's request (macOS steps in §11 "macOS steps", all 6 done; CI was green on `macos-latest` arm64 on 2026-10-30). The hands-on Mac test listed below had not been reported before the merge. Before that on 2026-11-02: `install-script` (`scripts/install.sh`) and `comment-key` (`c` comments in every mode) merged into `main`, not released. |
 | **Next step** | Category filter for the export (`:export md [cite] [1-5…] [path]`), proposed 2026-11-03, waiting for the user's go-ahead. The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
@@ -2101,6 +2101,23 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-03 — Release 1.4.0
+- Done: version 1.4.0, tag `v1.4.0`. Release run green (6 min):
+  `marg-linux-x86_64`, `marg-windows-x86_64.exe` and, for the first time,
+  `marg-macos-arm64.zip` attached. Release notes written by hand (the
+  generated ones were only the changelog link). The user had already
+  installed `main` locally with `scripts/install.sh`.
+- Decisions: the user chose to include the macOS app, marked in the
+  release notes as not yet tried by hand on a Mac. Minor version (new
+  features).
+- Watch out: the release run warned that `actions/checkout`,
+  `upload-artifact` and `download-artifact` @v4 target the deprecated
+  Node.js 20, and that `ubuntu-latest` moves to Ubuntu 26 (from
+  2026-10-19), which raises the glibc the Linux binary needs. Neither
+  failed the run; not changed.
+- Next: the user tries the macOS download on their Mac (list in §0);
+  the category filter for the export if the user agrees.
 
 ### 2026-11-03 — Citations in the Markdown export (branch `export-citations`)
 - Done: `:export md cite [path]` asks for author and year (prefilled from
