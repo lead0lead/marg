@@ -61,6 +61,8 @@ fn open_reports_info() {
     assert_eq!(info.labels.unwrap(), ["i", "1"]);
     assert_eq!(info.id.unwrap(), b"margtextfixture1");
     assert_eq!(info.title.as_deref(), Some("marg text fixture"));
+    assert_eq!(info.author.as_deref(), Some("Ada Lovelace; Alan Turing"));
+    assert_eq!(info.created.as_deref(), Some("D:20240315120000Z"));
 }
 
 #[test]

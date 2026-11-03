@@ -77,7 +77,8 @@ def text_pdf():
         5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
         6: stream(page1),
         7: stream(page2),
-        8: b"<< /Producer (marg gen_fixtures.py) /Title (marg text fixture) >>",
+        8: b"<< /Producer (marg gen_fixtures.py) /Title (marg text fixture)"
+        b" /Author (Ada Lovelace; Alan Turing) /CreationDate (D:20240315120000Z) >>",
         9: b"<< /Type /Outlines /First 10 0 R /Last 11 0 R /Count 2 >>",
         10: b"<< /Title (Page one) /Parent 9 0 R /Next 11 0 R /Dest [3 0 R /XYZ 0 792 0] >>",
         11: b"<< /Title (Page two) /Parent 9 0 R /Prev 10 0 R /Dest [4 0 R /XYZ 0 792 0] >>",
