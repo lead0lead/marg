@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`. macOS support (branch `macos`) merged into `main` 2026-11-02, after 1.3.0, so not in a release yet. v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
 | **Current phase** | `macos` merged into `main` 2026-11-02 at the user's request (macOS steps in §11 "macOS steps", all 6 done; CI was green on `macos-latest` arm64 on 2026-10-30). The hands-on Mac test listed below had not been reported before the merge. Before that on 2026-11-02: `install-script` (`scripts/install.sh`) and `comment-key` (`c` comments in every mode) merged into `main`, not released. |
-| **Next step** | The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
+| **Next step** | The user tries branch `export-full-path` (`:export md` shows the full path), then merge. The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (merged 2026-11-02, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-11-02 (`macos` merged into `main`) |
+| **Last updated** | 2026-11-03 (branch `export-full-path`) |
 
 ---
 
@@ -871,7 +871,7 @@ that name inside it if it is a folder. Before writing, every page's
 annotations are listed again (idle queue; edits are applied as they
 arrive, so this includes every edit sent before) and the text of the
 annotated pages is read; "Exporting…" until then, then "Exported N
-annotations to <name>" (a warning if pages could not be read). Title
+annotations to <full path>" (`~` for the home directory; a warning if pages could not be read). Title
 and section names are put on one line; quoted text is joined into one
 line; comments are written as typed (trimmed). Highlights, underlines,
 squiggly and strike-out are quotes; boxes, notes and other types are
@@ -2085,6 +2085,13 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-03 — Full path in the export message (branch `export-full-path`)
+- Done: `:export md` now reports "Exported N annotations to <full path>"
+  (relative paths made absolute, home as `~`) instead of the file name only.
+- Decisions: the user asked for it.
+- State: build, tests, clippy and fmt pass; not merged.
+- Next: the user tries the branch, then merge into `main`.
 
 ### 2026-11-02 — macOS merged into `main`
 - Done: branch `macos` merged into `main` (on top of 1.3.0,

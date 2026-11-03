@@ -3701,10 +3701,8 @@ impl MargApp {
             .filter(|p| open.text_failed.contains(p))
             .count()
             + open.annots_failed.len();
-        let shown = x.path.file_name().map_or_else(
-            || x.path.display().to_string(),
-            |n| n.to_string_lossy().into(),
-        );
+        // Full path (a relative one made absolute), with the home directory as `~`.
+        let shown = complete::tilde(&std::path::absolute(&x.path).unwrap_or(x.path.clone()));
         match std::fs::write(&x.path, md) {
             Ok(()) if unread > 0 => self.show(
                 Level::Warn,
