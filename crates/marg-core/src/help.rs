@@ -231,6 +231,10 @@ pub fn page(maps: &Maps, categories: &[String]) -> Vec<HelpLine> {
                 ":export md [path]",
                 "write the annotations as Markdown (default: <file>.notes.md)",
             ),
+            (
+                ":export md cite [path]",
+                "the same, quotes cited (asks for author and year)",
+            ),
             (":42", "go to page 42"),
             (":help", "the help page"),
             (

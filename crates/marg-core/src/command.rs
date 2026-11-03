@@ -45,8 +45,12 @@ pub enum Command {
     /// Allow annotating the open file although its permissions forbid it,
     /// until it is closed.
     Unlock,
-    /// `:export md [path]`: write the annotations as Markdown.
-    Export(Option<String>),
+    /// `:export md [cite] [path]`: write the annotations as Markdown;
+    /// with `cite`, quotes end with a citation.
+    Export {
+        path: Option<String>,
+        cite: bool,
+    },
     Version,
     DebugToggle,
     /// Hints on words; the picked word gets the caret.
@@ -478,7 +482,7 @@ impl Command {
         match self {
             Command::PageGoto(_) => "page.goto",
             Command::Open(_) => "file.open",
-            Command::Export(_) => "file.export",
+            Command::Export { .. } => "file.export",
             Command::Set(_) => "config.set",
             Command::SetLayout(_) => "view.layout",
             Command::SelectionSearch(_) => "selection.search",
@@ -498,7 +502,7 @@ impl fmt::Display for Command {
 
 /// Parse a `:` command line (without the colon).
 ///
-/// `q`, `q!`, `e <path>`, `export md [path]`, `layout <name>`, `version`, `debug`, a page
+/// `q`, `q!`, `e <path>`, `export md [cite] [path]`, `layout <name>`, `version`, `debug`, a page
 /// number, or any registered command name (`zoom.in`).
 pub fn parse_ex(line: &str) -> Result<Command, String> {
     let line = line.trim();
@@ -528,11 +532,25 @@ pub fn parse_ex(line: &str) -> Result<Command, String> {
                 Ok(Command::Open(rest.to_string()))
             }
         }
-        "export" => match rest.split_once(char::is_whitespace) {
-            None if rest == "md" => Ok(Command::Export(None)),
-            Some(("md", path)) => Ok(Command::Export(Some(path.trim().to_string()))),
-            _ => Err("usage: export md [path]".into()),
-        },
+        "export" => {
+            let Some(args) = rest
+                .strip_prefix("md")
+                .filter(|a| a.is_empty() || a.starts_with(char::is_whitespace))
+            else {
+                return Err("usage: export md [cite] [path]".into());
+            };
+            let args = args.trim();
+            // `cite` is a keyword; a file of that name is `./cite`.
+            let (cite, path) = match args.split_once(char::is_whitespace) {
+                Some(("cite", p)) => (true, p.trim()),
+                _ if args == "cite" => (true, ""),
+                _ => (false, args),
+            };
+            Ok(Command::Export {
+                path: (!path.is_empty()).then(|| path.to_string()),
+                cite,
+            })
+        }
         "layout" => match rest {
             "continuous" => Ok(Command::SetLayout(Layout::Continuous)),
             "single" => Ok(Command::SetLayout(Layout::Single)),
@@ -626,13 +644,27 @@ mod tests {
             Ok(Command::SetLayout(Layout::Spread))
         );
         assert!(parse_ex("layout").is_err());
-        assert_eq!(parse_ex("export md"), Ok(Command::Export(None)));
+        let export = |path: Option<&str>, cite| Command::Export {
+            path: path.map(String::from),
+            cite,
+        };
+        assert_eq!(parse_ex("export md"), Ok(export(None, false)));
         assert_eq!(
             parse_ex("export md ~/notes/a b.md"),
-            Ok(Command::Export(Some("~/notes/a b.md".into())))
+            Ok(export(Some("~/notes/a b.md"), false))
+        );
+        assert_eq!(parse_ex("export md cite"), Ok(export(None, true)));
+        assert_eq!(
+            parse_ex("export md  cite  ~/notes"),
+            Ok(export(Some("~/notes"), true))
+        );
+        assert_eq!(
+            parse_ex("export md citations.md"),
+            Ok(export(Some("citations.md"), false))
         );
         assert!(parse_ex("export").is_err());
         assert!(parse_ex("export html").is_err());
+        assert!(parse_ex("export mdx").is_err());
         assert_eq!(parse_ex("help"), Ok(Command::HelpPage));
         assert_eq!(parse_ex("config"), Ok(Command::WriteConfig));
         assert_eq!(parse_ex("unlock"), Ok(Command::Unlock));
