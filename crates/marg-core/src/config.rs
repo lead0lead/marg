@@ -30,6 +30,7 @@ pub struct Config {
     pub hints: HintsConfig,
     pub search: SearchConfig,
     pub annotation: AnnotationConfig,
+    pub export: ExportConfig,
     /// Highlight categories; keys `1`–`5` pick the first five.
     #[serde(rename = "category")]
     pub categories: Vec<Category>,
@@ -49,6 +50,7 @@ impl Default for Config {
             hints: HintsConfig::default(),
             search: SearchConfig::default(),
             annotation: AnnotationConfig::default(),
+            export: ExportConfig::default(),
             categories: default_categories(),
             keys: KeysConfig::default(),
             colors: ColorsConfig::default(),
@@ -119,6 +121,22 @@ impl Default for AnnotationConfig {
             autosave_secs: 2.0,
             undo_steps: 100,
             ignore_permissions: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ExportConfig {
+    /// `:export md cite`: written after each quote, with `{author}`,
+    /// `{year}`, `{page}` and `{title}` filled in.
+    pub citation: String,
+}
+
+impl Default for ExportConfig {
+    fn default() -> Self {
+        Self {
+            citation: "({author}, {year}, p. {page})".into(),
         }
     }
 }

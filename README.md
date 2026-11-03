@@ -15,7 +15,8 @@ annotations that Okular, Acrobat, browsers and Zotero can read.
 - **Reading.** Continuous, single-page and two-page layouts, an outline,
   search, marks, jump history, links, dark pages and themes.
 - **Export.** `:export md` writes your highlights and comments as Markdown,
-  grouped by category.
+  grouped by category. `:export md cite` adds a citation to each quote,
+  such as `(Smith, 2024, p. 12)`; the format is `citation` in `[export]`.
 
 ## Install
 
@@ -298,6 +299,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `:close, :bd` | close the file, show the recent files |
 | `:layout continuous\|single\|spread` | set the layout |
 | `:export md [path]` | write the annotations as Markdown (default: &lt;file&gt;.notes.md) |
+| `:export md cite [path]` | the same, quotes cited (asks for author and year) |
 | `:42` | go to page 42 |
 | `:help` | the help page |
 | `:config` | write a commented default config, if there is none |

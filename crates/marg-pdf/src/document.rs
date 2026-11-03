@@ -31,6 +31,10 @@ pub struct DocInfo {
     pub id: Option<Vec<u8>>,
     /// Title from the metadata, if not empty.
     pub title: Option<String>,
+    /// Author and creation date (`D:2024…`) from the metadata, if not
+    /// empty; they prefill the citation prompt.
+    pub author: Option<String>,
+    pub created: Option<String>,
     /// The PDF's permissions allow adding and changing annotations.
     pub can_annotate: bool,
     /// marg may write the file (it was not refused permission).
@@ -336,10 +340,14 @@ impl Doc {
             },
             None => None,
         };
-        let title = doc
-            .metadata(MetadataName::Title)
-            .ok()
-            .filter(|t| !t.trim().is_empty());
+        let meta = |name| {
+            doc.metadata(name)
+                .ok()
+                .filter(|t: &String| !t.trim().is_empty())
+        };
+        let title = meta(MetadataName::Title);
+        let author = meta(MetadataName::Author);
+        let created = meta(MetadataName::CreationDate);
         let can_annotate = annotate_permitted(&doc).map_err(err)?;
         // Opening for appending changes nothing; only a refusal counts (a
         // file locked by another program on Windows is not read-only).
@@ -353,6 +361,8 @@ impl Doc {
             labels,
             id,
             title,
+            author,
+            created,
             can_annotate,
             writable,
         };

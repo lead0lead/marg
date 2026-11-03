@@ -69,13 +69,13 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.3.0 released** on 2026-11-01 (https://github.com/lead0lead/marg/releases/tag/v1.3.0): hints straight into a selection (`v` word, `V` line, `Ctrl-q` block in Normal mode), block selection (`Ctrl-q` in Caret/Visual: the text in a rectangle), `Enter` on a selected annotation recolors through the category prompt, the desktop's file dialog (`O`, `:e` without a path; `rfd`), and `Ctrl-q` no longer quits marg (egui's built-in shortcut, off outside macOS). Linux binary and Windows `.exe`. macOS support (branch `macos`) merged into `main` 2026-11-02, after 1.3.0, so not in a release yet. v1.2.0 released 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
 | **Current phase** | `macos` merged into `main` 2026-11-02 at the user's request (macOS steps in §11 "macOS steps", all 6 done; CI was green on `macos-latest` arm64 on 2026-10-30). The hands-on Mac test listed below had not been reported before the merge. Before that on 2026-11-02: `install-script` (`scripts/install.sh`) and `comment-key` (`c` comments in every mode) merged into `main`, not released. |
-| **Next step** | The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
+| **Next step** | The user tries branch `export-citations` (`:export md cite`, §2.11; contains `export-full-path`), then merge. The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.3.0 (tag pushed 2026-11-01) |
 | **Repository** | private GitHub repository `marg`, branch `main` |
 | **App** | runs locally: `cargo run --release -- [<file.pdf> [--page N]]` (continuous, single and spread layouts; outline, search, marks, jump history, links, help; hints, caret/visual selection; highlights, underlines, comments, notes and boxes saved into the PDF; annotation list; no file → recent files list) |
 | **Target** | Linux (X11 and Wayland), Windows 10/11 and macOS on Apple Silicon (merged 2026-11-02, user 2026-10-30), desktop only. Out of scope: mobile, tablets, pen input. |
-| **Last updated** | 2026-11-02 (`macos` merged into `main`) |
+| **Last updated** | 2026-11-03 (branch `export-citations`) |
 
 ---
 
@@ -871,12 +871,27 @@ that name inside it if it is a folder. Before writing, every page's
 annotations are listed again (idle queue; edits are applied as they
 arrive, so this includes every edit sent before) and the text of the
 annotated pages is read; "Exporting…" until then, then "Exported N
-annotations to <name>" (a warning if pages could not be read). Title
+annotations to <full path>" (`~` for the home directory; a warning if pages could not be read). Title
 and section names are put on one line; quoted text is joined into one
 line; comments are written as typed (trimmed). Highlights, underlines,
 squiggly and strike-out are quotes; boxes, notes and other types are
 **[Box]**, **[Note]**, **[<Subtype>]**. The date is UTC. Written on the
 UI thread (small file).
+
+**Citations (2026-11-03, branch `export-citations`):** `:export md cite
+[path]` (`Command::Export { path, cite }`; `cite` is a keyword, a file of
+that name is `./cite`) asks `Author:` then `Year:` in the status bar
+(`Mode::Cite`), prefilled with the last answers for the open file, else
+the metadata's Author (as written) and the year of its CreationDate
+(`export::year`; often the file's date, not the publication year, hence
+the prompt). Esc: "Not exported". Quotes then end with
+`> — <export.citation>` instead of `> — p. N`; the template's
+placeholders are `{author}`, `{year}` (empty: "n.d."), `{page}` (page
+label) and `{title}` (title, else file name); unknown ones are kept as
+written and reported as config problems (`export::check`). Default
+`({author}, {year}, p. {page})`. Boxes and notes keep `— p. N`. An empty
+author exports page numbers, as without `cite`. The answers are kept
+while the file is open, not across sessions.
 
 ### 2.12 Help overlay
 
@@ -2057,7 +2072,8 @@ Cmd vs. Ctrl in the keymap, Option as AltGr, arm64 only or universal.
 - Dark mode / page recoloring (Zathura-style recolor).
 - Reading Zotero's own annotations, or syncing with Zotero.
 - Exporting boxes as cropped PNG images into the Markdown export.
-- Copy a highlight as a citation-style quote with page number.
+- Copy a highlight as a citation-style quote with page number (`y`; the
+  export has citations since 2026-11-03).
 - Search across the annotations of all previously opened files.
 - Tabs or split view (paper + supplement side by side).
 - Freehand / pen annotations.
@@ -2085,6 +2101,29 @@ Format:
 - Next: the exact next step.
 - Watch out: anything a new session would otherwise get wrong.
 ```
+
+### 2026-11-03 — Citations in the Markdown export (branch `export-citations`)
+- Done: `:export md cite [path]` asks for author and year (prefilled from
+  the PDF's Author and CreationDate) and ends each quote with
+  `[export] citation` (default `({author}, {year}, p. {page})`); §2.11.
+  `DocInfo` has `author` and `created`; the text fixture has both.
+- Decisions: the user chose a configurable template, a command flag (not
+  a setting) and asking at export (CreationDate is often not the
+  publication year). Not decided by the user, my call: an empty author
+  falls back to page numbers; boxes and notes keep the page number; the
+  answers are remembered only while the file is open.
+- State: build, tests, clippy and fmt pass; not merged. Branched from
+  `export-full-path` (same code), so merging it merges that too.
+- Next: the user tries it on a copy of a paper, then merge both branches.
+- Watch out: Author is kept as written in the metadata ("Smith, J.; Lee,
+  K."); no reformatting into last names.
+
+### 2026-11-03 — Full path in the export message (branch `export-full-path`)
+- Done: `:export md` now reports "Exported N annotations to <full path>"
+  (relative paths made absolute, home as `~`) instead of the file name only.
+- Decisions: the user asked for it.
+- State: build, tests, clippy and fmt pass; not merged.
+- Next: the user tries the branch, then merge into `main`.
 
 ### 2026-11-02 — macOS merged into `main`
 - Done: branch `macos` merged into `main` (on top of 1.3.0,

@@ -187,6 +187,7 @@ Text hints come in two stages: every visible line gets a label at its left, then
 | `:close, :bd` | close the file, show the recent files |
 | `:layout continuous\|single\|spread` | set the layout |
 | `:export md [path]` | write the annotations as Markdown (default: &lt;file&gt;.notes.md) |
+| `:export md cite [path]` | the same, quotes cited (asks for author and year) |
 | `:42` | go to page 42 |
 | `:help` | the help page |
 | `:config` | write a commented default config, if there is none |

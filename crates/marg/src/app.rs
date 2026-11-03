@@ -108,6 +108,9 @@ struct OpenDoc {
     text_failed: HashSet<usize>,
     /// `:export md`, waiting for annotations and text.
     export: Option<PendingExport>,
+    /// The author and year last given for `:export md cite`; they prefill
+    /// the prompt next time.
+    cited: Option<(String, String)>,
 }
 
 /// A Markdown export waiting for the annotations of every page and the
@@ -116,6 +119,15 @@ struct PendingExport {
     path: PathBuf,
     /// Pages not listed again yet (so that recent edits are included).
     relist: HashSet<usize>,
+    /// `:export md cite`: author and year.
+    cite: Option<(String, String)>,
+}
+
+/// `:export md cite`, asking for the author, then the year.
+struct Citing {
+    path: Option<String>,
+    /// Given: asking for the year.
+    author: Option<String>,
 }
 
 /// An undoable annotation action: annotations it deleted, created and
@@ -291,6 +303,8 @@ enum Mode {
     Search,
     /// Asking for the password of an encrypted file.
     Password,
+    /// Asking for the author and year of `:export md cite`.
+    Cite,
 }
 
 impl Mode {
@@ -301,6 +315,7 @@ impl Mode {
             | Mode::Search
             | Mode::Confirm
             | Mode::Password
+            | Mode::Cite
             | Mode::Recolor => "NORMAL",
             Mode::Help => "HELP",
             Mode::Recent => "RECENT",
@@ -395,6 +410,9 @@ pub struct MargApp {
     searchline: LineEdit,
     /// The password prompt (no history).
     passline: LineEdit,
+    /// The author and year prompt of `:export md cite`.
+    citeline: LineEdit,
+    citing: Option<Citing>,
     /// The file being opened and the password sent with it; the file the
     /// password prompt is for.
     opening: Option<(PathBuf, Option<String>)>,
@@ -546,6 +564,8 @@ impl MargApp {
             cmdline: LineEdit::default(),
             searchline: LineEdit::default(),
             passline: LineEdit::default(),
+            citeline: LineEdit::default(),
+            citing: None,
             opening: s.path.clone().map(|p| (p, None)),
             search_origin: None,
             next_search_id: 0,
@@ -1052,6 +1072,7 @@ impl MargApp {
             annots_failed: HashSet::new(),
             text_failed: HashSet::new(),
             export: None,
+            cited: None,
             links: vec![None; view.page_count()],
             links_requested: HashSet::new(),
             view,
@@ -1109,6 +1130,7 @@ impl MargApp {
                 _ if self.mode == Mode::Command => self.cmdline_event(ctx, e),
                 _ if self.mode == Mode::Search => self.search_event(e),
                 _ if self.mode == Mode::Password => self.password_event(e),
+                _ if self.mode == Mode::Cite => self.cite_event(e),
                 _ if self.mode == Mode::Confirm => self.confirm_event(e),
                 _ if self.mode == Mode::Help => {
                     if self.help.as_mut().is_none_or(|(h, _)| h.event(e)) {
@@ -3194,8 +3216,12 @@ impl MargApp {
                 self.set_setting(ctx, &arg);
                 return;
             }
-            Command::Export(path) => {
-                self.start_export(path.as_deref());
+            Command::Export { path, cite: false } => {
+                self.start_export(path.as_deref(), None);
+                return;
+            }
+            Command::Export { path, cite: true } => {
+                self.ask_citation(path);
                 return;
             }
             Command::Version => {
@@ -3415,7 +3441,7 @@ impl MargApp {
             | Command::QuitForce
             | Command::Open(_)
             | Command::OpenDialog
-            | Command::Export(_)
+            | Command::Export { .. }
             | Command::WriteConfig
             | Command::Unlock
             | Command::Set(_)
@@ -3620,7 +3646,7 @@ impl MargApp {
 
     /// `:export md [path]`: list the annotations again, then write the file once everything is read
     /// (`poll_export`). `path` may be a folder.
-    fn start_export(&mut self, path: Option<&str>) {
+    fn start_export(&mut self, path: Option<&str>, cite: Option<(String, String)>) {
         let Some(open) = &mut self.open else {
             self.error("No file open".into());
             return;
@@ -3650,9 +3676,88 @@ impl MargApp {
             pages,
             urgent: false,
         });
-        open.export = Some(PendingExport { path, relist });
+        open.export = Some(PendingExport { path, relist, cite });
         self.show(Level::Info, "Exporting…".into());
         self.poll_export();
+    }
+
+    /// `:export md cite [path]`: ask for the author, prefilled with the
+    /// last answer for this file or the metadata.
+    fn ask_citation(&mut self, path: Option<String>) {
+        let Some(open) = &self.open else {
+            self.error("No file open".into());
+            return;
+        };
+        let author = match &open.cited {
+            Some((a, _)) => a.clone(),
+            None => open.info.author.clone().unwrap_or_default(),
+        };
+        self.citeline.set(author.trim());
+        self.citing = Some(Citing { path, author: None });
+        self.return_mode = self.mode;
+        self.mode = Mode::Cite;
+    }
+
+    /// A key in the author and year prompt: Enter takes the author, then
+    /// the year and exports; Esc does not export.
+    fn cite_event(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => self.citeline.insert(t),
+            Event::Paste(t) => self.citeline.paste(t),
+            Event::Key { pressed: true, .. } => {
+                let Some(k) = input::key_press(e) else { return };
+                match k.code {
+                    KeyCode::Named(Named::Esc) => {
+                        self.citing = None;
+                        self.citeline.clear();
+                        self.mode = self.return_mode;
+                        self.show(Level::Info, "Not exported".into());
+                    }
+                    KeyCode::Named(Named::Enter) => self.cite_enter(),
+                    KeyCode::Named(Named::Backspace) => self.citeline.backspace(),
+                    KeyCode::Named(Named::Delete) => self.citeline.delete(),
+                    KeyCode::Named(Named::Left) => self.citeline.left(),
+                    KeyCode::Named(Named::Right) => self.citeline.right(),
+                    KeyCode::Named(Named::Home) => self.citeline.home(),
+                    KeyCode::Named(Named::End) => self.citeline.end(),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn cite_enter(&mut self) {
+        let typed = self.citeline.text().trim().to_string();
+        self.citeline.clear();
+        let (Some(c), Some(open)) = (&mut self.citing, &mut self.open) else {
+            self.citing = None;
+            self.mode = self.return_mode;
+            return;
+        };
+        if c.author.is_none() {
+            let year = match &open.cited {
+                Some((_, y)) => y.clone(),
+                None => open
+                    .info
+                    .created
+                    .as_deref()
+                    .and_then(marg_core::export::year)
+                    .unwrap_or_default(),
+            };
+            c.author = Some(typed);
+            self.citeline.set(&year);
+            return;
+        }
+        let Some(Citing { path, author }) = self.citing.take() else {
+            return;
+        };
+        let author = author.unwrap_or_default();
+        open.cited = Some((author.clone(), typed.clone()));
+        self.mode = self.return_mode;
+        // No author: page numbers, as without `cite`.
+        let cite = (!author.is_empty()).then_some((author, typed));
+        self.start_export(path.as_deref(), cite);
     }
 
     /// Write the pending export once the annotations of every page and the
@@ -3693,6 +3798,14 @@ impl MargApp {
                 date: &marg_core::export::date(statefile::now_secs()),
                 labels: open.info.labels.as_deref(),
                 categories: &names,
+                cite: x
+                    .cite
+                    .as_ref()
+                    .map(|(author, year)| marg_core::export::Cite {
+                        template: &self.config.export.citation,
+                        author,
+                        year,
+                    }),
             },
             &entries,
         );
@@ -3701,10 +3814,8 @@ impl MargApp {
             .filter(|p| open.text_failed.contains(p))
             .count()
             + open.annots_failed.len();
-        let shown = x.path.file_name().map_or_else(
-            || x.path.display().to_string(),
-            |n| n.to_string_lossy().into(),
-        );
+        // Full path (a relative one made absolute), with the home directory as `~`.
+        let shown = complete::tilde(&std::path::absolute(&x.path).unwrap_or(x.path.clone()));
         match std::fs::write(&x.path, md) {
             Ok(()) if unread > 0 => self.show(
                 Level::Warn,
@@ -4086,6 +4197,11 @@ impl MargApp {
                 let dots = "•".repeat(self.passline.text().chars().count());
                 let prefix = format!("Password for {name}: ");
                 prompt::show(ui, &prefix, &dots, self.passline.cursor(), th.statusbar_fg);
+            } else if self.mode == Mode::Cite {
+                let asking_year = self.citing.as_ref().is_some_and(|c| c.author.is_some());
+                let prefix = if asking_year { "Year: " } else { "Author: " };
+                let (text, cursor) = (self.citeline.text(), self.citeline.cursor());
+                prompt::show(ui, prefix, text, cursor, th.statusbar_fg);
             } else {
                 let left = if matches!(self.mode, Mode::Category | Mode::Recolor) {
                     self.category_prompt()
@@ -4490,6 +4606,7 @@ fn build_keymaps(config: &Config) -> ([Keymap; 4], Vec<String>) {
         map
     });
     warnings.extend(lookup::check(config));
+    warnings.extend(marg_core::export::check(config));
     (maps, warnings)
 }
 
