@@ -69,7 +69,7 @@ with no memory of earlier ones; this file and the git history are all it has.
 |---|---|
 | **Status** | **v1.4.0 released** on 2026-11-03 (https://github.com/lead0lead/marg/releases/tag/v1.4.0): `:export md cite [path]` (quotes end with a citation from the `[export] citation` template; author and year asked for, prefilled from the metadata), the export message shows the full path, `c` comments in every mode, `scripts/install.sh` for Linux, and the first macOS download (`marg-macos-arm64.zip`, Apple Silicon; built and tested by CI, not yet tried by hand on a Mac, said so in the release notes). Linux binary, Windows `.exe` and macOS app. v1.3.0 released 2026-11-01, v1.2.0 2026-10-30, v1.1.0 and v1.0.0 2026-10-29. |
 | **Current phase** | `export-citations` (with `export-full-path`) merged into `main` 2026-11-03 after the user tried it ("feels very nice"); not released. `macos` merged into `main` 2026-11-02 at the user's request (macOS steps in §11 "macOS steps", all 6 done; CI was green on `macos-latest` arm64 on 2026-10-30). The hands-on Mac test listed below had not been reported before the merge. Before that on 2026-11-02: `install-script` (`scripts/install.sh`) and `comment-key` (`c` comments in every mode) merged into `main`, not released. |
-| **Next step** | Category filter for the export (`:export md [cite] [1-5…] [path]`), proposed 2026-11-03, waiting for the user's go-ahead. The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
+| **Next step** | Branch `resize-settle` (2026-11-06, not merged): the user reported major lag and stutter while resizing the window on the Mac. Cause (by reading the code; not reproduced on a Mac): in fit-width every resize frame has a new zoom, so each frame asked for new full-page renders (visible ± `prerender_pages`) and uploaded each result as a texture, which at Retina scale is tens of MB per page. Now renders wait until the page view has kept its size for `[render] resize_settle_ms` (150); meanwhile the cached renders are drawn scaled and the document thread's queue is cleared. The user tries it on the Mac; if resizing still stutters, the next suspect is eframe's OpenGL (glow) backend on macOS, and switching to wgpu needs the user's OK (new dependency). Then: category filter for the export (`:export md [cite] [1-5…] [path]`), proposed 2026-11-03, waiting for the user's go-ahead. The user tries `main` on their Mac (Release workflow artifact `marg-macos-arm64.zip`, or a local build with `scripts/make-app.sh`): Open With from Finder and Zotero, a second Open With while marg runs, dropping on the Dock icon and the window, Cmd-q with unsaved changes, keys on their layout (Option), links, Retina sharpness, speed, the file dialog and `Ctrl-q` block selection. Then a release with the macOS app. The Phase 3–5 choices in §12 are open. |
 | **Decision milestone** | Passed 2026-10-28: after reading real papers with the Phase 2 build, the user said selection works and asked to move on to the next phase ("I feel like we are ready to move on"). This was before the planned week ended; the user's call. |
 | **Live version** | v1.4.0 (tag pushed 2026-11-03) |
 | **Repository** | private GitHub repository `marg`, branch `main` |
@@ -1350,6 +1350,7 @@ spread_first_page_alone = false
 prerender_pages = 2
 cache_mb = 256
 tile_above_zoom = 2.0
+resize_settle_ms = 150   # renders at a new window size wait until it settles
 
 [hints]
 chars = "asdfghjkl"
@@ -1878,6 +1879,10 @@ building more.
 ## 12. Open Questions & Known Risks
 
 **Open decisions (user)**
+
+- **Resize settle on the Mac** (2026-11-06, branch `resize-settle`):
+  does resizing feel smooth now, and is the short blur after a resize (the
+  scaled cached render, sharp after 150 ms) acceptable?
 
 - **File dialog choices to confirm** (2026-10-31, Claude's defaults, the
   user's call after trying it): `O` and `:e` without a path; start folder

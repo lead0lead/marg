@@ -276,6 +276,10 @@ pub struct RenderConfig {
     pub tile_above_zoom: f32,
     /// Tile edge length in device pixels.
     pub tile_px: u32,
+    /// While the window is being resized, renders at the new size wait
+    /// until the size has not changed for this long (ms); the pages are
+    /// drawn scaled from the cached renders meanwhile.
+    pub resize_settle_ms: u64,
 }
 
 impl Default for RenderConfig {
@@ -285,6 +289,7 @@ impl Default for RenderConfig {
             cache_mb: 256,
             tile_above_zoom: 2.0,
             tile_px: 512,
+            resize_settle_ms: 150,
         }
     }
 }

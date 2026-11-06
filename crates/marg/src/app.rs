@@ -427,6 +427,10 @@ pub struct MargApp {
     /// `Rendered` responses received, for the document thread's bookkeeping.
     received: u64,
     last_request: Vec<RenderKey>,
+    /// Size of the page view last frame, and when it last changed: renders
+    /// wait while the window is being resized.
+    last_area: Option<egui::Vec2>,
+    resized_at: Option<Instant>,
     message: Option<Message>,
     state_path: Option<PathBuf>,
     config_path: Option<PathBuf>,
@@ -574,6 +578,8 @@ impl MargApp {
             start_page: s.start_page,
             received: 0,
             last_request: Vec::new(),
+            last_area: None,
+            resized_at: None,
             message: None,
             state_path: s.state_path,
             config_path: s.config_path,
@@ -4392,10 +4398,31 @@ impl eframe::App for MargApp {
                 }
                 let Some(open) = &mut self.open else { return };
                 open.view.set_viewport(area.width(), area.height());
+                let now = Instant::now();
+                if self.last_area.is_some_and(|a| a != area.size()) {
+                    self.resized_at = Some(now);
+                }
+                self.last_area = Some(area.size());
+                let settle = Duration::from_millis(self.config.render.resize_settle_ms);
+                let resizing = self.resized_at.is_some_and(|t| now - t < settle);
                 let plan = self
                     .cache
                     .plan(&open.view, &self.config.render, ppp, &open.revs);
-                if plan.keys != self.last_request {
+                if resizing {
+                    // Every frame of a resize has a new fit zoom: rendering
+                    // and uploading each one makes resizing stutter. Draw
+                    // the cached renders scaled and render once it settles.
+                    if !self.last_request.is_empty() {
+                        self.doc.send(Request::Render {
+                            keys: Vec::new(),
+                            received: self.received,
+                        });
+                        self.last_request.clear();
+                    }
+                    if let Some(t) = self.resized_at {
+                        ui.ctx().request_repaint_after(settle - (now - t));
+                    }
+                } else if plan.keys != self.last_request {
                     self.doc.send(Request::Render {
                         keys: plan.keys.clone(),
                         received: self.received,

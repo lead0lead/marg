@@ -40,6 +40,9 @@
 # Above this zoom, pages render in tiles of tile_px device pixels.
 #tile_above_zoom = 2.0
 #tile_px = 512
+# While the window is resized, wait this long after the last size change
+# before rendering at the new size (ms).
+#resize_settle_ms = 150
 
 #[ui]
 # Status bar height (px; at least the font size + 8).
