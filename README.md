@@ -27,11 +27,14 @@ most systems already have.
 
 **macOS:** unzip `marg-macos-arm64.zip` and move `marg.app` to
 Applications. The app is not signed with an Apple Developer ID, so macOS
-blocks the first start: right-click `marg.app` → Open → Open, or run
-`xattr -dr com.apple.quarantine /Applications/marg.app` once. marg then
-appears under "Open With" for PDFs (Finder, Zotero's file handling). For
-the terminal: `ln -s /Applications/marg.app/Contents/MacOS/marg
-/usr/local/bin/marg` (any directory on your `PATH`).
+blocks the first start ("cannot be opened" or "is damaged"). Run
+`xattr -dr com.apple.quarantine /Applications/marg.app` once, or open it,
+then allow it under System Settings → Privacy & Security → "Open Anyway"
+(on macOS 14 and older, right-click `marg.app` → Open → Open also works).
+marg then appears under "Open With" for PDFs (Finder, Zotero's file
+handling). For the terminal, link the binary into a directory on your
+`PATH`, for example `sudo ln -s /Applications/marg.app/Contents/MacOS/marg
+/usr/local/bin/marg`.
 
 To build from source, you need stable Rust, a C compiler and libclang
 (MuPDF is compiled from source by the `mupdf` crate). On Debian or Ubuntu:
@@ -48,9 +51,20 @@ the binary in `~/.local/bin`, a desktop entry and the icon in
 default PDF app. Run it again to update; open marg windows keep the old
 version until restarted.
 
-On macOS, the Xcode command line tools are enough
-(`xcode-select --install`); `scripts/make-app.sh target/dist/marg .`
-builds `marg.app`.
+On macOS (Apple Silicon), the Xcode command line tools provide the C
+compiler and libclang; install Rust with [rustup](https://rustup.rs):
+
+```sh
+xcode-select --install
+git clone https://github.com/lead0lead/marg.git && cd marg
+cargo build --profile dist      # target/dist/marg (the first build takes a while)
+scripts/make-app.sh target/dist/marg .
+cp -R marg.app /Applications/
+```
+
+A `marg.app` built this way is not quarantined, so it starts without the
+Gatekeeper step above. To build a branch, `git switch <branch>` before
+building.
 
 ## Use
 
